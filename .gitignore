@@ -1,0 +1,75 @@
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+##############################
+# DEPENDENCIES
+##############################
+node_modules/
+jspm_packages/
+.pnp
+.pnp.js
+
+##############################
+# BUILD & OUTPUT
+##############################
+dist/
+build/
+coverage/
+.cache/
+.parcel-cache/
+.next/
+.nuxt/
+out/
+*.tsbuildinfo
+
+##############################
+# ENVIRONMENT FILES
+##############################
+.env
+.env.*
+!.env.example   # Keep example env for reference
+
+##############################
+# LOGS & RUNTIME DATA
+##############################
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+pids
+*.pid
+*.seed
+*.pid.lock
+
+##############################
+# OS / EDITOR FILES
+##############################
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.iml
+*.swo
+*.swp
+
+##############################
+# DOCKER / CONTAINERS
+##############################
+docker-compose.override.yml
+*.bak
+*.tmp
+
+##############################
+# PROJECT-SPECIFIC
+##############################
+# Database
+backend/database/*
+
+# Ignore everything in database folder except migrations/seeds (if you want to keep them)
+!backend/database/migrations/
+!backend/database/seeds/
+
+# Public files (already in git, ignore build artifacts inside)
+frontend/public/*.tmp

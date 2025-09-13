@@ -1,0 +1,19 @@
+FROM node:18-alpine
+
+WORKDIR /app
+
+# Configure npm for reliability
+RUN npm config set fetch-retry-mintimeout 20000 && \
+    npm config set fetch-retry-maxtimeout 120000 && \
+    npm config set fetch-retries 10 && \
+    npm config set fetch-timeout 600000
+
+# Copy package files
+COPY package*.json ./
+
+# Install with maximum retries and verbose output
+RUN npm install --verbose --no-audit --no-fund --maxsockets 1
+
+COPY . .
+EXPOSE 3000
+CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0"]
