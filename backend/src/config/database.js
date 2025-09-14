@@ -1,28 +1,26 @@
+// backend/src/config/database.js
 const knex = require('knex');
+const knexConfig = require('../../knexfile');
 
-const config = {
-  client: 'pg',
-  connection: {
-    host: process.env.DB_HOST || 'postgres',
-    port: process.env.DB_PORT || 5432,
-    user: process.env.DB_USER || 'papv2',
-    password: process.env.DB_PASSWORD || 'password',
-    database: process.env.DB_NAME || 'framework'
-  },
-  pool: {
-    min: 2,
-    max: 10,
-    acquireTimeoutMillis: 30000,
-    createTimeoutMillis: 30000,
-    destroyTimeoutMillis: 5000,
-    idleTimeoutMillis: 30000
-  },
-  migrations: {
-    directory: './database/migrations'
-  },
-  seeds: {
-    directory: './database/seeds'
-  }
-};
+const environment = process.env.NODE_ENV || 'development';
+const config = knexConfig[environment];
 
-module.exports = knex(config);
+// Create and export the knex instance
+const db = knex(config);
+
+// Test connection on startup
+db.raw('SELECT 1')
+  .then(() => {
+    console.log('Database connected successfully');
+  })
+  .catch((err) => {
+    console.error('Database connection failed:', err.message);
+    console.error('Connection config:', {
+      host: config.connection.host,
+      port: config.connection.port,
+      user: config.connection.user,
+      database: config.connection.database
+    });
+  });
+
+module.exports = db;

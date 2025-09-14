@@ -1,8 +1,14 @@
-const knex = require('knex')(require('../../knexfile')[process.env.NODE_ENV || 'development']);
+// backend/src/models/index.js
+const knex = require('../config/database');
 
 const Organization = {
   async create(data) {
-    return knex('organizations').insert(data).returning('*');
+    const [organization] = await knex('organizations').insert({
+      ...data,
+      created_at: new Date(),
+      updated_at: new Date()
+    }).returning('*');
+    return organization;
   },
   
   async findById(id) {
@@ -16,7 +22,12 @@ const Organization = {
 
 const User = {
   async create(data) {
-    return knex('users').insert(data).returning('*');
+    const [user] = await knex('users').insert({
+      ...data,
+      created_at: new Date(),
+      updated_at: new Date()
+    }).returning('*');
+    return user;
   },
   
   async findById(id) {
@@ -29,14 +40,20 @@ const User = {
   
   async updateLastLogin(id) {
     return knex('users').where('id', id).update({
-      last_login_at: knex.fn.now()
+      last_login_at: new Date(),
+      updated_at: new Date()
     });
   }
 };
 
 const Target = {
   async create(data) {
-    return knex('targets').insert(data).returning('*');
+    const [target] = await knex('targets').insert({
+      ...data,
+      created_at: new Date(),
+      updated_at: new Date()
+    }).returning('*');
+    return target;
   },
   
   async findByOrganization(organizationId, filters = {}) {
@@ -49,25 +66,42 @@ const Target = {
     return query.orderBy('created_at', 'desc');
   },
   
-  async findById(id) {
-    return knex('targets').where('id', id).first();
+  async findById(id, organizationId = null) {
+    let query = knex('targets').where('id', id);
+    
+    if (organizationId) {
+      query = query.where('organization_id', organizationId);
+    }
+    
+    return query.first();
   },
   
-  async update(id, data) {
-    return knex('targets').where('id', id).update({
-      ...data,
-      updated_at: knex.fn.now()
-    }).returning('*');
+  async update(id, organizationId, data) {
+    const [target] = await knex('targets')
+      .where({ id, organization_id: organizationId })
+      .update({
+        ...data,
+        updated_at: new Date()
+      })
+      .returning('*');
+    return target;
   },
   
-  async delete(id) {
-    return knex('targets').where('id', id).del();
+  async delete(id, organizationId) {
+    return knex('targets')
+      .where({ id, organization_id: organizationId })
+      .del();
   }
 };
 
 const Subdomain = {
   async create(data) {
-    return knex('subdomains').insert(data).returning('*');
+    const [subdomain] = await knex('subdomains').insert({
+      ...data,
+      created_at: new Date(),
+      updated_at: new Date()
+    }).returning('*');
+    return subdomain;
   },
   
   async findByTarget(targetId, filters = {}) {
@@ -81,13 +115,23 @@ const Subdomain = {
   },
   
   async bulkCreate(subdomains) {
-    return knex('subdomains').insert(subdomains).onConflict(['target_id', 'subdomain']).merge();
+    return knex('subdomains')
+      .insert(subdomains)
+      .onConflict(['target_id', 'subdomain'])
+      .merge({
+        updated_at: new Date()
+      });
   }
 };
 
 const ScanJob = {
   async create(data) {
-    return knex('scan_jobs').insert(data).returning('*');
+    const [scanJob] = await knex('scan_jobs').insert({
+      ...data,
+      created_at: new Date(),
+      updated_at: new Date()
+    }).returning('*');
+    return scanJob;
   },
   
   async findByOrganization(organizationId, filters = {}) {
@@ -104,12 +148,24 @@ const ScanJob = {
   },
   
   async updateStatus(id, status, data = {}) {
-    return knex('scan_jobs').where('id', id).update({
-      status,
-      ...data,
-      updated_at: knex.fn.now()
-    }).returning('*');
+    const [scanJob] = await knex('scan_jobs')
+      .where('id', id)
+      .update({
+        status,
+        ...data,
+        updated_at: new Date()
+      })
+      .returning('*');
+    return scanJob;
   }
 };
 
-module.exports = { knex, Organization, User, Target, Subdomain, ScanJob };
+// Export the knex instance along with models
+module.exports = { 
+  knex, 
+  Organization, 
+  User, 
+  Target, 
+  Subdomain, 
+  ScanJob 
+};

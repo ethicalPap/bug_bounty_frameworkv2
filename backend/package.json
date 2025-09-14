@@ -6,8 +6,11 @@
   "scripts": {
     "dev": "nodemon src/app.js",
     "start": "node src/app.js",
-    "migrate": "knex migrate:latest",
-    "seed": "knex seed:run",
+    "migrate": "knex migrate:latest --knexfile knexfile.js",
+    "migrate:rollback": "knex migrate:rollback --knexfile knexfile.js",
+    "migrate:make": "knex migrate:make --knexfile knexfile.js",
+    "seed": "knex seed:run --knexfile knexfile.js",
+    "seed:make": "knex seed:make --knexfile knexfile.js",
     "test": "jest"
   },
   "dependencies": {

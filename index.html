@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Bug Bounty Framework</title>
+    <title>Bug Bounty Platform</title>
     <style>
         * {
             margin: 0;
@@ -13,8 +13,8 @@
 
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background-color: #111827;
-            color: #f3f4f6;
+            background-color: #0f172a;
+            color: #f8fafc;
             height: 100vh;
             overflow: hidden;
         }
@@ -27,42 +27,51 @@
 
         /* Sidebar */
         .sidebar {
-            width: 250px;
-            background-color: #1f2937;
-            border-right: 1px solid #374151;
+            width: 260px;
+            background: linear-gradient(to bottom, #1e293b, #0f172a);
+            border-right: 1px solid #334155;
             display: flex;
             flex-direction: column;
+            box-shadow: 2px 0 10px rgba(0, 0, 0, 0.3);
         }
 
         .logo {
-            padding: 20px;
-            border-bottom: 1px solid #374151;
-            font-size: 18px;
+            padding: 24px 20px;
+            border-bottom: 1px solid #334155;
+            font-size: 20px;
             font-weight: bold;
-            color: #60a5fa;
+            background: linear-gradient(45deg, #3b82f6, #8b5cf6);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            text-align: center;
         }
 
         .nav-item {
-            padding: 15px 20px;
+            padding: 16px 24px;
             cursor: pointer;
-            border-bottom: 1px solid #374151;
-            transition: background-color 0.2s;
+            border-bottom: 1px solid #1e293b;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            gap: 12px;
         }
 
         .nav-item:hover {
-            background-color: #374151;
+            background-color: #1e293b;
+            border-left: 3px solid #3b82f6;
         }
 
         .nav-item.active {
-            background-color: #1d4ed8;
+            background: linear-gradient(90deg, #1e40af, #3b82f6);
+            border-left: 3px solid #60a5fa;
+            font-weight: 600;
         }
 
         .user-info {
             margin-top: auto;
             padding: 20px;
-            border-top: 1px solid #374151;
-            font-size: 14px;
-            color: #9ca3af;
+            border-top: 1px solid #334155;
+            background-color: #1e293b;
         }
 
         /* Main Content */
@@ -74,15 +83,19 @@
         }
 
         .header {
-            padding: 20px 30px;
-            border-bottom: 1px solid #374151;
-            background-color: #1f2937;
+            padding: 20px 32px;
+            border-bottom: 1px solid #334155;
+            background: linear-gradient(90deg, #1e293b, #0f172a);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
         }
 
         .content {
             flex: 1;
-            padding: 30px;
+            padding: 24px 32px;
             overflow-y: auto;
+            background-color: #0f172a;
         }
 
         /* Auth Form */
@@ -91,22 +104,26 @@
             align-items: center;
             justify-content: center;
             height: 100vh;
-            background-color: #111827;
+            background: linear-gradient(135deg, #0f172a, #1e293b);
         }
 
         .auth-form {
-            background-color: #1f2937;
-            padding: 40px;
-            border-radius: 8px;
-            width: 400px;
-            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+            background: rgba(30, 41, 59, 0.8);
+            backdrop-filter: blur(10px);
+            padding: 48px;
+            border-radius: 16px;
+            width: 420px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.6);
+            border: 1px solid #334155;
         }
 
         .auth-title {
             text-align: center;
-            font-size: 24px;
-            margin-bottom: 30px;
-            color: #60a5fa;
+            font-size: 28px;
+            margin-bottom: 32px;
+            background: linear-gradient(45deg, #3b82f6, #8b5cf6);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
         }
 
         /* Forms */
@@ -116,122 +133,246 @@
 
         .form-group label {
             display: block;
-            margin-bottom: 5px;
-            color: #d1d5db;
+            margin-bottom: 6px;
+            color: #e2e8f0;
+            font-weight: 500;
         }
 
         .form-group input, .form-group select, .form-group textarea {
             width: 100%;
-            padding: 12px;
-            border: 1px solid #374151;
-            border-radius: 6px;
-            background-color: #111827;
-            color: #f3f4f6;
+            padding: 12px 16px;
+            border: 1px solid #475569;
+            border-radius: 8px;
+            background-color: #1e293b;
+            color: #f8fafc;
             font-size: 14px;
+            transition: border-color 0.2s ease;
         }
 
         .form-group input:focus, .form-group select:focus, .form-group textarea:focus {
             outline: none;
-            border-color: #60a5fa;
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
         }
 
         /* Buttons */
         .btn {
             padding: 12px 24px;
             border: none;
-            border-radius: 6px;
+            border-radius: 8px;
             cursor: pointer;
             font-size: 14px;
-            transition: all 0.2s;
+            font-weight: 500;
+            transition: all 0.2s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
         }
 
         .btn-primary {
-            background-color: #1d4ed8;
+            background: linear-gradient(45deg, #3b82f6, #1d4ed8);
             color: white;
         }
 
         .btn-primary:hover {
-            background-color: #1e40af;
+            background: linear-gradient(45deg, #2563eb, #1e40af);
+            transform: translateY(-1px);
         }
 
         .btn-secondary {
-            background-color: #374151;
+            background-color: #475569;
             color: white;
         }
 
         .btn-secondary:hover {
-            background-color: #4b5563;
+            background-color: #64748b;
         }
 
-        .btn-danger {
-            background-color: #dc2626;
+        .btn-success {
+            background: linear-gradient(45deg, #10b981, #059669);
             color: white;
         }
 
-        .btn-danger:hover {
-            background-color: #b91c1c;
+        .btn-danger {
+            background: linear-gradient(45deg, #ef4444, #dc2626);
+            color: white;
+        }
+
+        .btn-small {
+            padding: 6px 12px;
+            font-size: 12px;
         }
 
         /* Tables */
+        .table-container {
+            background-color: #1e293b;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+        }
+
         .table {
             width: 100%;
             border-collapse: collapse;
-            margin-top: 20px;
         }
 
         .table th, .table td {
-            padding: 12px;
+            padding: 16px;
             text-align: left;
-            border-bottom: 1px solid #374151;
+            border-bottom: 1px solid #334155;
         }
 
         .table th {
-            background-color: #1f2937;
-            color: #d1d5db;
+            background-color: #0f172a;
+            color: #e2e8f0;
+            font-weight: 600;
+            font-size: 13px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .table tbody tr:hover {
+            background-color: #334155;
         }
 
         /* Cards */
         .card {
-            background-color: #1f2937;
-            border-radius: 8px;
+            background: linear-gradient(135deg, #1e293b, #334155);
+            border-radius: 12px;
             padding: 24px;
-            margin-bottom: 20px;
-            border: 1px solid #374151;
+            margin-bottom: 24px;
+            border: 1px solid #475569;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
         }
 
         .card-title {
-            font-size: 18px;
-            font-weight: bold;
+            font-size: 20px;
+            font-weight: 600;
             margin-bottom: 16px;
-            color: #f3f4f6;
+            color: #f8fafc;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 24px;
+        }
+
+        .stat-card {
+            background: linear-gradient(135deg, #1e293b, #0f172a);
+            padding: 20px;
+            border-radius: 12px;
+            text-align: center;
+            border: 1px solid #334155;
+        }
+
+        .stat-value {
+            font-size: 32px;
+            font-weight: bold;
+            margin-bottom: 8px;
+        }
+
+        .stat-label {
+            color: #94a3b8;
+            font-size: 14px;
+            font-weight: 500;
         }
 
         /* Status badges */
         .status {
-            padding: 4px 12px;
-            border-radius: 12px;
-            font-size: 12px;
-            font-weight: bold;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
         }
 
         .status-completed {
-            background-color: #065f46;
-            color: #10b981;
+            background: linear-gradient(45deg, #10b981, #059669);
+            color: white;
         }
 
         .status-running {
-            background-color: #1e3a8a;
-            color: #3b82f6;
+            background: linear-gradient(45deg, #3b82f6, #1d4ed8);
+            color: white;
         }
 
-        .status-queued {
-            background-color: #92400e;
-            color: #f59e0b;
+        .status-pending {
+            background: linear-gradient(45deg, #f59e0b, #d97706);
+            color: white;
         }
 
         .status-failed {
-            background-color: #7f1d1d;
-            color: #ef4444;
+            background: linear-gradient(45deg, #ef4444, #dc2626);
+            color: white;
+        }
+
+        .status-active {
+            background: linear-gradient(45deg, #10b981, #059669);
+            color: white;
+        }
+
+        .status-inactive {
+            background: linear-gradient(45deg, #6b7280, #4b5563);
+            color: white;
+        }
+
+        /* Severity badges */
+        .severity-critical {
+            background: linear-gradient(45deg, #dc2626, #991b1b);
+            color: white;
+        }
+
+        .severity-high {
+            background: linear-gradient(45deg, #ea580c, #c2410c);
+            color: white;
+        }
+
+        .severity-medium {
+            background: linear-gradient(45deg, #d97706, #b45309);
+            color: white;
+        }
+
+        .severity-low {
+            background: linear-gradient(45deg, #059669, #047857);
+            color: white;
+        }
+
+        .severity-info {
+            background: linear-gradient(45deg, #0ea5e9, #0284c7);
+            color: white;
+        }
+
+        /* Filters */
+        .filters {
+            display: flex;
+            gap: 16px;
+            margin-bottom: 24px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        .filter-group {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .filter-group label {
+            font-size: 12px;
+            color: #94a3b8;
+            font-weight: 500;
+        }
+
+        .filter-group select, .filter-group input {
+            padding: 8px 12px;
+            border-radius: 6px;
+            border: 1px solid #475569;
+            background-color: #1e293b;
+            color: #f8fafc;
+            font-size: 13px;
         }
 
         /* Utilities */
@@ -258,19 +399,115 @@
 
         /* Checkbox styles */
         .checkbox-group {
-            display: flex;
-            gap: 15px;
-            flex-wrap: wrap;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 12px;
         }
 
         .checkbox-item {
             display: flex;
             align-items: center;
+            padding: 12px;
+            background-color: #1e293b;
+            border-radius: 8px;
+            border: 1px solid #334155;
         }
 
         .checkbox-item input {
             width: auto;
-            margin-right: 8px;
+            margin-right: 12px;
+        }
+
+        .checkbox-item label {
+            color: #e2e8f0;
+            font-weight: 500;
+        }
+
+        /* Pagination */
+        .pagination {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 8px;
+            margin-top: 24px;
+        }
+
+        .pagination button {
+            padding: 8px 12px;
+            border: 1px solid #475569;
+            background-color: #1e293b;
+            color: #f8fafc;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+
+        .pagination button:hover:not(:disabled) {
+            background-color: #334155;
+        }
+
+        .pagination button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .pagination .active {
+            background-color: #3b82f6;
+            border-color: #3b82f6;
+        }
+
+        /* Target selector */
+        .target-selector {
+            background-color: #1e293b;
+            padding: 16px;
+            border-radius: 8px;
+            margin-bottom: 24px;
+            border: 1px solid #334155;
+        }
+
+        .target-stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 16px;
+            margin-top: 16px;
+        }
+
+        .target-stat {
+            text-align: center;
+            padding: 12px;
+            background-color: #0f172a;
+            border-radius: 6px;
+        }
+
+        .target-stat-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #3b82f6;
+        }
+
+        .target-stat-label {
+            font-size: 12px;
+            color: #94a3b8;
+            margin-top: 4px;
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .sidebar {
+                width: 200px;
+            }
+            
+            .content {
+                padding: 16px;
+            }
+            
+            .filters {
+                flex-direction: column;
+                align-items: stretch;
+            }
+            
+            .stats-grid {
+                grid-template-columns: 1fr;
+            }
         }
     </style>
 </head>
@@ -278,7 +515,7 @@
     <!-- Authentication Form -->
     <div id="auth-container" class="auth-container">
         <div class="auth-form">
-            <h2 class="auth-title">Bug Bounty Framework</h2>
+            <h2 class="auth-title">🛡️ Bug Bounty Platform</h2>
             <form id="auth-form">
                 <div class="form-group">
                     <label for="email">Email</label>
@@ -312,16 +549,18 @@
     <div id="dashboard" class="container hidden">
         <!-- Sidebar -->
         <div class="sidebar">
-            <div class="logo">🛡️ Bug Bounty</div>
+            <div class="logo">🛡️ Security Platform</div>
             <div class="nav-item active" data-tab="dashboard">📊 Dashboard</div>
             <div class="nav-item" data-tab="targets">🎯 Targets</div>
+            <div class="nav-item" data-tab="subdomains">🌐 Subdomains</div>
+            <div class="nav-item" data-tab="directories">📁 Directories</div>
+            <div class="nav-item" data-tab="vulnerabilities">⚠️ Vulnerabilities</div>
             <div class="nav-item" data-tab="scans">🔍 Scans</div>
-            <div class="nav-item" data-tab="results">📋 Results</div>
             <div class="nav-item" data-tab="settings">⚙️ Settings</div>
             <div class="user-info">
-                <div id="user-name">Loading...</div>
-                <div style="margin-top: 10px;">
-                    <button onclick="logout()" class="btn btn-secondary" style="font-size: 12px; padding: 6px 12px;">Logout</button>
+                <div id="user-name" style="color: #e2e8f0; font-weight: 500;">Loading...</div>
+                <div style="margin-top: 12px;">
+                    <button onclick="logout()" class="btn btn-secondary btn-small">Logout</button>
                 </div>
             </div>
         </div>
@@ -329,33 +568,46 @@
         <!-- Main Content -->
         <div class="main">
             <div class="header">
-                <h1 id="page-title">Dashboard</h1>
+                <h1 id="page-title" style="color: #f8fafc;">Dashboard</h1>
+                <div class="header-actions">
+                    <select id="global-target-filter" style="padding: 8px 12px; border-radius: 6px; border: 1px solid #475569; background-color: #1e293b; color: #f8fafc;">
+                        <option value="">All Targets</option>
+                    </select>
+                </div>
             </div>
             <div class="content">
                 <!-- Dashboard Tab -->
                 <div id="tab-dashboard" class="tab-content">
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div class="stat-value" style="color: #3b82f6;" id="total-targets">0</div>
+                            <div class="stat-label">Total Targets</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value" style="color: #10b981;" id="total-subdomains">0</div>
+                            <div class="stat-label">Total Subdomains</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value" style="color: #f59e0b;" id="total-directories">0</div>
+                            <div class="stat-label">Total Directories</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value" style="color: #ef4444;" id="total-vulnerabilities">0</div>
+                            <div class="stat-label">Total Vulnerabilities</div>
+                        </div>
+                    </div>
+                    
                     <div class="card">
-                        <div class="card-title">Overview</div>
-                        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px;">
-                            <div class="card">
-                                <h3>Total Targets</h3>
-                                <div id="total-targets" style="font-size: 24px; font-weight: bold; color: #60a5fa;">0</div>
-                            </div>
-                            <div class="card">
-                                <h3>Active Scans</h3>
-                                <div id="active-scans" style="font-size: 24px; font-weight: bold; color: #10b981;">0</div>
-                            </div>
-                            <div class="card">
-                                <h3>Completed Scans</h3>
-                                <div id="completed-scans" style="font-size: 24px; font-weight: bold; color: #f59e0b;">0</div>
-                            </div>
+                        <div class="card-title">Target Overview</div>
+                        <div id="target-overview">
+                            <p style="color: #94a3b8;">Loading target overview...</p>
                         </div>
                     </div>
                     
                     <div class="card">
                         <div class="card-title">Recent Activity</div>
                         <div id="recent-activity">
-                            <p style="color: #9ca3af;">Loading recent activity...</p>
+                            <p style="color: #94a3b8;">Loading recent activity...</p>
                         </div>
                     </div>
                 </div>
@@ -364,7 +616,7 @@
                 <div id="tab-targets" class="tab-content hidden">
                     <div class="card">
                         <div class="card-title">Add New Target</div>
-                        <form id="target-form" style="display: grid; grid-template-columns: 1fr 2fr auto; gap: 15px; align-items: end;">
+                        <form id="target-form" style="display: grid; grid-template-columns: 1fr 2fr auto; gap: 16px; align-items: end;">
                             <div class="form-group">
                                 <label for="target-domain">Domain</label>
                                 <input type="text" id="target-domain" placeholder="example.com" required>
@@ -379,21 +631,191 @@
 
                     <div class="card">
                         <div class="card-title">Your Targets</div>
-                        <table class="table">
-                            <thead>
-                                <tr>
-                                    <th>Domain</th>
-                                    <th>Description</th>
-                                    <th>Created</th>
-                                    <th>Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody id="targets-list">
-                                <tr>
-                                    <td colspan="4" style="text-align: center; color: #9ca3af;">Loading targets...</td>
-                                </tr>
-                            </tbody>
-                        </table>
+                        <div class="table-container">
+                            <table class="table">
+                                <thead>
+                                    <tr>
+                                        <th>Domain</th>
+                                        <th>Description</th>
+                                        <th>Subdomains</th>
+                                        <th>Vulnerabilities</th>
+                                        <th>Created</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="targets-list">
+                                    <tr>
+                                        <td colspan="6" style="text-align: center; color: #94a3b8;">Loading targets...</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Subdomains Tab -->
+                <div id="tab-subdomains" class="tab-content hidden">
+                    <div class="filters">
+                        <div class="filter-group">
+                            <label>Target</label>
+                            <select id="subdomain-target-filter">
+                                <option value="">All Targets</option>
+                            </select>
+                        </div>
+                        <div class="filter-group">
+                            <label>Status</label>
+                            <select id="subdomain-status-filter">
+                                <option value="">All Status</option>
+                                <option value="active">Active</option>
+                                <option value="inactive">Inactive</option>
+                            </select>
+                        </div>
+                        <div class="filter-group">
+                            <label>Search</label>
+                            <input type="text" id="subdomain-search" placeholder="Search subdomains...">
+                        </div>
+                        <button onclick="loadSubdomains()" class="btn btn-primary">🔄 Refresh</button>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-title">Subdomains</div>
+                        <div class="table-container">
+                            <table class="table">
+                                <thead>
+                                    <tr>
+                                        <th>Subdomain</th>
+                                        <th>Target</th>
+                                        <th>Status</th>
+                                        <th>HTTP Status</th>
+                                        <th>IP Address</th>
+                                        <th>Title</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="subdomains-list">
+                                    <tr>
+                                        <td colspan="7" style="text-align: center; color: #94a3b8;">Loading subdomains...</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                        <div id="subdomains-pagination" class="pagination"></div>
+                    </div>
+                </div>
+
+                <!-- Directories Tab -->
+                <div id="tab-directories" class="tab-content hidden">
+                    <div class="filters">
+                        <div class="filter-group">
+                            <label>Target</label>
+                            <select id="directory-target-filter">
+                                <option value="">All Targets</option>
+                            </select>
+                        </div>
+                        <div class="filter-group">
+                            <label>Subdomain</label>
+                            <select id="directory-subdomain-filter">
+                                <option value="">All Subdomains</option>
+                            </select>
+                        </div>
+                        <div class="filter-group">
+                            <label>Status Code</label>
+                            <select id="directory-status-filter">
+                                <option value="">All Status</option>
+                                <option value="200">200 OK</option>
+                                <option value="403">403 Forbidden</option>
+                                <option value="404">404 Not Found</option>
+                                <option value="500">500 Error</option>
+                            </select>
+                        </div>
+                        <div class="filter-group">
+                            <label>Search</label>
+                            <input type="text" id="directory-search" placeholder="Search paths...">
+                        </div>
+                        <button onclick="loadDirectories()" class="btn btn-primary">🔄 Refresh</button>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-title">Directories & Files</div>
+                        <div class="table-container">
+                            <table class="table">
+                                <thead>
+                                    <tr>
+                                        <th>Path</th>
+                                        <th>Subdomain</th>
+                                        <th>Status</th>
+                                        <th>Size</th>
+                                        <th>Title</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="directories-list">
+                                    <tr>
+                                        <td colspan="6" style="text-align: center; color: #94a3b8;">Loading directories...</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                        <div id="directories-pagination" class="pagination"></div>
+                    </div>
+                </div>
+
+                <!-- Vulnerabilities Tab -->
+                <div id="tab-vulnerabilities" class="tab-content hidden">
+                    <div class="filters">
+                        <div class="filter-group">
+                            <label>Target</label>
+                            <select id="vuln-target-filter">
+                                <option value="">All Targets</option>
+                            </select>
+                        </div>
+                        <div class="filter-group">
+                            <label>Severity</label>
+                            <select id="vuln-severity-filter">
+                                <option value="">All Severities</option>
+                                <option value="critical">Critical</option>
+                                <option value="high">High</option>
+                                <option value="medium">Medium</option>
+                                <option value="low">Low</option>
+                                <option value="info">Info</option>
+                            </select>
+                        </div>
+                        <div class="filter-group">
+                            <label>Status</label>
+                            <select id="vuln-status-filter">
+                                <option value="">All Status</option>
+                                <option value="open">Open</option>
+                                <option value="confirmed">Confirmed</option>
+                                <option value="fixed">Fixed</option>
+                                <option value="false_positive">False Positive</option>
+                            </select>
+                        </div>
+                        <button onclick="loadVulnerabilities()" class="btn btn-primary">🔄 Refresh</button>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-title">Vulnerabilities</div>
+                        <div class="table-container">
+                            <table class="table">
+                                <thead>
+                                    <tr>
+                                        <th>Title</th>
+                                        <th>Target</th>
+                                        <th>Severity</th>
+                                        <th>Status</th>
+                                        <th>URL</th>
+                                        <th>Found</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="vulnerabilities-list">
+                                    <tr>
+                                        <td colspan="7" style="text-align: center; color: #94a3b8;">Loading vulnerabilities...</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                        <div id="vulnerabilities-pagination" class="pagination"></div>
                     </div>
                 </div>
 
@@ -423,11 +845,11 @@
                                 <div class="checkbox-group">
                                     <div class="checkbox-item">
                                         <input type="checkbox" id="subdomain_scan" value="subdomain_scan" checked>
-                                        <label for="subdomain_scan">Subdomain Scan</label>
+                                        <label for="subdomain_scan">Subdomain Enumeration</label>
                                     </div>
                                     <div class="checkbox-item">
                                         <input type="checkbox" id="port_scan" value="port_scan">
-                                        <label for="port_scan">Port Scan</label>
+                                        <label for="port_scan">Port Scanning</label>
                                     </div>
                                     <div class="checkbox-item">
                                         <input type="checkbox" id="content_discovery" value="content_discovery">
@@ -435,7 +857,7 @@
                                     </div>
                                     <div class="checkbox-item">
                                         <input type="checkbox" id="js_files_scan" value="js_files_scan">
-                                        <label for="js_files_scan">JS Files Scan</label>
+                                        <label for="js_files_scan">JavaScript Analysis</label>
                                     </div>
                                     <div class="checkbox-item">
                                         <input type="checkbox" id="api_discovery" value="api_discovery">
@@ -443,48 +865,36 @@
                                     </div>
                                     <div class="checkbox-item">
                                         <input type="checkbox" id="vulnerability_scan" value="vulnerability_scan">
-                                        <label for="vulnerability_scan">Vulnerability Scan</label>
-                                    </div>
-                                    <div class="checkbox-item">
-                                        <input type="checkbox" id="full_scan" value="full_scan">
-                                        <label for="full_scan">Full Scan</label>
+                                        <label for="vulnerability_scan">Vulnerability Scanning</label>
                                     </div>
                                 </div>
                             </div>
-                            <button type="submit" class="btn btn-primary">Start Scan</button>
+                            <button type="submit" class="btn btn-primary">🚀 Start Scan</button>
                         </form>
                     </div>
 
                     <div class="card">
                         <div class="card-title">Scan Jobs</div>
                         <button onclick="loadScans()" class="btn btn-secondary mb-4">🔄 Refresh</button>
-                        <table class="table">
-                            <thead>
-                                <tr>
-                                    <th>ID</th>
-                                    <th>Target</th>
-                                    <th>Type</th>
-                                    <th>Status</th>
-                                    <th>Created</th>
-                                    <th>Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody id="scans-list">
-                                <tr>
-                                    <td colspan="6" style="text-align: center; color: #9ca3af;">Loading scans...</td>
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-
-                <!-- Results Tab -->
-                <div id="tab-results" class="tab-content hidden">
-                    <div class="card">
-                        <div class="card-title">Scan Results</div>
-                        <button onclick="loadResults()" class="btn btn-secondary mb-4">🔄 Refresh Results</button>
-                        <div id="results-container">
-                            <p style="color: #9ca3af;">Loading results...</p>
+                        <div class="table-container">
+                            <table class="table">
+                                <thead>
+                                    <tr>
+                                        <th>ID</th>
+                                        <th>Target</th>
+                                        <th>Type</th>
+                                        <th>Status</th>
+                                        <th>Progress</th>
+                                        <th>Created</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="scans-list">
+                                    <tr>
+                                        <td colspan="7" style="text-align: center; color: #94a3b8;">Loading scans...</td>
+                                    </tr>
+                                </tbody>
+                            </table>
                         </div>
                     </div>
                 </div>
@@ -514,6 +924,11 @@
         const API_BASE = 'http://localhost:3001/api/v1';
         let currentUser = null;
         let isRegistering = false;
+        let currentPageData = {
+            subdomains: { page: 1, total: 0 },
+            directories: { page: 1, total: 0 },
+            vulnerabilities: { page: 1, total: 0 }
+        };
 
         // Authentication
         document.getElementById('auth-form').addEventListener('submit', async (e) => {
@@ -562,7 +977,7 @@
                     currentUser = data.user;
                     showDashboard();
                 } else {
-                    alert('Login failed: ' + (data.message || 'Unknown error'));
+                    alert('Login failed: ' + (data.error || 'Unknown error'));
                 }
             } catch (error) {
                 alert('Login failed: ' + error.message);
@@ -583,7 +998,7 @@
                     currentUser = data.user;
                     showDashboard();
                 } else {
-                    alert('Registration failed: ' + (data.message || 'Unknown error'));
+                    alert('Registration failed: ' + (data.error || 'Unknown error'));
                 }
             } catch (error) {
                 alert('Registration failed: ' + error.message);
@@ -643,16 +1058,44 @@
             const titles = {
                 dashboard: 'Dashboard',
                 targets: 'Targets',
+                subdomains: 'Subdomains',
+                directories: 'Directories',
+                vulnerabilities: 'Vulnerabilities',
                 scans: 'Scans',
-                results: 'Results',
                 settings: 'Settings'
             };
             document.getElementById('page-title').textContent = titles[tab];
+
+            // Load data for the specific tab
+            switch(tab) {
+                case 'dashboard':
+                    loadDashboardData();
+                    break;
+                case 'targets':
+                    loadTargets();
+                    break;
+                case 'subdomains':
+                    loadSubdomains();
+                    break;
+                case 'directories':
+                    loadDirectories();
+                    break;
+                case 'vulnerabilities':
+                    loadVulnerabilities();
+                    break;
+                case 'scans':
+                    loadScans();
+                    break;
+            }
         }
 
         // Load dashboard data
         async function loadDashboardData() {
-            await Promise.all([loadTargets(), loadScans(), loadDashboardStats()]);
+            await Promise.all([
+                loadTargets(),
+                loadDashboardStats(),
+                updateGlobalTargetFilter()
+            ]);
         }
 
         async function loadDashboardStats() {
@@ -668,25 +1111,68 @@
                 const targets = targetsData.success ? targetsData.data : [];
                 const scans = scansData.success ? scansData.data : [];
                 
+                // Update basic stats
                 document.getElementById('total-targets').textContent = targets.length;
-                document.getElementById('active-scans').textContent = 
-                    scans.filter(s => s.status === 'running' || s.status === 'queued').length;
-                document.getElementById('completed-scans').textContent = 
-                    scans.filter(s => s.status === 'completed').length;
+                
+                // Get detailed stats for each target
+                let totalSubdomains = 0;
+                let totalDirectories = 0; 
+                let totalVulnerabilities = 0;
+
+                const targetOverviewHtml = targets.map(target => {
+                    const targetStats = target.stats ? JSON.parse(target.stats) : {};
+                    totalSubdomains += targetStats.subdomains || 0;
+                    totalDirectories += targetStats.discovered_paths || 0;
+                    totalVulnerabilities += targetStats.vulnerabilities || 0;
+
+                    return `
+                        <div class="target-stat">
+                            <div style="font-weight: bold; color: #3b82f6; margin-bottom: 8px;">${target.domain}</div>
+                            <div class="target-stats">
+                                <div class="target-stat">
+                                    <div class="target-stat-value">${targetStats.subdomains || 0}</div>
+                                    <div class="target-stat-label">Subdomains</div>
+                                </div>
+                                <div class="target-stat">
+                                    <div class="target-stat-value">${targetStats.discovered_paths || 0}</div>
+                                    <div class="target-stat-label">Directories</div>
+                                </div>
+                                <div class="target-stat">
+                                    <div class="target-stat-value">${targetStats.vulnerabilities || 0}</div>
+                                    <div class="target-stat-label">Vulnerabilities</div>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+
+                document.getElementById('total-subdomains').textContent = totalSubdomains;
+                document.getElementById('total-directories').textContent = totalDirectories;
+                document.getElementById('total-vulnerabilities').textContent = totalVulnerabilities;
+
+                if (targetOverviewHtml) {
+                    document.getElementById('target-overview').innerHTML = 
+                        '<div style="display: grid; gap: 20px;">' + targetOverviewHtml + '</div>';
+                } else {
+                    document.getElementById('target-overview').innerHTML = 
+                        '<p style="color: #94a3b8;">No targets configured yet.</p>';
+                }
 
                 // Recent activity
                 const recentActivity = document.getElementById('recent-activity');
                 const recentScans = scans.slice(0, 5);
                 if (recentScans.length > 0) {
                     recentActivity.innerHTML = recentScans.map(scan => 
-                        `<div style="padding: 8px 0; border-bottom: 1px solid #374151;">
-                            <strong>${scan.target?.domain || 'Unknown Target'}</strong> - 
-                            ${scan.scanType} - 
+                        `<div style="padding: 12px 0; border-bottom: 1px solid #334155; display: flex; justify-content: space-between; align-items: center;">
+                            <div>
+                                <strong style="color: #f8fafc;">${scan.domain || 'Unknown Target'}</strong>
+                                <span style="color: #94a3b8;"> - ${scan.job_type || 'Unknown Scan'}</span>
+                            </div>
                             <span class="status status-${scan.status}">${scan.status}</span>
                         </div>`
                     ).join('');
                 } else {
-                    recentActivity.innerHTML = '<p style="color: #9ca3af;">No recent activity</p>';
+                    recentActivity.innerHTML = '<p style="color: #94a3b8;">No recent activity</p>';
                 }
             } catch (error) {
                 console.error('Failed to load dashboard stats:', error);
@@ -703,29 +1189,96 @@
                 // Update targets list
                 const targetsList = document.getElementById('targets-list');
                 if (targets.length > 0) {
-                    targetsList.innerHTML = targets.map(target => `
-                        <tr>
-                            <td>${target.domain}</td>
-                            <td>${target.description || '-'}</td>
-                            <td>${new Date(target.createdAt).toLocaleDateString()}</td>
-                            <td>
-                                <button onclick="deleteTarget(${target.id})" class="btn btn-danger" style="font-size: 12px; padding: 4px 8px;">Delete</button>
-                            </td>
-                        </tr>
-                    `).join('');
+                    targetsList.innerHTML = targets.map(target => {
+                        const stats = target.stats ? JSON.parse(target.stats) : {};
+                        return `
+                            <tr>
+                                <td style="font-weight: 600; color: #3b82f6;">${target.domain}</td>
+                                <td>${target.description || '-'}</td>
+                                <td>${stats.subdomains || 0}</td>
+                                <td>
+                                    <span class="status ${stats.vulnerabilities > 0 ? 'severity-high' : 'status-inactive'}" style="padding: 4px 8px;">
+                                        ${stats.vulnerabilities || 0}
+                                    </span>
+                                </td>
+                                <td>${new Date(target.created_at).toLocaleDateString()}</td>
+                                <td>
+                                    <button onclick="deleteTarget(${target.id})" class="btn btn-danger btn-small">Delete</button>
+                                </td>
+                            </tr>
+                        `;
+                    }).join('');
                 } else {
-                    targetsList.innerHTML = '<tr><td colspan="4" style="text-align: center; color: #9ca3af;">No targets yet</td></tr>';
+                    targetsList.innerHTML = '<tr><td colspan="6" style="text-align: center; color: #94a3b8;">No targets yet</td></tr>';
                 }
 
-                // Update scan target dropdown
-                const scanTargetSelect = document.getElementById('scan-target');
-                scanTargetSelect.innerHTML = '<option value="">Select target...</option>' +
-                    targets.map(target => `<option value="${target.id}">${target.domain}</option>`).join('');
+                // Update all target dropdowns
+                updateTargetDropdowns(targets);
                     
             } catch (error) {
                 console.error('Failed to load targets:', error);
             }
         }
+
+        function updateTargetDropdowns(targets) {
+            const dropdowns = [
+                'scan-target',
+                'global-target-filter',
+                'subdomain-target-filter',
+                'directory-target-filter',
+                'vuln-target-filter'
+            ];
+
+            dropdowns.forEach(dropdownId => {
+                const dropdown = document.getElementById(dropdownId);
+                if (dropdown) {
+                    const currentValue = dropdown.value;
+                    const isFilterDropdown = dropdownId.includes('filter');
+                    
+                    dropdown.innerHTML = (isFilterDropdown ? '<option value="">All Targets</option>' : '<option value="">Select target...</option>') +
+                        targets.map(target => `<option value="${target.id}">${target.domain}</option>`).join('');
+                    
+                    // Restore previous selection if it still exists
+                    if (currentValue && targets.find(t => t.id == currentValue)) {
+                        dropdown.value = currentValue;
+                    }
+                }
+            });
+        }
+
+        async function updateGlobalTargetFilter() {
+            const response = await apiCall('/targets');
+            const data = await response.json();
+            const targets = data.success ? data.data : [];
+            updateTargetDropdowns(targets);
+        }
+
+        // Global target filter change
+        document.getElementById('global-target-filter').addEventListener('change', (e) => {
+            const selectedTargetId = e.target.value;
+            
+            // Update other filter dropdowns to match
+            ['subdomain-target-filter', 'directory-target-filter', 'vuln-target-filter'].forEach(filterId => {
+                const filter = document.getElementById(filterId);
+                if (filter) {
+                    filter.value = selectedTargetId;
+                }
+            });
+            
+            // Reload current tab data with the new filter
+            const activeTab = document.querySelector('.nav-item.active').dataset.tab;
+            switch(activeTab) {
+                case 'subdomains':
+                    loadSubdomains();
+                    break;
+                case 'directories':
+                    loadDirectories();
+                    break;
+                case 'vulnerabilities':
+                    loadVulnerabilities();
+                    break;
+            }
+        });
 
         document.getElementById('target-form').addEventListener('submit', async (e) => {
             e.preventDefault();
@@ -743,7 +1296,8 @@
                     loadTargets();
                     alert('Target added successfully!');
                 } else {
-                    alert('Failed to add target');
+                    const errorData = await response.json();
+                    alert('Failed to add target: ' + (errorData.error || errorData.message || 'Unknown error'));
                 }
             } catch (error) {
                 alert('Failed to add target: ' + error.message);
@@ -761,6 +1315,264 @@
             }
         }
 
+        // Subdomains
+        async function loadSubdomains(page = 1) {
+            try {
+                const targetId = document.getElementById('subdomain-target-filter').value;
+                const status = document.getElementById('subdomain-status-filter').value;
+                const search = document.getElementById('subdomain-search').value;
+                
+                const params = new URLSearchParams({
+                    page: page,
+                    limit: 25
+                });
+                
+                if (targetId) params.append('target_id', targetId);
+                if (status) params.append('status', status);
+                if (search) params.append('search', search);
+
+                const response = await apiCall(`/subdomains?${params}`);
+                
+                if (!response.ok) {
+                    console.error('Failed to fetch subdomains:', response.status);
+                    document.getElementById('subdomains-list').innerHTML = 
+                        '<tr><td colspan="7" style="text-align: center; color: #ef4444;">Failed to load subdomains - check if backend is running</td></tr>';
+                    return;
+                }
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    const subdomains = data.data;
+                    currentPageData.subdomains = { page, total: data.pagination.total };
+                    
+                    const subdomainsList = document.getElementById('subdomains-list');
+                    const instructionsEl = document.getElementById('subdomains-instructions');
+                    
+                    if (subdomains.length > 0) {
+                        // Hide instructions and show data
+                        if (instructionsEl) instructionsEl.style.display = 'none';
+                        subdomainsList.innerHTML = subdomains.map(subdomain => `
+                            <tr>
+                                <td style="font-weight: 600; color: #3b82f6;">${subdomain.subdomain}</td>
+                                <td>${subdomain.target_domain}</td>
+                                <td><span class="status status-${subdomain.status}">${subdomain.status}</span></td>
+                                <td>${subdomain.http_status || '-'}</td>
+                                <td>${subdomain.ip_address || '-'}</td>
+                                <td>${subdomain.title || '-'}</td>
+                                <td>
+                                    <button onclick="checkSubdomainLive(${subdomain.id})" class="btn btn-secondary btn-small">Check Live</button>
+                                    <button onclick="scanDirectories(${subdomain.id})" class="btn btn-primary btn-small">Scan Dirs</button>
+                                </td>
+                            </tr>
+                        `).join('');
+                        
+                        updatePagination('subdomains', data.pagination);
+                    } else {
+                        // Show instructions and hide pagination
+                        if (instructionsEl) instructionsEl.style.display = 'block';
+                        subdomainsList.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #94a3b8;">No subdomains found</td></tr>';
+                        const paginationEl = document.getElementById('subdomains-pagination');
+                        if (paginationEl) paginationEl.innerHTML = '';
+                    }
+                }
+            } catch (error) {
+                console.error('Failed to load subdomains:', error);
+                document.getElementById('subdomains-list').innerHTML = 
+                    '<tr><td colspan="7" style="text-align: center; color: #ef4444;">Error loading subdomains</td></tr>';
+            }
+        }
+
+        // Filter event listeners for subdomains
+        ['subdomain-target-filter', 'subdomain-status-filter'].forEach(filterId => {
+            document.getElementById(filterId).addEventListener('change', () => loadSubdomains(1));
+        });
+
+        document.getElementById('subdomain-search').addEventListener('input', debounce(() => loadSubdomains(1), 500));
+
+        async function checkSubdomainLive(id) {
+            try {
+                const response = await apiCall(`/subdomains/${id}/check-live`, { method: 'POST' });
+                if (response.ok) {
+                    loadSubdomains(currentPageData.subdomains.page);
+                    alert('Live status check completed!');
+                } else {
+                    alert('Failed to check live status');
+                }
+            } catch (error) {
+                alert('Failed to check live status: ' + error.message);
+            }
+        }
+
+        async function checkAllSubdomainsLive() {
+            if (confirm('This will check the live status of all visible subdomains. Continue?')) {
+                alert('Bulk live checking would be implemented here - checking all subdomains with httpx');
+            }
+        }
+
+        // Directories
+        async function loadDirectories(page = 1) {
+            try {
+                const targetId = document.getElementById('directory-target-filter').value;
+                const subdomainId = document.getElementById('directory-subdomain-filter').value;
+                const statusCode = document.getElementById('directory-status-filter').value;
+                const search = document.getElementById('directory-search').value;
+                
+                const params = new URLSearchParams({
+                    page: page,
+                    limit: 25
+                });
+                
+                if (targetId) params.append('target_id', targetId);
+                if (subdomainId) params.append('subdomain_id', subdomainId);
+                if (statusCode) params.append('status_code', statusCode);
+                if (search) params.append('search', search);
+
+                const response = await apiCall(`/directories?${params}`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    const directories = data.data;
+                    currentPageData.directories = { page, total: data.pagination.total };
+                    
+                    const directoriesList = document.getElementById('directories-list');
+                    const instructionsEl = document.getElementById('directories-instructions');
+                    
+                    if (directories.length > 0) {
+                        // Hide instructions and show data
+                        instructionsEl.style.display = 'none';
+                        directoriesList.innerHTML = directories.map(directory => `
+                            <tr>
+                                <td style="font-family: monospace; color: #3b82f6;">${directory.path}</td>
+                                <td>${directory.subdomain}</td>
+                                <td>
+                                    <span class="status ${getStatusColor(directory.status_code)}">${directory.status_code}</span>
+                                </td>
+                                <td>${formatBytes(directory.content_length)}</td>
+                                <td>${directory.title || '-'}</td>
+                                <td>
+                                    <button onclick="window.open('${directory.url}', '_blank')" class="btn btn-secondary btn-small">Open</button>
+                                </td>
+                            </tr>
+                        `).join('');
+                        
+                        updatePagination('directories', data.pagination);
+                    } else {
+                        // Show instructions
+                        instructionsEl.style.display = 'block';
+                        directoriesList.innerHTML = '<tr><td colspan="6" style="text-align: center; color: #94a3b8;">No directories found</td></tr>';
+                        document.getElementById('directories-pagination').innerHTML = '';
+                    }
+                }
+            } catch (error) {
+                console.error('Failed to load directories:', error);
+                document.getElementById('directories-list').innerHTML = 
+                    '<tr><td colspan="6" style="text-align: center; color: #ef4444;">Failed to load directories</td></tr>';
+            }
+        }
+
+        // Filter event listeners for directories
+        ['directory-target-filter', 'directory-subdomain-filter', 'directory-status-filter'].forEach(filterId => {
+            document.getElementById(filterId).addEventListener('change', () => loadDirectories(1));
+        });
+
+        document.getElementById('directory-search').addEventListener('input', debounce(() => loadDirectories(1), 500));
+
+        async function scanAllDirectories() {
+            if (confirm('This will start directory scanning for all active subdomains. Continue?')) {
+                alert('Bulk directory scanning would be implemented here - running content discovery on all active subdomains');
+            }
+        }
+
+        // Ports
+        async function loadPorts(page = 1) {
+            try {
+                // Since ports table might not exist yet, show instructions
+                const portsInstructionsEl = document.getElementById('ports-instructions');
+                const portsList = document.getElementById('ports-list');
+                
+                portsInstructionsEl.style.display = 'block';
+                portsList.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #94a3b8;">No ports discovered yet</td></tr>';
+                document.getElementById('ports-pagination').innerHTML = '';
+                
+            } catch (error) {
+                console.error('Failed to load ports:', error);
+                document.getElementById('ports-list').innerHTML = 
+                    '<tr><td colspan="7" style="text-align: center; color: #ef4444;">Failed to load ports</td></tr>';
+            }
+        }
+
+        async function scanAllPorts() {
+            if (confirm('This will start port scanning for all active subdomains. Continue?')) {
+                alert('Bulk port scanning would be implemented here - running nmap on all active subdomains');
+            }
+        }
+
+        // Vulnerabilities
+        async function loadVulnerabilities(page = 1) {
+            try {
+                const targetId = document.getElementById('vuln-target-filter').value;
+                const severity = document.getElementById('vuln-severity-filter').value;
+                const status = document.getElementById('vuln-status-filter').value;
+                
+                const params = new URLSearchParams({
+                    page: page,
+                    limit: 25
+                });
+                
+                if (targetId) params.append('target_id', targetId);
+                if (severity) params.append('severity', severity);
+                if (status) params.append('status', status);
+
+                const response = await apiCall(`/vulnerabilities?${params}`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    const vulnerabilities = data.data;
+                    currentPageData.vulnerabilities = { page, total: data.pagination.total };
+                    
+                    const vulnerabilitiesList = document.getElementById('vulnerabilities-list');
+                    const instructionsEl = document.getElementById('vulnerabilities-instructions');
+                    
+                    if (vulnerabilities.length > 0) {
+                        // Hide instructions and show data
+                        instructionsEl.style.display = 'none';
+                        vulnerabilitiesList.innerHTML = vulnerabilities.map(vuln => `
+                            <tr>
+                                <td style="font-weight: 600;">${vuln.title}</td>
+                                <td>${vuln.target_domain}</td>
+                                <td><span class="status severity-${vuln.severity}">${vuln.severity.toUpperCase()}</span></td>
+                                <td><span class="status status-${vuln.status}">${vuln.status.replace('_', ' ')}</span></td>
+                                <td style="font-family: monospace; font-size: 12px;">
+                                    ${vuln.url ? `<a href="${vuln.url}" target="_blank" style="color: #3b82f6;">${vuln.url.substring(0, 50)}...</a>` : '-'}
+                                </td>
+                                <td>${new Date(vuln.created_at).toLocaleDateString()}</td>
+                                <td>
+                                    <button onclick="viewVulnerability(${vuln.id})" class="btn btn-secondary btn-small">View</button>
+                                </td>
+                            </tr>
+                        `).join('');
+                        
+                        updatePagination('vulnerabilities', data.pagination);
+                    } else {
+                        // Show instructions
+                        instructionsEl.style.display = 'block';
+                        vulnerabilitiesList.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #94a3b8;">No vulnerabilities found</td></tr>';
+                        document.getElementById('vulnerabilities-pagination').innerHTML = '';
+                    }
+                }
+            } catch (error) {
+                console.error('Failed to load vulnerabilities:', error);
+                document.getElementById('vulnerabilities-list').innerHTML = 
+                    '<tr><td colspan="7" style="text-align: center; color: #ef4444;">Failed to load vulnerabilities</td></tr>';
+            }
+        }
+
+        // Filter event listeners for vulnerabilities
+        ['vuln-target-filter', 'vuln-severity-filter', 'vuln-status-filter'].forEach(filterId => {
+            document.getElementById(filterId).addEventListener('change', () => loadVulnerabilities(1));
+        });
+
         // Scans
         async function loadScans() {
             try {
@@ -773,24 +1585,32 @@
                     scansList.innerHTML = scans.map(scan => `
                         <tr>
                             <td>${scan.id}</td>
-                            <td>${scan.target?.domain || 'Unknown'}</td>
-                            <td>${scan.scanType}</td>
+                            <td>${scan.domain || 'Unknown'}</td>
+                            <td>${scan.job_type || scan.scanType || 'Unknown'}</td>
                             <td><span class="status status-${scan.status}">${scan.status}</span></td>
-                            <td>${new Date(scan.createdAt).toLocaleDateString()}</td>
+                            <td>
+                                <div style="background-color: #0f172a; border-radius: 4px; height: 8px; width: 100px;">
+                                    <div style="background: linear-gradient(90deg, #3b82f6, #1d4ed8); height: 100%; border-radius: 4px; width: ${scan.progress_percentage || 0}%;"></div>
+                                </div>
+                                <span style="font-size: 11px; color: #94a3b8;">${scan.progress_percentage || 0}%</span>
+                            </td>
+                            <td>${new Date(scan.created_at).toLocaleDateString()}</td>
                             <td>
                                 ${scan.status === 'completed' ? 
-                                    `<button onclick="viewResults(${scan.id})" class="btn btn-secondary" style="font-size: 12px; padding: 4px 8px;">View Results</button>` :
+                                    `<button onclick="viewScanResults(${scan.id})" class="btn btn-secondary btn-small">View Results</button>` :
+                                    scan.status === 'running' ? 
+                                    `<button onclick="stopScan(${scan.id})" class="btn btn-danger btn-small">Stop</button>` :
                                     '-'
                                 }
                             </td>
                         </tr>
                     `).join('');
                 } else {
-                    scansList.innerHTML = '<tr><td colspan="6" style="text-align: center; color: #9ca3af;">No scans yet</td></tr>';
+                    scansList.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #94a3b8;">No scans yet</td></tr>';
                 }
             } catch (error) {
                 console.error('Failed to load scans:', error);
-                document.getElementById('scans-list').innerHTML = '<tr><td colspan="6" style="text-align: center; color: #ef4444;">Failed to load scans</td></tr>';
+                document.getElementById('scans-list').innerHTML = '<tr><td colspan="7" style="text-align: center; color: #ef4444;">Failed to load scans</td></tr>';
             }
         }
 
@@ -825,76 +1645,108 @@
                     loadScans();
                     switchTab('scans');
                 } else {
-                    alert('Failed to start scan');
+                    const errorData = await response.json();
+                    alert('Failed to start scan: ' + (errorData.error || errorData.message || 'Unknown error'));
                 }
             } catch (error) {
                 alert('Failed to start scan: ' + error.message);
             }
         });
 
-        // Results
-        async function loadResults() {
+        // Utility functions
+        function updatePagination(type, pagination) {
+            const paginationContainer = document.getElementById(`${type}-pagination`);
+            if (!paginationContainer) return;
+            
+            const { page, pages, total } = pagination;
+            let paginationHtml = '';
+            
+            // Previous button
+            paginationHtml += `<button onclick="load${capitalizeFirst(type)}(${page - 1})" ${page <= 1 ? 'disabled' : ''}>Previous</button>`;
+            
+            // Page numbers
+            for (let i = Math.max(1, page - 2); i <= Math.min(pages, page + 2); i++) {
+                paginationHtml += `<button onclick="load${capitalizeFirst(type)}(${i})" class="${i === page ? 'active' : ''}">${i}</button>`;
+            }
+            
+            // Next button
+            paginationHtml += `<button onclick="load${capitalizeFirst(type)}(${page + 1})" ${page >= pages ? 'disabled' : ''}>Next</button>`;
+            
+            paginationContainer.innerHTML = paginationHtml;
+        }
+
+        function capitalizeFirst(str) {
+            return str.charAt(0).toUpperCase() + str.slice(1);
+        }
+
+        function getStatusColor(statusCode) {
+            if (statusCode >= 200 && statusCode < 300) return 'status-completed';
+            if (statusCode >= 300 && statusCode < 400) return 'status-running';
+            if (statusCode >= 400 && statusCode < 500) return 'status-pending';
+            if (statusCode >= 500) return 'status-failed';
+            return 'status-inactive';
+        }
+
+        function formatBytes(bytes) {
+            if (!bytes) return '-';
+            const k = 1024;
+            const sizes = ['B', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+        }
+
+        function debounce(func, wait) {
+            let timeout;
+            return function executedFunction(...args) {
+                const later = () => {
+                    clearTimeout(timeout);
+                    func(...args);
+                };
+                clearTimeout(timeout);
+                timeout = setTimeout(later, wait);
+            };
+        }
+
+        // Additional functionality
+        async function scanDirectories(subdomainId) {
+            // This would trigger a directory scan for a specific subdomain
+            alert(`Directory scan for subdomain ${subdomainId} would be implemented here`);
+        }
+
+        async function viewVulnerability(id) {
+            // This would show vulnerability details in a modal
+            alert(`Vulnerability details for ${id} would be shown here`);
+        }
+
+        async function viewScanResults(scanId) {
             try {
-                const response = await apiCall('/scans/jobs');
+                const response = await apiCall(`/scans/${scanId}`);
                 const data = await response.json();
-                const scans = data.success ? data.data : [];
-                const completedScans = scans.filter(scan => scan.status === 'completed');
                 
-                const resultsContainer = document.getElementById('results-container');
-                
-                if (completedScans.length === 0) {
-                    resultsContainer.innerHTML = '<p style="color: #9ca3af;">No completed scans with results yet.</p>';
-                    return;
+                if (data.success && data.data) {
+                    const results = data.data.results || {};
+                    alert('Scan Results:\n\n' + JSON.stringify(results, null, 2));
+                } else {
+                    alert('No results available for this scan.');
                 }
-                
-                let resultsHtml = '';
-                for (const scan of completedScans) {
-                    try {
-                        const resultsResponse = await apiCall(`/scans/jobs/${scan.id}/results`);
-                        const resultsData = await resultsResponse.json();
-                        
-                        resultsHtml += `
-                            <div class="card">
-                                <div class="card-title">
-                                    ${scan.target?.domain || 'Unknown Target'} - ${scan.scanType}
-                                    <span style="font-size: 14px; color: #9ca3af;">(Scan #${scan.id})</span>
-                                </div>
-                                <pre style="background: #111827; padding: 15px; border-radius: 4px; overflow-x: auto; color: #d1d5db;">${JSON.stringify(resultsData.data?.results || {}, null, 2)}</pre>
-                            </div>
-                        `;
-                    } catch (error) {
-                        resultsHtml += `
-                            <div class="card">
-                                <div class="card-title">${scan.target?.domain || 'Unknown Target'} - ${scan.scanType}</div>
-                                <p style="color: #ef4444;">Failed to load results for this scan.</p>
-                            </div>
-                        `;
-                    }
-                }
-                
-                resultsContainer.innerHTML = resultsHtml;
             } catch (error) {
-                console.error('Failed to load results:', error);
-                document.getElementById('results-container').innerHTML = '<p style="color: #ef4444;">Failed to load results.</p>';
+                alert('Failed to load scan results: ' + error.message);
             }
         }
 
-        async function viewResults(scanId) {
-            switchTab('results');
-            // Load just this specific result
-            try {
-                const response = await apiCall('/scans/jobs/' + scanId + '/results');
-                const data = await response.json();
-                const results = data.data && data.data.results ? data.data.results : {};
-                
-                document.getElementById('results-container').innerHTML = 
-                    '<div class="card">' +
-                    '<div class="card-title">Scan Results (ID: ' + scanId + ')</div>' +
-                    '<pre style="background: #111827; padding: 15px; border-radius: 4px; overflow-x: auto; color: #d1d5db;">' + 
-                    JSON.stringify(results, null, 2) + '</pre>' +
-                    '</div>';
-            } catch (error) {
-                document.getElementById('results-container').innerHTML = '<p style="color: #ef4444;">Failed to load results.</p>';
+        async function stopScan(scanId) {
+            if (confirm('Are you sure you want to stop this scan?')) {
+                try {
+                    const response = await apiCall(`/scans/stop/${scanId}`, { method: 'POST' });
+                    if (response.ok) {
+                        loadScans();
+                        alert('Scan stopped successfully!');
+                    } else {
+                        alert('Failed to stop scan');
+                    }
+                } catch (error) {
+                    alert('Failed to stop scan: ' + error.message);
+                }
             }
         }
 

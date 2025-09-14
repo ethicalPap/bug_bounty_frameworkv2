@@ -7,9 +7,29 @@ const execAsync = promisify(exec);
 const ScanJob = require('../models/ScanJob');
 const Target = require('../models/Target');
 
+// Only import models if they exist and are available
+let Subdomain, Directory, Vulnerability;
+try {
+  Subdomain = require('../models/Subdomain');
+} catch (error) {
+  console.log('Subdomain model not available yet');
+}
+
+try {
+  Directory = require('../models/Directory');
+} catch (error) {
+  console.log('Directory model not available yet');
+}
+
+try {
+  Vulnerability = require('../models/Vulnerability');
+} catch (error) {
+  console.log('Vulnerability model not available yet');
+}
+
 class ScanService {
   constructor() {
-    this.activeScanJobs = new Map(); // Track active scan processes
+    this.activeScanJobs = new Map();
     this.toolsPath = path.join(__dirname, '../../tools');
   }
 
@@ -22,10 +42,8 @@ class ScanService {
     for (const scan of scans) {
       console.log(`Starting ${scan.job_type} for target: ${target.domain}`);
       
-      // Mark scan as started
       await ScanJob.markAsStarted(scan.id);
       
-      // Start the appropriate scan based on type
       const job = this.executeScan(scan, target);
       this.activeScanJobs.set(scan.id, job);
       
@@ -68,10 +86,7 @@ class ScanService {
           throw new Error(`Unknown scan type: ${scan.job_type}`);
       }
 
-      // Mark as completed with results
       await ScanJob.markAsCompleted(scan.id, results);
-
-      // Update target stats
       await this.updateTargetStats(target, scan.job_type, results);
 
       console.log(`Completed ${scan.job_type} for target: ${target.domain}`);
@@ -79,11 +94,9 @@ class ScanService {
 
     } catch (error) {
       console.error(`Error in ${scan.job_type} for ${target.domain}:`, error);
-      
       await ScanJob.markAsFailed(scan.id, error.message);
       throw error;
     } finally {
-      // Remove from active jobs
       this.activeScanJobs.delete(scan.id);
     }
   }
@@ -133,34 +146,7 @@ class ScanService {
 
       await ScanJob.updateProgress(scan.id, 40);
 
-      // Phase 2: Try amass if available (optional)
-      try {
-        await execAsync('which amass', { timeout: 5000 });
-        
-        console.log(`Running amass for ${target.domain}`);
-        const amassCmd = `timeout 300 amass enum -d ${target.domain} -passive -silent`;
-        const { stdout: amassOutput } = await execAsync(amassCmd, {
-          timeout: 320000,
-          maxBuffer: 1024 * 1024 * 50
-        });
-        
-        const amassResults = amassOutput
-          .split('\n')
-          .filter(line => line.trim())
-          .map(subdomain => subdomain.trim().toLowerCase())
-          .filter(subdomain => subdomain.length > 0 && subdomain.includes('.'));
-
-        amassResults.forEach(sub => allSubdomains.add(sub));
-        toolsUsed.push('amass');
-        console.log(`Amass found ${amassResults.length} additional subdomains`);
-
-      } catch (amassError) {
-        console.log('Amass not available or failed, skipping');
-      }
-
-      await ScanJob.updateProgress(scan.id, 70);
-
-      // Phase 3: Basic DNS enumeration if no tools available
+      // Phase 2: Basic DNS enumeration if no tools available
       if (allSubdomains.size === 0) {
         console.log('No external tools available, using basic DNS enumeration');
         
@@ -182,7 +168,7 @@ class ScanService {
 
       await ScanJob.updateProgress(scan.id, 85);
 
-      // Phase 4: Verify alive subdomains if httpx available
+      // Phase 3: Verify alive subdomains if httpx available
       const validSubdomains = Array.from(allSubdomains)
         .filter(sub => {
           if (!sub.includes('.')) return false;
@@ -228,6 +214,25 @@ class ScanService {
           
         } catch {
           console.log('httpx not available, skipping verification');
+        }
+      }
+
+      // Phase 4: Store in database if Subdomain model is available
+      if (Subdomain && validSubdomains.length > 0) {
+        try {
+          const subdomainRecords = validSubdomains.map(subdomain => ({
+            target_id: target.id,
+            subdomain: subdomain,
+            status: aliveSubdomains.includes(subdomain) ? 'active' : 'inactive',
+            scan_job_id: scan.id,
+            first_discovered: new Date(),
+            last_seen: aliveSubdomains.includes(subdomain) ? new Date() : null
+          }));
+
+          await Subdomain.bulkCreate(subdomainRecords);
+          console.log(`Stored ${subdomainRecords.length} subdomains in database`);
+        } catch (dbError) {
+          console.error('Failed to store subdomains in database:', dbError.message);
         }
       }
 
@@ -660,7 +665,20 @@ class ScanService {
    */
   async updateTargetStats(target, scanType, results) {
     try {
-      const currentStats = target.stats ? JSON.parse(target.stats) : {};
+      // Handle target.stats - it might be a string or already parsed object
+      let currentStats = {};
+      if (target.stats) {
+        if (typeof target.stats === 'string') {
+          try {
+            currentStats = JSON.parse(target.stats);
+          } catch (parseError) {
+            console.warn('Failed to parse target stats, using empty object:', parseError.message);
+            currentStats = {};
+          }
+        } else if (typeof target.stats === 'object') {
+          currentStats = target.stats;
+        }
+      }
       
       switch (scanType) {
         case 'subdomain_scan':
@@ -692,6 +710,8 @@ class ScanService {
         stats: JSON.stringify(currentStats),
         last_scan_at: new Date()
       });
+      
+      console.log(`Updated target stats for ${target.domain}:`, currentStats);
       
     } catch (error) {
       console.error('Error updating target stats:', error);

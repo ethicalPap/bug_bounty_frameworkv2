@@ -1,10 +1,8 @@
-version: '3.8'
-
 services:
   backend:
     build:
       context: ./backend
-      dockerfile: Dockerfile.prod
+      dockerfile: Dockerfile
     ports:
       - "3001:3001"
     environment:
@@ -26,8 +24,6 @@ services:
       redis:
         condition: service_healthy
     volumes:
-      - ./backend:/app
-      - /app/node_modules
       - scan_data:/app/scan_data  # Persistent scan data
     restart: unless-stopped
 

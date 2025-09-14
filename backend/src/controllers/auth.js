@@ -43,23 +43,29 @@ const register = async (req, res) => {
       return res.status(409).json({ error: 'Email already registered' });
     }
     
-    // Create organization
+    // Create organization - fix the destructuring issue
     const orgSlug = organizationName.toLowerCase().replace(/[^a-z0-9]/g, '-');
-    const [organization] = await Organization.create({
+    const organizationResult = await Organization.create({
       name: organizationName,
       slug: orgSlug,
       plan_type: 'free'
     });
     
-    // Create user
+    // Handle the organization result properly
+    const organization = Array.isArray(organizationResult) ? organizationResult[0] : organizationResult;
+    
+    // Create user - fix the destructuring issue
     const passwordHash = await bcrypt.hash(password, 12);
-    const [user] = await User.create({
+    const userResult = await User.create({
       organization_id: organization.id,
       email,
       password_hash: passwordHash,
       full_name: fullName,
       role: 'admin'
     });
+    
+    // Handle the user result properly
+    const user = Array.isArray(userResult) ? userResult[0] : userResult;
     
     const tokens = generateTokens(user.id, organization.id, user.role);
     
