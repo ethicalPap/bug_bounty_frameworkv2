@@ -5,11 +5,15 @@ module.exports = {
   development: {
     client: 'postgresql',
     connection: {
-      host: process.env.DB_HOST || 'localhost',
+      host: process.env.DB_HOST || 'postgres',  // Changed from 'localhost' to 'postgres'
       port: process.env.DB_PORT || 5432,
       user: process.env.DB_USER || 'papv2',
       password: process.env.DB_PASSWORD || 'password',
       database: process.env.DB_NAME || 'framework'
+    },
+    pool: {
+      min: 2,
+      max: 10
     },
     migrations: {
       directory: './database/migrations'
@@ -18,7 +22,6 @@ module.exports = {
       directory: './database/seeds'
     }
   },
-
   production: {
     client: 'postgresql',
     connection: process.env.DATABASE_URL,

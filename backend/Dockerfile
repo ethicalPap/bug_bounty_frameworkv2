@@ -1,7 +1,7 @@
 # backend/Dockerfile.prod
 FROM node:18-alpine
 
-# Install system dependencies and security tools
+# Install system dependencies
 RUN apk update && apk add --no-cache \
     wget \
     unzip \
@@ -21,41 +21,55 @@ COPY package*.json ./
 # Install Node.js dependencies
 RUN npm ci --only=production
 
-# Install security tools
-RUN mkdir -p /tmp/tools
+# Create tools directory
+RUN mkdir -p /tmp/tools /app/tools/wordlists
 
-# Install subfinder
-RUN wget -O /tmp/tools/subfinder.zip https://github.com/projectdiscovery/subfinder/releases/download/v2.6.3/subfinder_2.6.3_linux_amd64.zip && \
-    cd /tmp/tools && unzip subfinder.zip && \
+# Install security tools with error handling
+RUN set -e && \
+    # Install subfinder
+    echo "Installing subfinder..." && \
+    wget -q -O /tmp/tools/subfinder.zip https://github.com/projectdiscovery/subfinder/releases/download/v2.6.3/subfinder_2.6.3_linux_amd64.zip && \
+    cd /tmp/tools && unzip -o subfinder.zip && \
     mv subfinder /usr/local/bin/ && \
-    chmod +x /usr/local/bin/subfinder
-
-# Install amass
-RUN wget -O /tmp/tools/amass.zip https://github.com/owasp-amass/amass/releases/download/v4.2.0/amass_Linux_amd64.zip && \
-    cd /tmp/tools && unzip amass.zip && \
+    chmod +x /usr/local/bin/subfinder && \
+    \
+    # Install amass
+    echo "Installing amass..." && \
+    wget -q -O /tmp/tools/amass.zip https://github.com/owasp-amass/amass/releases/download/v4.2.0/amass_Linux_amd64.zip && \
+    unzip -o amass.zip && \
     mv amass_Linux_amd64/amass /usr/local/bin/ && \
-    chmod +x /usr/local/bin/amass
-
-# Install ffuf
-RUN wget -O /tmp/tools/ffuf.tgz https://github.com/ffuf/ffuf/releases/download/v2.0.4/ffuf_2.0.4_linux_amd64.tar.gz && \
-    cd /tmp/tools && tar -xzf ffuf.tgz && \
-    mv ffuf /usr/local/bin/ && \
-    chmod +x /usr/local/bin/ffuf
-
-# Install httpx
-RUN wget -O /tmp/tools/httpx.zip https://github.com/projectdiscovery/httpx/releases/download/v1.3.7/httpx_1.3.7_linux_amd64.zip && \
-    cd /tmp/tools && unzip httpx.zip && \
+    chmod +x /usr/local/bin/amass && \
+    \
+    # Install httpx
+    echo "Installing httpx..." && \
+    wget -q -O /tmp/tools/httpx.zip https://github.com/projectdiscovery/httpx/releases/download/v1.3.7/httpx_1.3.7_linux_amd64.zip && \
+    unzip -o httpx.zip && \
     mv httpx /usr/local/bin/ && \
-    chmod +x /usr/local/bin/httpx
+    chmod +x /usr/local/bin/httpx && \
+    \
+    # Clean up
+    rm -rf /tmp/tools
 
-# Create tools directory and download wordlists
-RUN mkdir -p /app/tools/wordlists
-RUN wget -O /app/tools/wordlists/common.txt https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/Web-Content/common.txt
-RUN wget -O /app/tools/wordlists/big.txt https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/Web-Content/big.txt
-RUN wget -O /app/tools/wordlists/directory-list-2.3-medium.txt https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/Web-Content/directory-list-2.3-medium.txt
+# Download wordlists
+RUN wget -q -O /app/tools/wordlists/common.txt https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/Web-Content/common.txt || \
+    echo "# Fallback wordlist" > /app/tools/wordlists/common.txt
 
-# Clean up
-RUN rm -rf /tmp/tools
+# Install ffuf using Go (more reliable)
+RUN apk add --no-cache go && \
+    GOPATH=/tmp/go go install github.com/ffuf/ffuf/v2@latest && \
+    mv /tmp/go/bin/ffuf /usr/local/bin/ && \
+    chmod +x /usr/local/bin/ffuf && \
+    apk del go && \
+    rm -rf /tmp/go
+
+# Verify installations
+RUN echo "Verifying tool installations..." && \
+    subfinder -version && \
+    amass version && \
+    httpx -version && \
+    ffuf -version && \
+    nmap --version && \
+    echo "All tools installed successfully!"
 
 # Copy application code
 COPY . .
