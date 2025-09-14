@@ -10,14 +10,34 @@ const app = express();
 
 // Security middleware
 app.use(helmet());
+// app.use(cors({
+//   origin: [
+//     process.env.FRONTEND_URL || 'http://localhost:3000',
+//     'http://localhost:3000',
+//     'http://127.0.0.1:3000',
+//     'http://localhost:5173',  // Vite dev server
+//     'http://127.0.0.1:5173',
+//     'http://localhost:8080',  // Simple HTTP server
+//     'http://127.0.0.1:8080',
+//     'http://localhost:3001',  // If serving from backend
+//     null  // For file:// protocol
+//   ],
+//   credentials: true,
+//   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+//   allowedHeaders: [
+//     'Origin', 
+//     'X-Requested-With', 
+//     'Content-Type', 
+//     'Accept', 
+//     'Authorization',
+//     'Cache-Control'
+//   ]
+// }));
+
+
+// dev only, above is for production
 app.use(cors({
-  origin: [
-    process.env.FRONTEND_URL || 'http://localhost:3000',
-    'http://localhost:3000',
-    'http://127.0.0.1:3000',
-    'http://localhost:5173',  // Vite dev server
-    'http://127.0.0.1:5173'
-  ],
+  origin: true,  // Allow all origins in development
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
   allowedHeaders: [
@@ -29,6 +49,7 @@ app.use(cors({
     'Cache-Control'
   ]
 }));
+
 
 // Request parsing
 app.use(express.json({ limit: '10mb' }));

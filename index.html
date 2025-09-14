@@ -1,0 +1,919 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bug Bounty Framework</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background-color: #111827;
+            color: #f3f4f6;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* Layout */
+        .container {
+            display: flex;
+            height: 100vh;
+        }
+
+        /* Sidebar */
+        .sidebar {
+            width: 250px;
+            background-color: #1f2937;
+            border-right: 1px solid #374151;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .logo {
+            padding: 20px;
+            border-bottom: 1px solid #374151;
+            font-size: 18px;
+            font-weight: bold;
+            color: #60a5fa;
+        }
+
+        .nav-item {
+            padding: 15px 20px;
+            cursor: pointer;
+            border-bottom: 1px solid #374151;
+            transition: background-color 0.2s;
+        }
+
+        .nav-item:hover {
+            background-color: #374151;
+        }
+
+        .nav-item.active {
+            background-color: #1d4ed8;
+        }
+
+        .user-info {
+            margin-top: auto;
+            padding: 20px;
+            border-top: 1px solid #374151;
+            font-size: 14px;
+            color: #9ca3af;
+        }
+
+        /* Main Content */
+        .main {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .header {
+            padding: 20px 30px;
+            border-bottom: 1px solid #374151;
+            background-color: #1f2937;
+        }
+
+        .content {
+            flex: 1;
+            padding: 30px;
+            overflow-y: auto;
+        }
+
+        /* Auth Form */
+        .auth-container {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            background-color: #111827;
+        }
+
+        .auth-form {
+            background-color: #1f2937;
+            padding: 40px;
+            border-radius: 8px;
+            width: 400px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+        }
+
+        .auth-title {
+            text-align: center;
+            font-size: 24px;
+            margin-bottom: 30px;
+            color: #60a5fa;
+        }
+
+        /* Forms */
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            color: #d1d5db;
+        }
+
+        .form-group input, .form-group select, .form-group textarea {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #374151;
+            border-radius: 6px;
+            background-color: #111827;
+            color: #f3f4f6;
+            font-size: 14px;
+        }
+
+        .form-group input:focus, .form-group select:focus, .form-group textarea:focus {
+            outline: none;
+            border-color: #60a5fa;
+        }
+
+        /* Buttons */
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+
+        .btn-primary {
+            background-color: #1d4ed8;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background-color: #1e40af;
+        }
+
+        .btn-secondary {
+            background-color: #374151;
+            color: white;
+        }
+
+        .btn-secondary:hover {
+            background-color: #4b5563;
+        }
+
+        .btn-danger {
+            background-color: #dc2626;
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background-color: #b91c1c;
+        }
+
+        /* Tables */
+        .table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+
+        .table th, .table td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #374151;
+        }
+
+        .table th {
+            background-color: #1f2937;
+            color: #d1d5db;
+        }
+
+        /* Cards */
+        .card {
+            background-color: #1f2937;
+            border-radius: 8px;
+            padding: 24px;
+            margin-bottom: 20px;
+            border: 1px solid #374151;
+        }
+
+        .card-title {
+            font-size: 18px;
+            font-weight: bold;
+            margin-bottom: 16px;
+            color: #f3f4f6;
+        }
+
+        /* Status badges */
+        .status {
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+
+        .status-completed {
+            background-color: #065f46;
+            color: #10b981;
+        }
+
+        .status-running {
+            background-color: #1e3a8a;
+            color: #3b82f6;
+        }
+
+        .status-queued {
+            background-color: #92400e;
+            color: #f59e0b;
+        }
+
+        .status-failed {
+            background-color: #7f1d1d;
+            color: #ef4444;
+        }
+
+        /* Utilities */
+        .hidden {
+            display: none;
+        }
+
+        .text-center {
+            text-align: center;
+        }
+
+        .mb-4 {
+            margin-bottom: 16px;
+        }
+
+        .mr-2 {
+            margin-right: 8px;
+        }
+
+        .loading {
+            opacity: 0.6;
+            pointer-events: none;
+        }
+
+        /* Checkbox styles */
+        .checkbox-group {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+
+        .checkbox-item {
+            display: flex;
+            align-items: center;
+        }
+
+        .checkbox-item input {
+            width: auto;
+            margin-right: 8px;
+        }
+    </style>
+</head>
+<body>
+    <!-- Authentication Form -->
+    <div id="auth-container" class="auth-container">
+        <div class="auth-form">
+            <h2 class="auth-title">Bug Bounty Framework</h2>
+            <form id="auth-form">
+                <div class="form-group">
+                    <label for="email">Email</label>
+                    <input type="email" id="email" required>
+                </div>
+                <div class="form-group">
+                    <label for="password">Password</label>
+                    <input type="password" id="password" required>
+                </div>
+                <div id="register-fields" class="hidden">
+                    <div class="form-group">
+                        <label for="fullName">Full Name</label>
+                        <input type="text" id="fullName">
+                    </div>
+                    <div class="form-group">
+                        <label for="organizationName">Organization Name</label>
+                        <input type="text" id="organizationName">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <button type="submit" class="btn btn-primary" style="width: 100%;">Login</button>
+                </div>
+                <div class="text-center">
+                    <button type="button" id="toggle-auth" class="btn btn-secondary">Register</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Main Dashboard -->
+    <div id="dashboard" class="container hidden">
+        <!-- Sidebar -->
+        <div class="sidebar">
+            <div class="logo">🛡️ Bug Bounty</div>
+            <div class="nav-item active" data-tab="dashboard">📊 Dashboard</div>
+            <div class="nav-item" data-tab="targets">🎯 Targets</div>
+            <div class="nav-item" data-tab="scans">🔍 Scans</div>
+            <div class="nav-item" data-tab="results">📋 Results</div>
+            <div class="nav-item" data-tab="settings">⚙️ Settings</div>
+            <div class="user-info">
+                <div id="user-name">Loading...</div>
+                <div style="margin-top: 10px;">
+                    <button onclick="logout()" class="btn btn-secondary" style="font-size: 12px; padding: 6px 12px;">Logout</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Content -->
+        <div class="main">
+            <div class="header">
+                <h1 id="page-title">Dashboard</h1>
+            </div>
+            <div class="content">
+                <!-- Dashboard Tab -->
+                <div id="tab-dashboard" class="tab-content">
+                    <div class="card">
+                        <div class="card-title">Overview</div>
+                        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px;">
+                            <div class="card">
+                                <h3>Total Targets</h3>
+                                <div id="total-targets" style="font-size: 24px; font-weight: bold; color: #60a5fa;">0</div>
+                            </div>
+                            <div class="card">
+                                <h3>Active Scans</h3>
+                                <div id="active-scans" style="font-size: 24px; font-weight: bold; color: #10b981;">0</div>
+                            </div>
+                            <div class="card">
+                                <h3>Completed Scans</h3>
+                                <div id="completed-scans" style="font-size: 24px; font-weight: bold; color: #f59e0b;">0</div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="card">
+                        <div class="card-title">Recent Activity</div>
+                        <div id="recent-activity">
+                            <p style="color: #9ca3af;">Loading recent activity...</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Targets Tab -->
+                <div id="tab-targets" class="tab-content hidden">
+                    <div class="card">
+                        <div class="card-title">Add New Target</div>
+                        <form id="target-form" style="display: grid; grid-template-columns: 1fr 2fr auto; gap: 15px; align-items: end;">
+                            <div class="form-group">
+                                <label for="target-domain">Domain</label>
+                                <input type="text" id="target-domain" placeholder="example.com" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="target-description">Description</label>
+                                <input type="text" id="target-description" placeholder="Target description">
+                            </div>
+                            <button type="submit" class="btn btn-primary">Add Target</button>
+                        </form>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-title">Your Targets</div>
+                        <table class="table">
+                            <thead>
+                                <tr>
+                                    <th>Domain</th>
+                                    <th>Description</th>
+                                    <th>Created</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="targets-list">
+                                <tr>
+                                    <td colspan="4" style="text-align: center; color: #9ca3af;">Loading targets...</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Scans Tab -->
+                <div id="tab-scans" class="tab-content hidden">
+                    <div class="card">
+                        <div class="card-title">Start New Scan</div>
+                        <form id="scan-form">
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                                <div class="form-group">
+                                    <label for="scan-target">Target</label>
+                                    <select id="scan-target" required>
+                                        <option value="">Select target...</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label for="scan-priority">Priority</label>
+                                    <select id="scan-priority">
+                                        <option value="low">Low</option>
+                                        <option value="medium" selected>Medium</option>
+                                        <option value="high">High</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label>Scan Types</label>
+                                <div class="checkbox-group">
+                                    <div class="checkbox-item">
+                                        <input type="checkbox" id="subdomain_scan" value="subdomain_scan" checked>
+                                        <label for="subdomain_scan">Subdomain Scan</label>
+                                    </div>
+                                    <div class="checkbox-item">
+                                        <input type="checkbox" id="port_scan" value="port_scan">
+                                        <label for="port_scan">Port Scan</label>
+                                    </div>
+                                    <div class="checkbox-item">
+                                        <input type="checkbox" id="content_discovery" value="content_discovery">
+                                        <label for="content_discovery">Content Discovery</label>
+                                    </div>
+                                    <div class="checkbox-item">
+                                        <input type="checkbox" id="js_files_scan" value="js_files_scan">
+                                        <label for="js_files_scan">JS Files Scan</label>
+                                    </div>
+                                    <div class="checkbox-item">
+                                        <input type="checkbox" id="api_discovery" value="api_discovery">
+                                        <label for="api_discovery">API Discovery</label>
+                                    </div>
+                                    <div class="checkbox-item">
+                                        <input type="checkbox" id="vulnerability_scan" value="vulnerability_scan">
+                                        <label for="vulnerability_scan">Vulnerability Scan</label>
+                                    </div>
+                                    <div class="checkbox-item">
+                                        <input type="checkbox" id="full_scan" value="full_scan">
+                                        <label for="full_scan">Full Scan</label>
+                                    </div>
+                                </div>
+                            </div>
+                            <button type="submit" class="btn btn-primary">Start Scan</button>
+                        </form>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-title">Scan Jobs</div>
+                        <button onclick="loadScans()" class="btn btn-secondary mb-4">🔄 Refresh</button>
+                        <table class="table">
+                            <thead>
+                                <tr>
+                                    <th>ID</th>
+                                    <th>Target</th>
+                                    <th>Type</th>
+                                    <th>Status</th>
+                                    <th>Created</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="scans-list">
+                                <tr>
+                                    <td colspan="6" style="text-align: center; color: #9ca3af;">Loading scans...</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Results Tab -->
+                <div id="tab-results" class="tab-content hidden">
+                    <div class="card">
+                        <div class="card-title">Scan Results</div>
+                        <button onclick="loadResults()" class="btn btn-secondary mb-4">🔄 Refresh Results</button>
+                        <div id="results-container">
+                            <p style="color: #9ca3af;">Loading results...</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Settings Tab -->
+                <div id="tab-settings" class="tab-content hidden">
+                    <div class="card">
+                        <div class="card-title">Settings</div>
+                        <div class="form-group">
+                            <label>API Endpoint</label>
+                            <input type="text" id="api-endpoint" value="http://localhost:3001/api/v1" readonly>
+                        </div>
+                        <div class="form-group">
+                            <label>Theme</label>
+                            <select>
+                                <option>Dark (Current)</option>
+                            </select>
+                        </div>
+                        <button class="btn btn-primary" onclick="alert('Settings saved!')">Save Settings</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:3001/api/v1';
+        let currentUser = null;
+        let isRegistering = false;
+
+        // Authentication
+        document.getElementById('auth-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+            
+            if (isRegistering) {
+                const fullName = document.getElementById('fullName').value;
+                const organizationName = document.getElementById('organizationName').value;
+                await register(email, password, fullName, organizationName);
+            } else {
+                await login(email, password);
+            }
+        });
+
+        document.getElementById('toggle-auth').addEventListener('click', () => {
+            const registerFields = document.getElementById('register-fields');
+            const submitBtn = document.querySelector('#auth-form button[type="submit"]');
+            const toggleBtn = document.getElementById('toggle-auth');
+            
+            if (isRegistering) {
+                registerFields.classList.add('hidden');
+                submitBtn.textContent = 'Login';
+                toggleBtn.textContent = 'Register';
+                isRegistering = false;
+            } else {
+                registerFields.classList.remove('hidden');
+                submitBtn.textContent = 'Register';
+                toggleBtn.textContent = 'Login';
+                isRegistering = true;
+            }
+        });
+
+        async function login(email, password) {
+            try {
+                const response = await fetch(`${API_BASE}/auth/login`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email, password })
+                });
+                const data = await response.json();
+                
+                if (data.user) {
+                    localStorage.setItem('token', data.accessToken);
+                    currentUser = data.user;
+                    showDashboard();
+                } else {
+                    alert('Login failed: ' + (data.message || 'Unknown error'));
+                }
+            } catch (error) {
+                alert('Login failed: ' + error.message);
+            }
+        }
+
+        async function register(email, password, fullName, organizationName) {
+            try {
+                const response = await fetch(`${API_BASE}/auth/register`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email, password, fullName, organizationName })
+                });
+                const data = await response.json();
+                
+                if (data.user) {
+                    localStorage.setItem('token', data.accessToken);
+                    currentUser = data.user;
+                    showDashboard();
+                } else {
+                    alert('Registration failed: ' + (data.message || 'Unknown error'));
+                }
+            } catch (error) {
+                alert('Registration failed: ' + error.message);
+            }
+        }
+
+        function logout() {
+            localStorage.removeItem('token');
+            currentUser = null;
+            document.getElementById('auth-container').classList.remove('hidden');
+            document.getElementById('dashboard').classList.add('hidden');
+        }
+
+        function showDashboard() {
+            document.getElementById('auth-container').classList.add('hidden');
+            document.getElementById('dashboard').classList.remove('hidden');
+            document.getElementById('user-name').textContent = currentUser.fullName || currentUser.email;
+            loadDashboardData();
+        }
+
+        // API helper
+        async function apiCall(endpoint, options = {}) {
+            const token = localStorage.getItem('token');
+            const response = await fetch(`${API_BASE}${endpoint}`, {
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json',
+                    ...options.headers
+                },
+                ...options
+            });
+            return response;
+        }
+
+        // Navigation
+        document.addEventListener('click', (e) => {
+            if (e.target.classList.contains('nav-item')) {
+                const tab = e.target.getAttribute('data-tab');
+                switchTab(tab);
+            }
+        });
+
+        function switchTab(tab) {
+            // Update navigation
+            document.querySelectorAll('.nav-item').forEach(item => {
+                item.classList.remove('active');
+            });
+            document.querySelector(`[data-tab="${tab}"]`).classList.add('active');
+
+            // Update content
+            document.querySelectorAll('.tab-content').forEach(content => {
+                content.classList.add('hidden');
+            });
+            document.getElementById(`tab-${tab}`).classList.remove('hidden');
+
+            // Update title
+            const titles = {
+                dashboard: 'Dashboard',
+                targets: 'Targets',
+                scans: 'Scans',
+                results: 'Results',
+                settings: 'Settings'
+            };
+            document.getElementById('page-title').textContent = titles[tab];
+        }
+
+        // Load dashboard data
+        async function loadDashboardData() {
+            await Promise.all([loadTargets(), loadScans(), loadDashboardStats()]);
+        }
+
+        async function loadDashboardStats() {
+            try {
+                const [targetsRes, scansRes] = await Promise.all([
+                    apiCall('/targets'),
+                    apiCall('/scans/jobs')
+                ]);
+                
+                const targetsData = await targetsRes.json();
+                const scansData = await scansRes.json();
+                
+                const targets = targetsData.success ? targetsData.data : [];
+                const scans = scansData.success ? scansData.data : [];
+                
+                document.getElementById('total-targets').textContent = targets.length;
+                document.getElementById('active-scans').textContent = 
+                    scans.filter(s => s.status === 'running' || s.status === 'queued').length;
+                document.getElementById('completed-scans').textContent = 
+                    scans.filter(s => s.status === 'completed').length;
+
+                // Recent activity
+                const recentActivity = document.getElementById('recent-activity');
+                const recentScans = scans.slice(0, 5);
+                if (recentScans.length > 0) {
+                    recentActivity.innerHTML = recentScans.map(scan => 
+                        `<div style="padding: 8px 0; border-bottom: 1px solid #374151;">
+                            <strong>${scan.target?.domain || 'Unknown Target'}</strong> - 
+                            ${scan.scanType} - 
+                            <span class="status status-${scan.status}">${scan.status}</span>
+                        </div>`
+                    ).join('');
+                } else {
+                    recentActivity.innerHTML = '<p style="color: #9ca3af;">No recent activity</p>';
+                }
+            } catch (error) {
+                console.error('Failed to load dashboard stats:', error);
+            }
+        }
+
+        // Targets
+        async function loadTargets() {
+            try {
+                const response = await apiCall('/targets');
+                const data = await response.json();
+                const targets = data.success ? data.data : [];
+                
+                // Update targets list
+                const targetsList = document.getElementById('targets-list');
+                if (targets.length > 0) {
+                    targetsList.innerHTML = targets.map(target => `
+                        <tr>
+                            <td>${target.domain}</td>
+                            <td>${target.description || '-'}</td>
+                            <td>${new Date(target.createdAt).toLocaleDateString()}</td>
+                            <td>
+                                <button onclick="deleteTarget(${target.id})" class="btn btn-danger" style="font-size: 12px; padding: 4px 8px;">Delete</button>
+                            </td>
+                        </tr>
+                    `).join('');
+                } else {
+                    targetsList.innerHTML = '<tr><td colspan="4" style="text-align: center; color: #9ca3af;">No targets yet</td></tr>';
+                }
+
+                // Update scan target dropdown
+                const scanTargetSelect = document.getElementById('scan-target');
+                scanTargetSelect.innerHTML = '<option value="">Select target...</option>' +
+                    targets.map(target => `<option value="${target.id}">${target.domain}</option>`).join('');
+                    
+            } catch (error) {
+                console.error('Failed to load targets:', error);
+            }
+        }
+
+        document.getElementById('target-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const domain = document.getElementById('target-domain').value;
+            const description = document.getElementById('target-description').value;
+            
+            try {
+                const response = await apiCall('/targets', {
+                    method: 'POST',
+                    body: JSON.stringify({ domain, description })
+                });
+                
+                if (response.ok) {
+                    document.getElementById('target-form').reset();
+                    loadTargets();
+                    alert('Target added successfully!');
+                } else {
+                    alert('Failed to add target');
+                }
+            } catch (error) {
+                alert('Failed to add target: ' + error.message);
+            }
+        });
+
+        async function deleteTarget(id) {
+            if (confirm('Are you sure you want to delete this target?')) {
+                try {
+                    await apiCall(`/targets/${id}`, { method: 'DELETE' });
+                    loadTargets();
+                } catch (error) {
+                    alert('Failed to delete target: ' + error.message);
+                }
+            }
+        }
+
+        // Scans
+        async function loadScans() {
+            try {
+                const response = await apiCall('/scans/jobs');
+                const data = await response.json();
+                const scans = data.success ? data.data : [];
+                
+                const scansList = document.getElementById('scans-list');
+                if (scans.length > 0) {
+                    scansList.innerHTML = scans.map(scan => `
+                        <tr>
+                            <td>${scan.id}</td>
+                            <td>${scan.target?.domain || 'Unknown'}</td>
+                            <td>${scan.scanType}</td>
+                            <td><span class="status status-${scan.status}">${scan.status}</span></td>
+                            <td>${new Date(scan.createdAt).toLocaleDateString()}</td>
+                            <td>
+                                ${scan.status === 'completed' ? 
+                                    `<button onclick="viewResults(${scan.id})" class="btn btn-secondary" style="font-size: 12px; padding: 4px 8px;">View Results</button>` :
+                                    '-'
+                                }
+                            </td>
+                        </tr>
+                    `).join('');
+                } else {
+                    scansList.innerHTML = '<tr><td colspan="6" style="text-align: center; color: #9ca3af;">No scans yet</td></tr>';
+                }
+            } catch (error) {
+                console.error('Failed to load scans:', error);
+                document.getElementById('scans-list').innerHTML = '<tr><td colspan="6" style="text-align: center; color: #ef4444;">Failed to load scans</td></tr>';
+            }
+        }
+
+        document.getElementById('scan-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const targetId = document.getElementById('scan-target').value;
+            const priority = document.getElementById('scan-priority').value;
+            const scanTypes = Array.from(document.querySelectorAll('input[type="checkbox"]:checked')).map(cb => cb.value);
+            
+            if (!targetId) {
+                alert('Please select a target');
+                return;
+            }
+            
+            if (scanTypes.length === 0) {
+                alert('Please select at least one scan type');
+                return;
+            }
+            
+            try {
+                const response = await apiCall('/scans/start', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        targetId: parseInt(targetId),
+                        scanTypes,
+                        priority
+                    })
+                });
+                
+                if (response.ok) {
+                    alert('Scan started successfully!');
+                    loadScans();
+                    switchTab('scans');
+                } else {
+                    alert('Failed to start scan');
+                }
+            } catch (error) {
+                alert('Failed to start scan: ' + error.message);
+            }
+        });
+
+        // Results
+        async function loadResults() {
+            try {
+                const response = await apiCall('/scans/jobs');
+                const data = await response.json();
+                const scans = data.success ? data.data : [];
+                const completedScans = scans.filter(scan => scan.status === 'completed');
+                
+                const resultsContainer = document.getElementById('results-container');
+                
+                if (completedScans.length === 0) {
+                    resultsContainer.innerHTML = '<p style="color: #9ca3af;">No completed scans with results yet.</p>';
+                    return;
+                }
+                
+                let resultsHtml = '';
+                for (const scan of completedScans) {
+                    try {
+                        const resultsResponse = await apiCall(`/scans/jobs/${scan.id}/results`);
+                        const resultsData = await resultsResponse.json();
+                        
+                        resultsHtml += `
+                            <div class="card">
+                                <div class="card-title">
+                                    ${scan.target?.domain || 'Unknown Target'} - ${scan.scanType}
+                                    <span style="font-size: 14px; color: #9ca3af;">(Scan #${scan.id})</span>
+                                </div>
+                                <pre style="background: #111827; padding: 15px; border-radius: 4px; overflow-x: auto; color: #d1d5db;">${JSON.stringify(resultsData.data?.results || {}, null, 2)}</pre>
+                            </div>
+                        `;
+                    } catch (error) {
+                        resultsHtml += `
+                            <div class="card">
+                                <div class="card-title">${scan.target?.domain || 'Unknown Target'} - ${scan.scanType}</div>
+                                <p style="color: #ef4444;">Failed to load results for this scan.</p>
+                            </div>
+                        `;
+                    }
+                }
+                
+                resultsContainer.innerHTML = resultsHtml;
+            } catch (error) {
+                console.error('Failed to load results:', error);
+                document.getElementById('results-container').innerHTML = '<p style="color: #ef4444;">Failed to load results.</p>';
+            }
+        }
+
+        async function viewResults(scanId) {
+            switchTab('results');
+            // Load just this specific result
+            try {
+                const response = await apiCall('/scans/jobs/' + scanId + '/results');
+                const data = await response.json();
+                const results = data.data && data.data.results ? data.data.results : {};
+                
+                document.getElementById('results-container').innerHTML = 
+                    '<div class="card">' +
+                    '<div class="card-title">Scan Results (ID: ' + scanId + ')</div>' +
+                    '<pre style="background: #111827; padding: 15px; border-radius: 4px; overflow-x: auto; color: #d1d5db;">' + 
+                    JSON.stringify(results, null, 2) + '</pre>' +
+                    '</div>';
+            } catch (error) {
+                document.getElementById('results-container').innerHTML = '<p style="color: #ef4444;">Failed to load results.</p>';
+            }
+        }
+
+        // Check authentication on load
+        window.addEventListener('load', () => {
+            const token = localStorage.getItem('token');
+            if (token) {
+                // Try to validate token by loading data
+                loadDashboardData().then(() => {
+                    // If successful, show dashboard
+                    document.getElementById('auth-container').classList.add('hidden');
+                    document.getElementById('dashboard').classList.remove('hidden');
+                    document.getElementById('user-name').textContent = 'User'; // Will be updated when data loads
+                }).catch(() => {
+                    // If failed, clear token and show auth
+                    localStorage.removeItem('token');
+                });
+            }
+        });
+    </script>
+</body>
+</html>

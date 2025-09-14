@@ -4,6 +4,8 @@ const path = require('path');
 const fs = require('fs').promises;
 const { promisify } = require('util');
 const execAsync = promisify(exec);
+const ScanJob = require('../models/ScanJob');
+const Target = require('../models/Target');
 
 class ScanService {
   constructor() {
@@ -21,7 +23,7 @@ class ScanService {
       console.log(`Starting ${scan.job_type} for target: ${target.domain}`);
       
       // Mark scan as started
-      await scan.markAsStarted();
+      await ScanJob.markAsStarted(scan.id);
       
       // Start the appropriate scan based on type
       const job = this.executeScan(scan, target);
@@ -66,13 +68,8 @@ class ScanService {
           throw new Error(`Unknown scan type: ${scan.job_type}`);
       }
 
-      // Update scan with results
-      await scan.update({
-        status: 'completed',
-        progress_percentage: 100,
-        completed_at: new Date(),
-        results: results
-      });
+      // Mark as completed with results
+      await ScanJob.markAsCompleted(scan.id, results);
 
       // Update target stats
       await this.updateTargetStats(target, scan.job_type, results);
@@ -83,7 +80,7 @@ class ScanService {
     } catch (error) {
       console.error(`Error in ${scan.job_type} for ${target.domain}:`, error);
       
-      await scan.markAsFailed(error.message);
+      await ScanJob.markAsFailed(scan.id, error.message);
       throw error;
     } finally {
       // Remove from active jobs
@@ -98,20 +95,20 @@ class ScanService {
     console.log(`Running subdomain scan for: ${target.domain}`);
     
     // Update progress
-    await scan.updateProgress(10);
+    await ScanJob.updateProgress(scan.id, 10);
 
     try {
       // Use subfinder for subdomain enumeration
       const subfinderCmd = `subfinder -d ${target.domain} -all -silent`;
       
-      await scan.updateProgress(30);
+      await ScanJob.updateProgress(scan.id, 30);
       
       const { stdout: subfinderOutput } = await execAsync(subfinderCmd, {
         timeout: 300000, // 5 minutes timeout
         maxBuffer: 1024 * 1024 * 10 // 10MB buffer
       });
 
-      await scan.updateProgress(60);
+      await ScanJob.updateProgress(scan.id, 60);
 
       // Process subfinder results
       const subdomains = subfinderOutput
@@ -120,7 +117,7 @@ class ScanService {
         .map(subdomain => subdomain.trim())
         .filter(subdomain => subdomain.length > 0);
 
-      await scan.updateProgress(80);
+      await ScanJob.updateProgress(scan.id, 80);
 
       // Additional enumeration with amass (if available)
       let amassSubdomains = [];
@@ -142,7 +139,7 @@ class ScanService {
       // Combine and deduplicate results
       const allSubdomains = [...new Set([...subdomains, ...amassSubdomains])];
       
-      await scan.updateProgress(90);
+      await ScanJob.updateProgress(scan.id, 90);
 
       // Validate subdomains
       const validSubdomains = allSubdomains.filter(sub => 
@@ -156,7 +153,7 @@ class ScanService {
         scan_timestamp: new Date().toISOString()
       };
 
-      await scan.updateProgress(100);
+      await ScanJob.updateProgress(scan.id, 100);
       
       return results;
 
@@ -174,20 +171,20 @@ class ScanService {
   async runPortScan(scan, target) {
     console.log(`Running port scan for: ${target.domain}`);
     
-    await scan.updateProgress(10);
+    await ScanJob.updateProgress(scan.id, 10);
 
     try {
       // Use nmap for port scanning
       const nmapCmd = `nmap -T4 -F ${target.domain}`;
       
-      await scan.updateProgress(30);
+      await ScanJob.updateProgress(scan.id, 30);
 
       const { stdout: nmapOutput } = await execAsync(nmapCmd, {
         timeout: 600000, // 10 minutes timeout
         maxBuffer: 1024 * 1024 * 10
       });
 
-      await scan.updateProgress(80);
+      await ScanJob.updateProgress(scan.id, 80);
 
       // Parse nmap output
       const openPorts = [];
@@ -211,7 +208,7 @@ class ScanService {
         scan_timestamp: new Date().toISOString()
       };
 
-      await scan.updateProgress(100);
+      await ScanJob.updateProgress(scan.id, 100);
       
       return results;
 
@@ -229,21 +226,21 @@ class ScanService {
   async runContentDiscovery(scan, target) {
     console.log(`Running content discovery for: ${target.domain}`);
     
-    await scan.updateProgress(10);
+    await ScanJob.updateProgress(scan.id, 10);
 
     try {
       // Use ffuf for content discovery
       const wordlist = path.join(this.toolsPath, 'wordlists/common.txt');
       const ffufCmd = `ffuf -w ${wordlist} -u http://${target.domain}/FUZZ -mc 200,204,301,302,307,401,403 -s`;
       
-      await scan.updateProgress(30);
+      await ScanJob.updateProgress(scan.id, 30);
 
       const { stdout: ffufOutput } = await execAsync(ffufCmd, {
         timeout: 600000, // 10 minutes
         maxBuffer: 1024 * 1024 * 10
       });
 
-      await scan.updateProgress(80);
+      await ScanJob.updateProgress(scan.id, 80);
 
       // Parse ffuf output (assuming JSON output)
       const discoveredPaths = [];
@@ -270,7 +267,7 @@ class ScanService {
         scan_timestamp: new Date().toISOString()
       };
 
-      await scan.updateProgress(100);
+      await ScanJob.updateProgress(scan.id, 100);
       
       return results;
 
@@ -288,7 +285,7 @@ class ScanService {
   async runJSFilesScan(scan, target) {
     console.log(`Running JS files scan for: ${target.domain}`);
     
-    await scan.updateProgress(20);
+    await ScanJob.updateProgress(scan.id, 20);
 
     // This is a simplified implementation
     // In production, you'd want to crawl the site and extract JS files
@@ -300,7 +297,7 @@ class ScanService {
       scan_timestamp: new Date().toISOString()
     };
 
-    await scan.updateProgress(100);
+    await ScanJob.updateProgress(scan.id, 100);
     
     return results;
   }
@@ -311,7 +308,7 @@ class ScanService {
   async runAPIDiscovery(scan, target) {
     console.log(`Running API discovery for: ${target.domain}`);
     
-    await scan.updateProgress(20);
+    await ScanJob.updateProgress(scan.id, 20);
 
     const results = {
       api_endpoints: [],
@@ -319,7 +316,7 @@ class ScanService {
       scan_timestamp: new Date().toISOString()
     };
 
-    await scan.updateProgress(100);
+    await ScanJob.updateProgress(scan.id, 100);
     
     return results;
   }
@@ -330,7 +327,7 @@ class ScanService {
   async runVulnerabilityScan(scan, target) {
     console.log(`Running vulnerability scan for: ${target.domain}`);
     
-    await scan.updateProgress(20);
+    await ScanJob.updateProgress(scan.id, 20);
 
     const results = {
       vulnerabilities: [],
@@ -339,7 +336,7 @@ class ScanService {
       scan_timestamp: new Date().toISOString()
     };
 
-    await scan.updateProgress(100);
+    await ScanJob.updateProgress(scan.id, 100);
     
     return results;
   }
@@ -351,9 +348,14 @@ class ScanService {
     console.log(`Running full scan for: ${target.domain}`);
     
     // Run all scan types sequentially
-    const subdomainResults = await this.runSubdomainScan({ ...scan, updateProgress: (p) => scan.updateProgress(p * 0.3) }, target);
-    const portResults = await this.runPortScan({ ...scan, updateProgress: (p) => scan.updateProgress(30 + p * 0.3) }, target);
-    const contentResults = await this.runContentDiscovery({ ...scan, updateProgress: (p) => scan.updateProgress(60 + p * 0.4) }, target);
+    await ScanJob.updateProgress(scan.id, 10);
+    const subdomainResults = await this.runSubdomainScan(scan, target);
+    
+    await ScanJob.updateProgress(scan.id, 40);
+    const portResults = await this.runPortScan(scan, target);
+    
+    await ScanJob.updateProgress(scan.id, 70);
+    const contentResults = await this.runContentDiscovery(scan, target);
     
     const results = {
       subdomain_scan: subdomainResults,
@@ -362,7 +364,7 @@ class ScanService {
       scan_timestamp: new Date().toISOString()
     };
 
-    await scan.updateProgress(100);
+    await ScanJob.updateProgress(scan.id, 100);
     
     return results;
   }
@@ -371,23 +373,29 @@ class ScanService {
    * Update target statistics based on scan results
    */
   async updateTargetStats(target, scanType, results) {
-    const currentStats = target.stats || {};
-    
-    switch (scanType) {
-      case 'subdomain_scan':
-        currentStats.subdomains = results.total_count || 0;
-        break;
-      case 'port_scan':
-        currentStats.ports = results.total_ports || 0;
-        break;
-      case 'vulnerability_scan':
-        currentStats.vulnerabilities = results.total_vulnerabilities || 0;
-        break;
-    }
+    try {
+      const currentStats = target.stats || {};
+      
+      switch (scanType) {
+        case 'subdomain_scan':
+          currentStats.subdomains = results.total_count || 0;
+          break;
+        case 'port_scan':
+          currentStats.ports = results.total_ports || 0;
+          break;
+        case 'vulnerability_scan':
+          currentStats.vulnerabilities = results.total_vulnerabilities || 0;
+          break;
+      }
 
-    currentStats.last_updated = new Date().toISOString();
-    
-    await target.update({ stats: currentStats });
+      currentStats.last_updated = new Date().toISOString();
+      
+      // Update target using Target model static method
+      await Target.update(target.id, target.organization_id, { stats: JSON.stringify(currentStats) });
+    } catch (error) {
+      console.error('Error updating target stats:', error);
+      // Don't throw - this shouldn't fail the scan
+    }
   }
 
   /**

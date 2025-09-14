@@ -2,20 +2,21 @@
 const ScanJob = require('../models/ScanJob');
 const Target = require('../models/Target');
 const { validationResult, body } = require('express-validator');
+const scanService = require('../services/scanService');
 
 const safeJsonParse = (value, fallback = {}) => {
-     if (!value) return fallback;
-     if (typeof value === 'object') return value;
-     if (typeof value === 'string') {
-       try {
-         return JSON.parse(value);
-       } catch (error) {
-         console.warn('JSON parse error for value:', value, error.message);
-         return fallback;
-       }
-     }
-     return fallback;
-   };
+  if (!value) return fallback;
+  if (typeof value === 'object') return value;
+  if (typeof value === 'string') {
+    try {
+      return JSON.parse(value);
+    } catch (error) {
+      console.warn('JSON parse error for value:', value, error.message);
+      return fallback;
+    }
+  }
+  return fallback;
+};
 
 // Validation rules for starting a scan
 const scanValidation = [
@@ -103,9 +104,13 @@ const startScan = async (req, res) => {
         organization_id: user.organization_id,
         status: 'pending'
       });
-      
+
       scans.push(scan);
     }
+
+    // Start scan jobs AFTER all scans are created
+    console.log(`Starting ${scans.length} scan jobs for target: ${target.domain}`);
+    await scanService.startScanJobs(scans, target);
 
     // Update target status
     await Target.update(targetId, user.organization_id, { 
@@ -113,9 +118,7 @@ const startScan = async (req, res) => {
       last_scan_at: new Date()
     });
 
-    // TODO: Start the actual scan process asynchronously
-    // For now, we'll just mark them as pending
-    console.log(`Created ${scans.length} scan jobs for target: ${target.domain}`);
+    console.log(`Created and started ${scans.length} scan jobs for target: ${target.domain}`);
 
     res.status(201).json({
       success: true,
@@ -225,9 +228,9 @@ const getScan = async (req, res) => {
     // Add computed fields
     const scanData = {
       ...scan,
-      config: scan.config ? JSON.parse(scan.config) : {},
-      results: scan.results ? JSON.parse(scan.results) : {},
-      scan_types: scan.scan_types ? JSON.parse(scan.scan_types) : []
+      config: safeJsonParse(scan.config, {}),
+      results: safeJsonParse(scan.results, {}),
+      scan_types: safeJsonParse(scan.scan_types, [])
     };
     
     if (scan.started_at) {
@@ -243,6 +246,56 @@ const getScan = async (req, res) => {
 
   } catch (error) {
     console.error('Error fetching scan:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
+
+// Get scan results
+const getScanResults = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { user } = req;
+
+    const scan = await ScanJob.findById(id, user.organization_id);
+
+    if (!scan) {
+      return res.status(404).json({
+        success: false,
+        message: 'Scan not found'
+      });
+    }
+
+    if (scan.status !== 'completed') {
+      return res.status(400).json({
+        success: false,
+        message: `Scan is not completed. Current status: ${scan.status}`
+      });
+    }
+
+    const scanData = {
+      scanJob: {
+        id: scan.id,
+        job_type: scan.job_type,
+        status: scan.status,
+        started_at: scan.started_at,
+        completed_at: scan.completed_at,
+        duration_seconds: scan.started_at && scan.completed_at ? 
+          Math.floor((new Date(scan.completed_at) - new Date(scan.started_at)) / 1000) : null
+      },
+      results: safeJsonParse(scan.results, {})
+    };
+
+    res.json({
+      success: true,
+      data: scanData
+    });
+
+  } catch (error) {
+    console.error('Error fetching scan results:', error);
     res.status(500).json({
       success: false,
       message: 'Internal server error',
@@ -272,6 +325,9 @@ const stopScan = async (req, res) => {
         message: `Cannot stop scan with status: ${scan.status}`
       });
     }
+
+    // Stop the scan job using scan service
+    await scanService.stopScanJob(scan);
 
     // Update scan status
     const updatedScan = await ScanJob.update(id, user.organization_id, {
@@ -309,6 +365,7 @@ module.exports = {
   startScan,
   getJobs,
   getScan,
+  getScanResults,
   stopScan,
   scanValidation
 };

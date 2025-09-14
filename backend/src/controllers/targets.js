@@ -3,6 +3,20 @@ const Target = require('../models/Target');
 const ScanJob = require('../models/ScanJob');
 const { validationResult, body } = require('express-validator');
 
+const safeJsonParse = (value, fallback = {}) => {
+  if (!value) return fallback;
+  if (typeof value === 'object') return value;
+  if (typeof value === 'string') {
+    try {
+      return JSON.parse(value);
+    } catch (error) {
+      console.warn('JSON parse error for value:', value, error.message);
+      return fallback;
+    }
+  }
+  return fallback;
+};
+
 // Add express-validator to your package.json dependencies
 const targetValidation = [
   body('domain')
@@ -99,8 +113,8 @@ const getTargets = async (req, res) => {
     // Calculate stats for each target (simplified for now)
     const targetsWithStats = targets.map(target => ({
       ...target,
-      stats: target.stats ? JSON.parse(target.stats) : { subdomains: 0, ports: 0, vulnerabilities: 0 },
-      tags: target.tags ? JSON.parse(target.tags) : [],
+      stats: safeJsonParse(target.stats, { subdomains: 0, ports: 0, vulnerabilities: 0 }),
+      tags: safeJsonParse(target.tags, []),
       recent_scans: 0 // TODO: Calculate recent scans
     }));
 
@@ -143,8 +157,8 @@ const getTarget = async (req, res) => {
     // Parse JSON fields
     const targetData = {
       ...target,
-      stats: target.stats ? JSON.parse(target.stats) : { subdomains: 0, ports: 0, vulnerabilities: 0 },
-      tags: target.tags ? JSON.parse(target.tags) : []
+      stats: safeJsonParse(target.stats, { subdomains: 0, ports: 0, vulnerabilities: 0 }),
+      tags: safeJsonParse(target.tags, [])
     };
 
     res.json({
@@ -200,8 +214,8 @@ const updateTarget = async (req, res) => {
     // Parse JSON fields for response
     const targetData = {
       ...updatedTarget,
-      stats: updatedTarget.stats ? JSON.parse(updatedTarget.stats) : { subdomains: 0, ports: 0, vulnerabilities: 0 },
-      tags: updatedTarget.tags ? JSON.parse(updatedTarget.tags) : []
+      stats: safeJsonParse(updatedTarget.stats, { subdomains: 0, ports: 0, vulnerabilities: 0 }),
+      tags: safeJsonParse(updatedTarget.tags, [])
     };
 
     res.json({
