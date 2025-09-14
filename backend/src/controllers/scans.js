@@ -3,6 +3,20 @@ const ScanJob = require('../models/ScanJob');
 const Target = require('../models/Target');
 const { validationResult, body } = require('express-validator');
 
+const safeJsonParse = (value, fallback = {}) => {
+     if (!value) return fallback;
+     if (typeof value === 'object') return value;
+     if (typeof value === 'string') {
+       try {
+         return JSON.parse(value);
+       } catch (error) {
+         console.warn('JSON parse error for value:', value, error.message);
+         return fallback;
+       }
+     }
+     return fallback;
+   };
+
 // Validation rules for starting a scan
 const scanValidation = [
   body('targetId')
@@ -156,9 +170,9 @@ const getJobs = async (req, res) => {
     const scansWithComputedFields = scans.map(scan => {
       const scanData = {
         ...scan,
-        config: scan.config ? JSON.parse(scan.config) : {},
-        results: scan.results ? JSON.parse(scan.results) : {},
-        scan_types: scan.scan_types ? JSON.parse(scan.scan_types) : []
+        config: safeJsonParse(scan.config, {}),
+        results: safeJsonParse(scan.results, {}),
+        scan_types: safeJsonParse(scan.scan_types, [])
       };
       
       // Calculate duration
