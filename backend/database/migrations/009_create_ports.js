@@ -1,4 +1,4 @@
-// backend/database/migrations/009_create_ports.js
+// backend/database/migrations/009_create_ports.js - FIXED VERSION
 exports.up = function(knex) {
   return knex.schema.createTable('ports', function(table) {
     table.increments('id').primary();
@@ -11,7 +11,7 @@ exports.up = function(knex) {
     table.text('banner');
     table.json('service_info').defaultTo(JSON.stringify({}));
     table.integer('scan_job_id');
-    table.timestamps(true, true);
+    table.timestamps(true, true); // This creates created_at and updated_at with proper defaults
     
     // Indexes
     table.index(['subdomain_id']);
