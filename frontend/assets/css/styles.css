@@ -253,14 +253,24 @@ body {
 }
 
 .btn-success {
-    background-color: #000000;
+    background-color: #001100;
     border-color: #00aa00;
     color: #00aa00;
+    position: relative;
 }
 
 .btn-success:hover {
     background-color: #00aa00;
     color: #000000;
+    box-shadow: 0 0 15px rgba(0, 170, 0, 0.5);
+}
+
+.btn-success:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    background-color: #000000;
+    border-color: #003300;
+    color: #003300;
 }
 
 .btn-danger {
@@ -282,6 +292,19 @@ body {
 .btn:disabled {
     opacity: 0.5;
     cursor: not-allowed;
+}
+
+/* Enhanced spinner for bulk check button */
+.btn .spinner {
+    width: 16px;
+    height: 16px;
+    border: 2px solid #003300;
+    border-top: 2px solid #00ff00;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    display: inline-block;
+    margin-right: 6px;
+    vertical-align: middle;
 }
 
 /* Tables */
@@ -330,6 +353,33 @@ body {
 .table a:hover {
     color: #ffffff;
     text-decoration: underline;
+}
+
+/* Enhanced table cell styling for IP addresses */
+.table td[style*="courier"] {
+    font-family: 'Courier New', monospace !important;
+    font-size: 13px;
+    color: #00cc00;
+    word-break: break-all;
+}
+
+/* Title cell with ellipsis */
+.table td[style*="ellipsis"] {
+    max-width: 200px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Improved button spacing for actions column */
+.table td button {
+    margin: 2px;
+}
+
+/* Loading state for table rows */
+.table tbody tr.checking {
+    background-color: #001100;
+    animation: pulse 2s ease-in-out infinite;
 }
 
 /* Cards */
@@ -440,11 +490,13 @@ body {
 .status-active {
     border-color: #00ff00;
     color: #00ff00;
+    background-color: rgba(0, 255, 0, 0.1);
 }
 
 .status-inactive {
     border-color: #666666;
     color: #666666;
+    background-color: rgba(102, 102, 102, 0.1);
 }
 
 /* Severity badges */
@@ -488,6 +540,18 @@ body {
     padding: 15px;
     border: 1px solid #003300;
     background-color: #0a0a0a;
+    background: linear-gradient(90deg, #0a0a0a 0%, #001100 50%, #0a0a0a 100%);
+    position: relative;
+}
+
+.filters::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, #00ff00, transparent);
 }
 
 .filter-group {
@@ -534,6 +598,108 @@ body {
     letter-spacing: 2px;
 }
 
+/* Progress bar container for bulk checking */
+#check-all-progress {
+    background-color: #001100;
+    border: 2px solid #00ff00;
+    padding: 15px;
+    margin-bottom: 15px;
+    font-family: 'Courier New', monospace;
+    position: relative;
+}
+
+#check-all-progress::before {
+    content: '⚡ ';
+    color: #00ff00;
+    font-weight: bold;
+    margin-right: 8px;
+}
+
+/* Progress bar styling */
+#progress-bar {
+    background-color: #00ff00;
+    height: 100%;
+    transition: width 0.3s ease;
+    position: relative;
+    min-width: 2px;
+}
+
+#progress-bar::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 4px;
+    height: 100%;
+    background-color: #ffffff;
+    box-shadow: 0 0 8px #00ff00;
+}
+
+/* Progress text styling */
+#progress-text {
+    font-size: 13px;
+    color: #00cc00;
+    margin-top: 8px;
+    letter-spacing: 1px;
+}
+
+/* Status span styling */
+#check-all-status {
+    font-family: 'Courier New', monospace;
+    font-weight: bold;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+/* IP address styling improvements */
+.ip-address {
+    font-family: 'Courier New', monospace;
+    color: #00cc00;
+    font-size: 13px;
+    background-color: rgba(0, 204, 0, 0.05);
+    padding: 2px 4px;
+    border-radius: 2px;
+    border: 1px solid rgba(0, 204, 0, 0.2);
+}
+
+/* Title column with better truncation */
+.subdomain-title {
+    max-width: 200px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    cursor: help;
+    color: #00cc00;
+}
+
+.subdomain-title:hover {
+    color: #00ff00;
+    background-color: rgba(0, 255, 0, 0.05);
+}
+
+/* Last seen date styling */
+.last-seen {
+    font-size: 12px;
+    color: #006600;
+    font-style: italic;
+}
+
+/* Tooltip for truncated titles */
+.subdomain-title[title]:hover::after {
+    content: attr(title);
+    position: absolute;
+    background-color: #000000;
+    color: #00ff00;
+    border: 2px solid #00ff00;
+    padding: 8px 12px;
+    font-size: 13px;
+    white-space: nowrap;
+    z-index: 1000;
+    margin-top: 25px;
+    margin-left: -50px;
+    box-shadow: 0 0 10px rgba(0, 255, 0, 0.3);
+}
+
 /* Messages */
 .message {
     padding: 12px 15px;
@@ -575,6 +741,17 @@ body {
     100% { transform: rotate(360deg); }
 }
 
+/* Pulse animation for checking status */
+@keyframes pulse {
+    0% { opacity: 1; }
+    50% { opacity: 0.6; }
+    100% { opacity: 1; }
+}
+
+.checking-status {
+    animation: pulse 1.5s ease-in-out infinite;
+}
+
 /* Pagination */
 .pagination {
     display: flex;
@@ -582,6 +759,12 @@ body {
     justify-content: center;
     margin-top: 20px;
     flex-wrap: wrap;
+}
+
+/* Enhanced pagination for subdomains */
+.pagination .btn {
+    min-width: 40px;
+    justify-content: center;
 }
 
 /* Target stats styling */
@@ -647,5 +830,25 @@ body {
     
     .table-container {
         overflow-x: auto;
+    }
+    
+    /* Hide less important columns on mobile for subdomains table */
+    .table th:nth-child(5),
+    .table td:nth-child(5),
+    .table th:nth-child(6),
+    .table td:nth-child(6),
+    .table th:nth-child(7),
+    .table td:nth-child(7) {
+        display: none;
+    }
+    
+    #check-all-progress {
+        padding: 10px;
+        font-size: 12px;
+    }
+    
+    .btn-success {
+        font-size: 12px;
+        padding: 8px 12px;
     }
 }

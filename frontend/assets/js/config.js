@@ -1,4 +1,4 @@
-// assets/js/config.js
+// frontend/assets/js/config.js
 const CONFIG = {
     API_BASE: 'http://localhost:3001/api/v1',
     

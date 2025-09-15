@@ -1,4 +1,4 @@
-// assets/js/modules/subdomains.js
+// frontend/assets/js/modules/subdomains.js
 
 const Subdomains = {
     async init() {
@@ -34,10 +34,25 @@ const Subdomains = {
 
             <div class="card">
                 <div class="card-title">Discovered Subdomains</div>
-                <div style="margin-bottom: 15px;">
-                    <button onclick="Subdomains.checkAllLive()" class="btn btn-success btn-small" id="check-all-btn">Check All Live</button>
-                    <span id="check-all-status" style="margin-left: 10px; color: #006600; font-size: 13px;"></span>
+                
+                <!-- Check All Live Button Section -->
+                <div style="margin-bottom: 15px; display: flex; align-items: center; gap: 15px;">
+                    <button onclick="Subdomains.checkAllLive()" class="btn btn-success btn-small" id="check-all-btn">
+                        🌐 Check All Live
+                    </button>
+                    <span id="check-all-status" style="color: #006600; font-size: 13px; font-family: 'Courier New', monospace;"></span>
                 </div>
+                
+                <!-- Progress Bar for Bulk Checking -->
+                <div id="check-all-progress" style="display: none; margin-bottom: 15px; padding: 15px; border: 2px solid #00ff00; background-color: #001100;">
+                    <div style="margin-bottom: 8px;">
+                        <div style="background-color: #003300; border: 1px solid #00ff00; height: 12px; width: 100%;">
+                            <div id="progress-bar" style="background-color: #00ff00; height: 100%; width: 0%; transition: width 0.3s ease;"></div>
+                        </div>
+                    </div>
+                    <div id="progress-text" style="font-size: 13px; color: #00cc00; font-family: 'Courier New', monospace;"></div>
+                </div>
+
                 <div class="table-container">
                     <table class="table">
                         <thead>
@@ -48,12 +63,13 @@ const Subdomains = {
                                 <th>HTTP Status</th>
                                 <th>IP Address</th>
                                 <th>Title</th>
+                                <th>Last Seen</th>
                                 <th>Actions</th>
                             </tr>
                         </thead>
                         <tbody id="subdomains-list">
                             <tr>
-                                <td colspan="7" style="text-align: center; color: #006600;">Loading subdomains...</td>
+                                <td colspan="8" style="text-align: center; color: #006600;">Loading subdomains...</td>
                             </tr>
                         </tbody>
                     </table>
@@ -100,7 +116,7 @@ const Subdomains = {
             if (!response.ok) {
                 console.error('Failed to fetch subdomains:', response.status);
                 document.getElementById('subdomains-list').innerHTML = 
-                    '<tr><td colspan="7" style="text-align: center; color: #ff0000;">Failed to load subdomains - check if backend is running</td></tr>';
+                    '<tr><td colspan="8" style="text-align: center; color: #ff0000;">Failed to load subdomains - check if backend is running</td></tr>';
                 return;
             }
             
@@ -122,7 +138,7 @@ const Subdomains = {
         } catch (error) {
             console.error('Failed to load subdomains:', error);
             document.getElementById('subdomains-list').innerHTML = 
-                '<tr><td colspan="7" style="text-align: center; color: #ff0000;">Error loading subdomains</td></tr>';
+                '<tr><td colspan="8" style="text-align: center; color: #ff0000;">Error loading subdomains</td></tr>';
         }
     },
 
@@ -136,15 +152,16 @@ const Subdomains = {
                     <td>${subdomain.target_domain}</td>
                     <td><span class="status status-${subdomain.status}">${subdomain.status}</span></td>
                     <td>${subdomain.http_status || '-'}</td>
-                    <td>${subdomain.ip_address || '-'}</td>
-                    <td>${subdomain.title || '-'}</td>
+                    <td style="font-family: 'Courier New', monospace; color: #00cc00;">${subdomain.ip_address || '-'}</td>
+                    <td style="max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${subdomain.title || ''}">${subdomain.title || '-'}</td>
+                    <td style="font-size: 12px; color: #006600;">${subdomain.last_seen ? new Date(subdomain.last_seen).toLocaleDateString() : '-'}</td>
                     <td>
                         <button onclick="Subdomains.checkLive(${subdomain.id})" class="btn btn-secondary btn-small">Check Live</button>
                     </td>
                 </tr>
             `).join('');
         } else {
-            subdomainsList.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #006600;">No subdomains found. Run a subdomain scan to discover subdomains!</td></tr>';
+            subdomainsList.innerHTML = '<tr><td colspan="8" style="text-align: center; color: #006600;">No subdomains found. Run a subdomain scan to discover subdomains!</td></tr>';
         }
     },
 
@@ -174,6 +191,7 @@ const Subdomains = {
             checkAllBtn.disabled = true;
             checkAllBtn.innerHTML = '<span class="spinner"></span>Checking All Domains...';
             statusSpan.textContent = 'Preparing bulk live check...';
+            statusSpan.style.color = '#ffff00';
             progressContainer.style.display = 'block';
             progressBar.style.width = '0%';
             
@@ -214,9 +232,11 @@ const Subdomains = {
             let successCount = 0;
             let failedCount = 0;
             const startTime = Date.now();
+            const BATCH_SIZE = CONFIG.BULK_CHECK_BATCH_SIZE || 5;
+            const BATCH_DELAY = CONFIG.BULK_CHECK_DELAY || 1000;
             
-            for (let i = 0; i < subdomains.length; i += CONFIG.BULK_CHECK_BATCH_SIZE) {
-                const batch = subdomains.slice(i, i + CONFIG.BULK_CHECK_BATCH_SIZE);
+            for (let i = 0; i < subdomains.length; i += BATCH_SIZE) {
+                const batch = subdomains.slice(i, i + BATCH_SIZE);
                 
                 // Process batch in parallel
                 const batchPromises = batch.map(async (subdomain) => {
@@ -250,8 +270,8 @@ const Subdomains = {
                 await Promise.all(batchPromises);
                 
                 // Small delay between batches to be respectful to the server
-                if (i + CONFIG.BULK_CHECK_BATCH_SIZE < subdomains.length) {
-                    await new Promise(resolve => setTimeout(resolve, CONFIG.BULK_CHECK_DELAY));
+                if (i + BATCH_SIZE < subdomains.length) {
+                    await new Promise(resolve => setTimeout(resolve, BATCH_DELAY));
                 }
             }
             
@@ -277,7 +297,7 @@ const Subdomains = {
         } finally {
             // Re-enable button
             checkAllBtn.disabled = false;
-            checkAllBtn.innerHTML = '🌐 Check All Live Domains';
+            checkAllBtn.innerHTML = '🌐 Check All Live';
             
             // Hide progress after delay
             setTimeout(() => {

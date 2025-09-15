@@ -91,14 +91,15 @@ services:
       retries: 3
       start_period: 40s
 
-  # Frontend (simple HTTP server)
+  # Frontend (nginx serving the frontend directory)
   frontend:
     image: nginx:alpine
     container_name: framework_frontend
     ports:
       - "3000:80"
     volumes:
-      - ./index.html:/usr/share/nginx/html/index.html:ro
+      # Mount the entire frontend directory, not just index.html
+      - ./frontend:/usr/share/nginx/html:ro
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
     restart: unless-stopped
     networks:
