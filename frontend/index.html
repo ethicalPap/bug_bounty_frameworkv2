@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bug Bounty Platform</title>
+    <link rel="stylesheet" href="assets/css/styles.css">
+</head>
+<body>
+    <!-- Authentication Form -->
+    <div id="auth-container" class="auth-container">
+        <div class="auth-form">
+            <h2 class="auth-title">🛡️ Bug Bounty Platform</h2>
+            <div id="auth-messages"></div>
+            <form id="auth-form">
+                <div class="form-group">
+                    <label for="email">Email</label>
+                    <input type="email" id="email" required>
+                </div>
+                <div class="form-group">
+                    <label for="password">Password</label>
+                    <input type="password" id="password" required>
+                </div>
+                <div id="register-fields" class="hidden">
+                    <div class="form-group">
+                        <label for="fullName">Full Name</label>
+                        <input type="text" id="fullName">
+                    </div>
+                    <div class="form-group">
+                        <label for="organizationName">Organization Name</label>
+                        <input type="text" id="organizationName">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <button type="submit" class="btn btn-primary" style="width: 100%;" id="auth-submit-btn">Login</button>
+                </div>
+                <div class="text-center">
+                    <button type="button" id="toggle-auth" class="btn btn-secondary">Register</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Main Dashboard -->
+    <div id="dashboard" class="container hidden">
+        <!-- Sidebar -->
+        <div class="sidebar">
+            <div class="logo">🛡️ Security Platform</div>
+            <div class="nav-item active" data-tab="targets">🎯 Targets</div>
+            <div class="nav-item" data-tab="dashboard">📊 Dashboard</div>
+            <div class="nav-item" data-tab="scans">🔍 Subdomain Scans</div>
+            <div class="nav-item" data-tab="subdomains">🌐 Subdomains</div>
+            <div class="nav-item" data-tab="directories">📁 Directories</div>
+            <div class="nav-item" data-tab="port-scanning">🔌 Port Scanning</div>
+            <div class="nav-item" data-tab="content-discovery">🔍 Content Discovery</div>
+            <div class="nav-item" data-tab="js-analysis">📄 JS Analysis</div>
+            <div class="nav-item" data-tab="api-discovery">🔗 API Discovery</div>
+            <div class="nav-item" data-tab="vuln-scanning">⚠️ Vuln Scanning</div>
+            <div class="nav-item" data-tab="settings">⚙️ Settings</div>
+            <div class="user-info">
+                <div id="user-name">Loading...</div>
+                <div style="margin-top: 12px;">
+                    <button onclick="logout()" class="btn btn-secondary btn-small">Logout</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Content -->
+        <div class="main">
+            <div class="header">
+                <h1 id="page-title">Targets</h1>
+                <div class="header-actions">
+                    <select id="global-target-filter">
+                        <option value="">All Targets</option>
+                    </select>
+                </div>
+            </div>
+            <div class="content" id="main-content">
+                <!-- Content will be loaded dynamically -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="assets/js/config.js"></script>
+    <script src="assets/js/utils.js"></script>
+    <script src="assets/js/api.js"></script>
+    <script src="assets/js/auth.js"></script>
+    <script src="assets/js/navigation.js"></script>
+    <script src="assets/js/modules/targets.js"></script>
+    <script src="assets/js/modules/dashboard.js"></script>
+    <script src="assets/js/modules/scans.js"></script>
+    <script src="assets/js/modules/subdomains.js"></script>
+    <script src="assets/js/modules/directories.js"></script>
+    <script src="assets/js/modules/vulnerabilities.js"></script>
+    <script src="assets/js/app.js"></script>
+</body>
+</html>
