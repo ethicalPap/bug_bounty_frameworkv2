@@ -397,6 +397,32 @@
             pointer-events: none;
         }
 
+        /* Error and success messages */
+        .message {
+            padding: 12px 16px;
+            border-radius: 8px;
+            margin-bottom: 16px;
+            font-weight: 500;
+        }
+
+        .message-error {
+            background-color: rgba(239, 68, 68, 0.1);
+            border: 1px solid #ef4444;
+            color: #fca5a5;
+        }
+
+        .message-success {
+            background-color: rgba(16, 185, 129, 0.1);
+            border: 1px solid #10b981;
+            color: #6ee7b7;
+        }
+
+        .message-warning {
+            background-color: rgba(245, 158, 11, 0.1);
+            border: 1px solid #f59e0b;
+            color: #fcd34d;
+        }
+
         /* Checkbox styles */
         .checkbox-group {
             display: grid;
@@ -423,71 +449,21 @@
             font-weight: 500;
         }
 
-        /* Pagination */
-        .pagination {
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            gap: 8px;
-            margin-top: 24px;
+        /* Loading spinner */
+        .spinner {
+            border: 3px solid #334155;
+            border-top: 3px solid #3b82f6;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            animation: spin 1s linear infinite;
+            display: inline-block;
+            margin-right: 8px;
         }
 
-        .pagination button {
-            padding: 8px 12px;
-            border: 1px solid #475569;
-            background-color: #1e293b;
-            color: #f8fafc;
-            border-radius: 6px;
-            cursor: pointer;
-        }
-
-        .pagination button:hover:not(:disabled) {
-            background-color: #334155;
-        }
-
-        .pagination button:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-        }
-
-        .pagination .active {
-            background-color: #3b82f6;
-            border-color: #3b82f6;
-        }
-
-        /* Target selector */
-        .target-selector {
-            background-color: #1e293b;
-            padding: 16px;
-            border-radius: 8px;
-            margin-bottom: 24px;
-            border: 1px solid #334155;
-        }
-
-        .target-stats {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-            gap: 16px;
-            margin-top: 16px;
-        }
-
-        .target-stat {
-            text-align: center;
-            padding: 12px;
-            background-color: #0f172a;
-            border-radius: 6px;
-        }
-
-        .target-stat-value {
-            font-size: 24px;
-            font-weight: bold;
-            color: #3b82f6;
-        }
-
-        .target-stat-label {
-            font-size: 12px;
-            color: #94a3b8;
-            margin-top: 4px;
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
         }
 
         /* Responsive */
@@ -516,6 +492,7 @@
     <div id="auth-container" class="auth-container">
         <div class="auth-form">
             <h2 class="auth-title">🛡️ Bug Bounty Platform</h2>
+            <div id="auth-messages"></div>
             <form id="auth-form">
                 <div class="form-group">
                     <label for="email">Email</label>
@@ -536,7 +513,7 @@
                     </div>
                 </div>
                 <div class="form-group">
-                    <button type="submit" class="btn btn-primary" style="width: 100%;">Login</button>
+                    <button type="submit" class="btn btn-primary" style="width: 100%;" id="auth-submit-btn">Login</button>
                 </div>
                 <div class="text-center">
                     <button type="button" id="toggle-auth" class="btn btn-secondary">Register</button>
@@ -616,6 +593,7 @@
                 <div id="tab-targets" class="tab-content hidden">
                     <div class="card">
                         <div class="card-title">Add New Target</div>
+                        <div id="target-messages"></div>
                         <form id="target-form" style="display: grid; grid-template-columns: 1fr 2fr auto; gap: 16px; align-items: end;">
                             <div class="form-group">
                                 <label for="target-domain">Domain</label>
@@ -625,7 +603,7 @@
                                 <label for="target-description">Description</label>
                                 <input type="text" id="target-description" placeholder="Target description">
                             </div>
-                            <button type="submit" class="btn btn-primary">Add Target</button>
+                            <button type="submit" class="btn btn-primary" id="add-target-btn">Add Target</button>
                         </form>
                     </div>
 
@@ -823,6 +801,7 @@
                 <div id="tab-scans" class="tab-content hidden">
                     <div class="card">
                         <div class="card-title">Start New Scan</div>
+                        <div id="scan-messages"></div>
                         <form id="scan-form">
                             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
                                 <div class="form-group">
@@ -869,7 +848,7 @@
                                     </div>
                                 </div>
                             </div>
-                            <button type="submit" class="btn btn-primary">🚀 Start Scan</button>
+                            <button type="submit" class="btn btn-primary" id="start-scan-btn">🚀 Start Scan</button>
                         </form>
                     </div>
 
@@ -913,7 +892,7 @@
                                 <option>Dark (Current)</option>
                             </select>
                         </div>
-                        <button class="btn btn-primary" onclick="alert('Settings saved!')">Save Settings</button>
+                        <button class="btn btn-primary" onclick="showMessage('Settings saved!', 'success')">Save Settings</button>
                     </div>
                 </div>
             </div>
@@ -930,24 +909,82 @@
             vulnerabilities: { page: 1, total: 0 }
         };
 
+        // Utility functions
+        function showMessage(message, type = 'info', containerId = 'auth-messages') {
+            const container = document.getElementById(containerId);
+            if (!container) return;
+            
+            const messageEl = document.createElement('div');
+            messageEl.className = `message message-${type}`;
+            messageEl.textContent = message;
+            
+            container.innerHTML = '';
+            container.appendChild(messageEl);
+            
+            setTimeout(() => {
+                if (messageEl.parentNode) {
+                    messageEl.parentNode.removeChild(messageEl);
+                }
+            }, 5000);
+        }
+
+        function setButtonLoading(buttonId, loading = true) {
+            const button = document.getElementById(buttonId);
+            if (!button) return;
+            
+            if (loading) {
+                button.disabled = true;
+                button.innerHTML = '<span class="spinner"></span>Loading...';
+            } else {
+                button.disabled = false;
+                // Restore original text based on button ID
+                const originalTexts = {
+                    'auth-submit-btn': isRegistering ? 'Register' : 'Login',
+                    'add-target-btn': 'Add Target',
+                    'start-scan-btn': '🚀 Start Scan'
+                };
+                button.innerHTML = originalTexts[buttonId] || 'Submit';
+            }
+        }
+
+        function safeJsonParse(value, fallback = {}) {
+            if (!value) return fallback;
+            if (typeof value === 'object') return value;
+            if (typeof value === 'string') {
+                try {
+                    return JSON.parse(value);
+                } catch (error) {
+                    console.warn('JSON parse error for value:', value, error.message);
+                    return fallback;
+                }
+            }
+            return fallback;
+        }
+
         // Authentication
         document.getElementById('auth-form').addEventListener('submit', async (e) => {
             e.preventDefault();
+            setButtonLoading('auth-submit-btn', true);
+            
             const email = document.getElementById('email').value;
             const password = document.getElementById('password').value;
             
-            if (isRegistering) {
-                const fullName = document.getElementById('fullName').value;
-                const organizationName = document.getElementById('organizationName').value;
-                await register(email, password, fullName, organizationName);
-            } else {
-                await login(email, password);
+            try {
+                if (isRegistering) {
+                    const fullName = document.getElementById('fullName').value;
+                    const organizationName = document.getElementById('organizationName').value;
+                    await register(email, password, fullName, organizationName);
+                } else {
+                    await login(email, password);
+                }
+            } finally {
+                setButtonLoading('auth-submit-btn', false);
             }
         });
 
         document.getElementById('toggle-auth').addEventListener('click', () => {
             const registerFields = document.getElementById('register-fields');
-            const submitBtn = document.querySelector('#auth-form button[type="submit"]');
+            const submitBtn = document.getElementById('auth-submit-btn');
             const toggleBtn = document.getElementById('toggle-auth');
             
             if (isRegistering) {
@@ -970,17 +1007,19 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ email, password })
                 });
+                
                 const data = await response.json();
                 
-                if (data.user) {
+                if (response.ok && data.user) {
                     localStorage.setItem('token', data.accessToken);
                     currentUser = data.user;
                     showDashboard();
                 } else {
-                    alert('Login failed: ' + (data.error || 'Unknown error'));
+                    showMessage('Login failed: ' + (data.error || data.message || 'Unknown error'), 'error');
                 }
             } catch (error) {
-                alert('Login failed: ' + error.message);
+                console.error('Login error:', error);
+                showMessage('Login failed: ' + error.message, 'error');
             }
         }
 
@@ -991,17 +1030,19 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ email, password, fullName, organizationName })
                 });
+                
                 const data = await response.json();
                 
-                if (data.user) {
+                if (response.ok && data.user) {
                     localStorage.setItem('token', data.accessToken);
                     currentUser = data.user;
                     showDashboard();
                 } else {
-                    alert('Registration failed: ' + (data.error || 'Unknown error'));
+                    showMessage('Registration failed: ' + (data.error || data.message || 'Unknown error'), 'error');
                 }
             } catch (error) {
-                alert('Registration failed: ' + error.message);
+                console.error('Registration error:', error);
+                showMessage('Registration failed: ' + error.message, 'error');
             }
         }
 
@@ -1022,15 +1063,28 @@
         // API helper
         async function apiCall(endpoint, options = {}) {
             const token = localStorage.getItem('token');
-            const response = await fetch(`${API_BASE}${endpoint}`, {
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json',
-                    ...options.headers
-                },
-                ...options
-            });
-            return response;
+            
+            try {
+                const response = await fetch(`${API_BASE}${endpoint}`, {
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json',
+                        ...options.headers
+                    },
+                    ...options
+                });
+                
+                if (response.status === 401) {
+                    // Token expired, redirect to login
+                    logout();
+                    return null;
+                }
+                
+                return response;
+            } catch (error) {
+                console.error('API call failed:', error);
+                throw error;
+            }
         }
 
         // Navigation
@@ -1091,25 +1145,24 @@
 
         // Load dashboard data
         async function loadDashboardData() {
-            await Promise.all([
-                loadTargets(),
-                loadDashboardStats(),
-                updateGlobalTargetFilter()
-            ]);
+            try {
+                await Promise.all([
+                    loadTargets(),
+                    loadDashboardStats(),
+                    updateGlobalTargetFilter()
+                ]);
+            } catch (error) {
+                console.error('Failed to load dashboard data:', error);
+            }
         }
 
         async function loadDashboardStats() {
             try {
-                const [targetsRes, scansRes] = await Promise.all([
-                    apiCall('/targets'),
-                    apiCall('/scans/jobs')
-                ]);
+                const targetsResponse = await apiCall('/targets');
+                if (!targetsResponse) return;
                 
-                const targetsData = await targetsRes.json();
-                const scansData = await scansRes.json();
-                
+                const targetsData = await targetsResponse.json();
                 const targets = targetsData.success ? targetsData.data : [];
-                const scans = scansData.success ? scansData.data : [];
                 
                 // Update basic stats
                 document.getElementById('total-targets').textContent = targets.length;
@@ -1120,26 +1173,26 @@
                 let totalVulnerabilities = 0;
 
                 const targetOverviewHtml = targets.map(target => {
-                    const targetStats = target.stats ? JSON.parse(target.stats) : {};
+                    const targetStats = safeJsonParse(target.stats, {});
                     totalSubdomains += targetStats.subdomains || 0;
                     totalDirectories += targetStats.discovered_paths || 0;
                     totalVulnerabilities += targetStats.vulnerabilities || 0;
 
                     return `
-                        <div class="target-stat">
+                        <div class="target-stat" style="background: #1e293b; padding: 16px; border-radius: 8px; border: 1px solid #334155;">
                             <div style="font-weight: bold; color: #3b82f6; margin-bottom: 8px;">${target.domain}</div>
-                            <div class="target-stats">
-                                <div class="target-stat">
-                                    <div class="target-stat-value">${targetStats.subdomains || 0}</div>
-                                    <div class="target-stat-label">Subdomains</div>
+                            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;">
+                                <div style="text-align: center;">
+                                    <div style="font-size: 20px; font-weight: bold; color: #10b981;">${targetStats.subdomains || 0}</div>
+                                    <div style="font-size: 12px; color: #94a3b8;">Subdomains</div>
                                 </div>
-                                <div class="target-stat">
-                                    <div class="target-stat-value">${targetStats.discovered_paths || 0}</div>
-                                    <div class="target-stat-label">Directories</div>
+                                <div style="text-align: center;">
+                                    <div style="font-size: 20px; font-weight: bold; color: #f59e0b;">${targetStats.discovered_paths || 0}</div>
+                                    <div style="font-size: 12px; color: #94a3b8;">Directories</div>
                                 </div>
-                                <div class="target-stat">
-                                    <div class="target-stat-value">${targetStats.vulnerabilities || 0}</div>
-                                    <div class="target-stat-label">Vulnerabilities</div>
+                                <div style="text-align: center;">
+                                    <div style="font-size: 20px; font-weight: bold; color: #ef4444;">${targetStats.vulnerabilities || 0}</div>
+                                    <div style="font-size: 12px; color: #94a3b8;">Vulnerabilities</div>
                                 </div>
                             </div>
                         </div>
@@ -1155,27 +1208,38 @@
                         '<div style="display: grid; gap: 20px;">' + targetOverviewHtml + '</div>';
                 } else {
                     document.getElementById('target-overview').innerHTML = 
-                        '<p style="color: #94a3b8;">No targets configured yet.</p>';
+                        '<p style="color: #94a3b8;">No targets configured yet. Add a target to get started!</p>';
                 }
 
-                // Recent activity
-                const recentActivity = document.getElementById('recent-activity');
-                const recentScans = scans.slice(0, 5);
-                if (recentScans.length > 0) {
-                    recentActivity.innerHTML = recentScans.map(scan => 
-                        `<div style="padding: 12px 0; border-bottom: 1px solid #334155; display: flex; justify-content: space-between; align-items: center;">
-                            <div>
-                                <strong style="color: #f8fafc;">${scan.domain || 'Unknown Target'}</strong>
-                                <span style="color: #94a3b8;"> - ${scan.job_type || 'Unknown Scan'}</span>
-                            </div>
-                            <span class="status status-${scan.status}">${scan.status}</span>
-                        </div>`
-                    ).join('');
-                } else {
-                    recentActivity.innerHTML = '<p style="color: #94a3b8;">No recent activity</p>';
+                // Load recent activity
+                try {
+                    const scansResponse = await apiCall('/scans/jobs?limit=5');
+                    if (scansResponse && scansResponse.ok) {
+                        const scansData = await scansResponse.json();
+                        const recentScans = scansData.success ? scansData.data : [];
+                        
+                        const recentActivity = document.getElementById('recent-activity');
+                        if (recentScans.length > 0) {
+                            recentActivity.innerHTML = recentScans.map(scan => 
+                                `<div style="padding: 12px 0; border-bottom: 1px solid #334155; display: flex; justify-content: space-between; align-items: center;">
+                                    <div>
+                                        <strong style="color: #f8fafc;">${scan.domain || 'Unknown Target'}</strong>
+                                        <span style="color: #94a3b8;"> - ${scan.job_type || 'Unknown Scan'}</span>
+                                    </div>
+                                    <span class="status status-${scan.status}">${scan.status}</span>
+                                </div>`
+                            ).join('');
+                        } else {
+                            recentActivity.innerHTML = '<p style="color: #94a3b8;">No recent scan activity</p>';
+                        }
+                    }
+                } catch (error) {
+                    document.getElementById('recent-activity').innerHTML = '<p style="color: #94a3b8;">Recent activity unavailable</p>';
                 }
+                
             } catch (error) {
                 console.error('Failed to load dashboard stats:', error);
+                showMessage('Failed to load dashboard statistics', 'error');
             }
         }
 
@@ -1183,6 +1247,8 @@
         async function loadTargets() {
             try {
                 const response = await apiCall('/targets');
+                if (!response) return;
+                
                 const data = await response.json();
                 const targets = data.success ? data.data : [];
                 
@@ -1190,7 +1256,7 @@
                 const targetsList = document.getElementById('targets-list');
                 if (targets.length > 0) {
                     targetsList.innerHTML = targets.map(target => {
-                        const stats = target.stats ? JSON.parse(target.stats) : {};
+                        const stats = safeJsonParse(target.stats, {});
                         return `
                             <tr>
                                 <td style="font-weight: 600; color: #3b82f6;">${target.domain}</td>
@@ -1209,7 +1275,7 @@
                         `;
                     }).join('');
                 } else {
-                    targetsList.innerHTML = '<tr><td colspan="6" style="text-align: center; color: #94a3b8;">No targets yet</td></tr>';
+                    targetsList.innerHTML = '<tr><td colspan="6" style="text-align: center; color: #94a3b8;">No targets yet. Add your first target above!</td></tr>';
                 }
 
                 // Update all target dropdowns
@@ -1217,6 +1283,7 @@
                     
             } catch (error) {
                 console.error('Failed to load targets:', error);
+                document.getElementById('targets-list').innerHTML = '<tr><td colspan="6" style="text-align: center; color: #ef4444;">Failed to load targets</td></tr>';
             }
         }
 
@@ -1247,41 +1314,23 @@
         }
 
         async function updateGlobalTargetFilter() {
-            const response = await apiCall('/targets');
-            const data = await response.json();
-            const targets = data.success ? data.data : [];
-            updateTargetDropdowns(targets);
+            try {
+                const response = await apiCall('/targets');
+                if (!response) return;
+                
+                const data = await response.json();
+                const targets = data.success ? data.data : [];
+                updateTargetDropdowns(targets);
+            } catch (error) {
+                console.error('Failed to update target filter:', error);
+            }
         }
 
-        // Global target filter change
-        document.getElementById('global-target-filter').addEventListener('change', (e) => {
-            const selectedTargetId = e.target.value;
-            
-            // Update other filter dropdowns to match
-            ['subdomain-target-filter', 'directory-target-filter', 'vuln-target-filter'].forEach(filterId => {
-                const filter = document.getElementById(filterId);
-                if (filter) {
-                    filter.value = selectedTargetId;
-                }
-            });
-            
-            // Reload current tab data with the new filter
-            const activeTab = document.querySelector('.nav-item.active').dataset.tab;
-            switch(activeTab) {
-                case 'subdomains':
-                    loadSubdomains();
-                    break;
-                case 'directories':
-                    loadDirectories();
-                    break;
-                case 'vulnerabilities':
-                    loadVulnerabilities();
-                    break;
-            }
-        });
-
+        // Target form submission
         document.getElementById('target-form').addEventListener('submit', async (e) => {
             e.preventDefault();
+            setButtonLoading('add-target-btn', true);
+            
             const domain = document.getElementById('target-domain').value;
             const description = document.getElementById('target-description').value;
             
@@ -1291,26 +1340,33 @@
                     body: JSON.stringify({ domain, description })
                 });
                 
-                if (response.ok) {
+                if (response && response.ok) {
                     document.getElementById('target-form').reset();
                     loadTargets();
-                    alert('Target added successfully!');
+                    showMessage('Target added successfully!', 'success', 'target-messages');
                 } else {
                     const errorData = await response.json();
-                    alert('Failed to add target: ' + (errorData.error || errorData.message || 'Unknown error'));
+                    showMessage('Failed to add target: ' + (errorData.error || errorData.message || 'Unknown error'), 'error', 'target-messages');
                 }
             } catch (error) {
-                alert('Failed to add target: ' + error.message);
+                showMessage('Failed to add target: ' + error.message, 'error', 'target-messages');
+            } finally {
+                setButtonLoading('add-target-btn', false);
             }
         });
 
         async function deleteTarget(id) {
             if (confirm('Are you sure you want to delete this target?')) {
                 try {
-                    await apiCall(`/targets/${id}`, { method: 'DELETE' });
-                    loadTargets();
+                    const response = await apiCall(`/targets/${id}`, { method: 'DELETE' });
+                    if (response && response.ok) {
+                        loadTargets();
+                        showMessage('Target deleted successfully!', 'success', 'target-messages');
+                    } else {
+                        showMessage('Failed to delete target', 'error', 'target-messages');
+                    }
                 } catch (error) {
-                    alert('Failed to delete target: ' + error.message);
+                    showMessage('Failed to delete target: ' + error.message, 'error', 'target-messages');
                 }
             }
         }
@@ -1332,6 +1388,7 @@
                 if (search) params.append('search', search);
 
                 const response = await apiCall(`/subdomains?${params}`);
+                if (!response) return;
                 
                 if (!response.ok) {
                     console.error('Failed to fetch subdomains:', response.status);
@@ -1347,11 +1404,8 @@
                     currentPageData.subdomains = { page, total: data.pagination.total };
                     
                     const subdomainsList = document.getElementById('subdomains-list');
-                    const instructionsEl = document.getElementById('subdomains-instructions');
                     
                     if (subdomains.length > 0) {
-                        // Hide instructions and show data
-                        if (instructionsEl) instructionsEl.style.display = 'none';
                         subdomainsList.innerHTML = subdomains.map(subdomain => `
                             <tr>
                                 <td style="font-weight: 600; color: #3b82f6;">${subdomain.subdomain}</td>
@@ -1362,16 +1416,13 @@
                                 <td>${subdomain.title || '-'}</td>
                                 <td>
                                     <button onclick="checkSubdomainLive(${subdomain.id})" class="btn btn-secondary btn-small">Check Live</button>
-                                    <button onclick="scanDirectories(${subdomain.id})" class="btn btn-primary btn-small">Scan Dirs</button>
                                 </td>
                             </tr>
                         `).join('');
                         
                         updatePagination('subdomains', data.pagination);
                     } else {
-                        // Show instructions and hide pagination
-                        if (instructionsEl) instructionsEl.style.display = 'block';
-                        subdomainsList.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #94a3b8;">No subdomains found</td></tr>';
+                        subdomainsList.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #94a3b8;">No subdomains found. Run a subdomain scan to discover subdomains!</td></tr>';
                         const paginationEl = document.getElementById('subdomains-pagination');
                         if (paginationEl) paginationEl.innerHTML = '';
                     }
@@ -1380,33 +1431,6 @@
                 console.error('Failed to load subdomains:', error);
                 document.getElementById('subdomains-list').innerHTML = 
                     '<tr><td colspan="7" style="text-align: center; color: #ef4444;">Error loading subdomains</td></tr>';
-            }
-        }
-
-        // Filter event listeners for subdomains
-        ['subdomain-target-filter', 'subdomain-status-filter'].forEach(filterId => {
-            document.getElementById(filterId).addEventListener('change', () => loadSubdomains(1));
-        });
-
-        document.getElementById('subdomain-search').addEventListener('input', debounce(() => loadSubdomains(1), 500));
-
-        async function checkSubdomainLive(id) {
-            try {
-                const response = await apiCall(`/subdomains/${id}/check-live`, { method: 'POST' });
-                if (response.ok) {
-                    loadSubdomains(currentPageData.subdomains.page);
-                    alert('Live status check completed!');
-                } else {
-                    alert('Failed to check live status');
-                }
-            } catch (error) {
-                alert('Failed to check live status: ' + error.message);
-            }
-        }
-
-        async function checkAllSubdomainsLive() {
-            if (confirm('This will check the live status of all visible subdomains. Continue?')) {
-                alert('Bulk live checking would be implemented here - checking all subdomains with httpx');
             }
         }
 
@@ -1429,6 +1453,8 @@
                 if (search) params.append('search', search);
 
                 const response = await apiCall(`/directories?${params}`);
+                if (!response) return;
+                
                 const data = await response.json();
                 
                 if (data.success) {
@@ -1436,11 +1462,8 @@
                     currentPageData.directories = { page, total: data.pagination.total };
                     
                     const directoriesList = document.getElementById('directories-list');
-                    const instructionsEl = document.getElementById('directories-instructions');
                     
                     if (directories.length > 0) {
-                        // Hide instructions and show data
-                        instructionsEl.style.display = 'none';
                         directoriesList.innerHTML = directories.map(directory => `
                             <tr>
                                 <td style="font-family: monospace; color: #3b82f6;">${directory.path}</td>
@@ -1458,9 +1481,7 @@
                         
                         updatePagination('directories', data.pagination);
                     } else {
-                        // Show instructions
-                        instructionsEl.style.display = 'block';
-                        directoriesList.innerHTML = '<tr><td colspan="6" style="text-align: center; color: #94a3b8;">No directories found</td></tr>';
+                        directoriesList.innerHTML = '<tr><td colspan="6" style="text-align: center; color: #94a3b8;">No directories found. Run a content discovery scan to find directories!</td></tr>';
                         document.getElementById('directories-pagination').innerHTML = '';
                     }
                 }
@@ -1468,43 +1489,6 @@
                 console.error('Failed to load directories:', error);
                 document.getElementById('directories-list').innerHTML = 
                     '<tr><td colspan="6" style="text-align: center; color: #ef4444;">Failed to load directories</td></tr>';
-            }
-        }
-
-        // Filter event listeners for directories
-        ['directory-target-filter', 'directory-subdomain-filter', 'directory-status-filter'].forEach(filterId => {
-            document.getElementById(filterId).addEventListener('change', () => loadDirectories(1));
-        });
-
-        document.getElementById('directory-search').addEventListener('input', debounce(() => loadDirectories(1), 500));
-
-        async function scanAllDirectories() {
-            if (confirm('This will start directory scanning for all active subdomains. Continue?')) {
-                alert('Bulk directory scanning would be implemented here - running content discovery on all active subdomains');
-            }
-        }
-
-        // Ports
-        async function loadPorts(page = 1) {
-            try {
-                // Since ports table might not exist yet, show instructions
-                const portsInstructionsEl = document.getElementById('ports-instructions');
-                const portsList = document.getElementById('ports-list');
-                
-                portsInstructionsEl.style.display = 'block';
-                portsList.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #94a3b8;">No ports discovered yet</td></tr>';
-                document.getElementById('ports-pagination').innerHTML = '';
-                
-            } catch (error) {
-                console.error('Failed to load ports:', error);
-                document.getElementById('ports-list').innerHTML = 
-                    '<tr><td colspan="7" style="text-align: center; color: #ef4444;">Failed to load ports</td></tr>';
-            }
-        }
-
-        async function scanAllPorts() {
-            if (confirm('This will start port scanning for all active subdomains. Continue?')) {
-                alert('Bulk port scanning would be implemented here - running nmap on all active subdomains');
             }
         }
 
@@ -1525,6 +1509,8 @@
                 if (status) params.append('status', status);
 
                 const response = await apiCall(`/vulnerabilities?${params}`);
+                if (!response) return;
+                
                 const data = await response.json();
                 
                 if (data.success) {
@@ -1532,11 +1518,8 @@
                     currentPageData.vulnerabilities = { page, total: data.pagination.total };
                     
                     const vulnerabilitiesList = document.getElementById('vulnerabilities-list');
-                    const instructionsEl = document.getElementById('vulnerabilities-instructions');
                     
                     if (vulnerabilities.length > 0) {
-                        // Hide instructions and show data
-                        instructionsEl.style.display = 'none';
                         vulnerabilitiesList.innerHTML = vulnerabilities.map(vuln => `
                             <tr>
                                 <td style="font-weight: 600;">${vuln.title}</td>
@@ -1555,9 +1538,7 @@
                         
                         updatePagination('vulnerabilities', data.pagination);
                     } else {
-                        // Show instructions
-                        instructionsEl.style.display = 'block';
-                        vulnerabilitiesList.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #94a3b8;">No vulnerabilities found</td></tr>';
+                        vulnerabilitiesList.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #94a3b8;">No vulnerabilities found. Run a vulnerability scan to discover issues!</td></tr>';
                         document.getElementById('vulnerabilities-pagination').innerHTML = '';
                     }
                 }
@@ -1568,15 +1549,12 @@
             }
         }
 
-        // Filter event listeners for vulnerabilities
-        ['vuln-target-filter', 'vuln-severity-filter', 'vuln-status-filter'].forEach(filterId => {
-            document.getElementById(filterId).addEventListener('change', () => loadVulnerabilities(1));
-        });
-
         // Scans
         async function loadScans() {
             try {
                 const response = await apiCall('/scans/jobs');
+                if (!response) return;
+                
                 const data = await response.json();
                 const scans = data.success ? data.data : [];
                 
@@ -1606,7 +1584,7 @@
                         </tr>
                     `).join('');
                 } else {
-                    scansList.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #94a3b8;">No scans yet</td></tr>';
+                    scansList.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #94a3b8;">No scans yet. Start your first scan above!</td></tr>';
                 }
             } catch (error) {
                 console.error('Failed to load scans:', error);
@@ -1614,19 +1592,24 @@
             }
         }
 
+        // Scan form submission
         document.getElementById('scan-form').addEventListener('submit', async (e) => {
             e.preventDefault();
+            setButtonLoading('start-scan-btn', true);
+            
             const targetId = document.getElementById('scan-target').value;
             const priority = document.getElementById('scan-priority').value;
             const scanTypes = Array.from(document.querySelectorAll('input[type="checkbox"]:checked')).map(cb => cb.value);
             
             if (!targetId) {
-                alert('Please select a target');
+                showMessage('Please select a target', 'error', 'scan-messages');
+                setButtonLoading('start-scan-btn', false);
                 return;
             }
             
             if (scanTypes.length === 0) {
-                alert('Please select at least one scan type');
+                showMessage('Please select at least one scan type', 'error', 'scan-messages');
+                setButtonLoading('start-scan-btn', false);
                 return;
             }
             
@@ -1640,26 +1623,87 @@
                     })
                 });
                 
-                if (response.ok) {
-                    alert('Scan started successfully!');
+                if (response && response.ok) {
+                    showMessage('Scan started successfully!', 'success', 'scan-messages');
                     loadScans();
                     switchTab('scans');
                 } else {
                     const errorData = await response.json();
-                    alert('Failed to start scan: ' + (errorData.error || errorData.message || 'Unknown error'));
+                    showMessage('Failed to start scan: ' + (errorData.error || errorData.message || 'Unknown error'), 'error', 'scan-messages');
                 }
             } catch (error) {
-                alert('Failed to start scan: ' + error.message);
+                showMessage('Failed to start scan: ' + error.message, 'error', 'scan-messages');
+            } finally {
+                setButtonLoading('start-scan-btn', false);
             }
         });
 
-        // Utility functions
+        // Additional functions
+        async function checkSubdomainLive(id) {
+            try {
+                const response = await apiCall(`/subdomains/${id}/check-live`, { method: 'POST' });
+                if (response && response.ok) {
+                    loadSubdomains(currentPageData.subdomains.page);
+                    showMessage('Live status check completed!', 'success');
+                } else {
+                    showMessage('Failed to check live status', 'error');
+                }
+            } catch (error) {
+                showMessage('Failed to check live status: ' + error.message, 'error');
+            }
+        }
+
+        async function viewVulnerability(id) {
+            // This would show vulnerability details in a modal
+            showMessage(`Vulnerability details for ${id} would be shown here`, 'info');
+        }
+
+        async function viewScanResults(scanId) {
+            try {
+                const response = await apiCall(`/scans/${scanId}`);
+                if (!response) return;
+                
+                const data = await response.json();
+                
+                if (data.success && data.data) {
+                    const results = data.data.results || {};
+                    alert('Scan Results:\n\n' + JSON.stringify(results, null, 2));
+                } else {
+                    showMessage('No results available for this scan.', 'warning');
+                }
+            } catch (error) {
+                showMessage('Failed to load scan results: ' + error.message, 'error');
+            }
+        }
+
+        async function stopScan(scanId) {
+            if (confirm('Are you sure you want to stop this scan?')) {
+                try {
+                    const response = await apiCall(`/scans/stop/${scanId}`, { method: 'POST' });
+                    if (response && response.ok) {
+                        loadScans();
+                        showMessage('Scan stopped successfully!', 'success');
+                    } else {
+                        showMessage('Failed to stop scan', 'error');
+                    }
+                } catch (error) {
+                    showMessage('Failed to stop scan: ' + error.message, 'error');
+                }
+            }
+        }
+
+        // Utility functions continued
         function updatePagination(type, pagination) {
             const paginationContainer = document.getElementById(`${type}-pagination`);
             if (!paginationContainer) return;
             
             const { page, pages, total } = pagination;
             let paginationHtml = '';
+            
+            if (pages <= 1) {
+                paginationContainer.innerHTML = '';
+                return;
+            }
             
             // Previous button
             paginationHtml += `<button onclick="load${capitalizeFirst(type)}(${page - 1})" ${page <= 1 ? 'disabled' : ''}>Previous</button>`;
@@ -1680,6 +1724,7 @@
         }
 
         function getStatusColor(statusCode) {
+            if (!statusCode) return 'status-inactive';
             if (statusCode >= 200 && statusCode < 300) return 'status-completed';
             if (statusCode >= 300 && statusCode < 400) return 'status-running';
             if (statusCode >= 400 && statusCode < 500) return 'status-pending';
@@ -1688,7 +1733,7 @@
         }
 
         function formatBytes(bytes) {
-            if (!bytes) return '-';
+            if (!bytes || bytes === 0) return '-';
             const k = 1024;
             const sizes = ['B', 'KB', 'MB', 'GB'];
             const i = Math.floor(Math.log(bytes) / Math.log(k));
@@ -1707,63 +1752,176 @@
             };
         }
 
-        // Additional functionality
-        async function scanDirectories(subdomainId) {
-            // This would trigger a directory scan for a specific subdomain
-            alert(`Directory scan for subdomain ${subdomainId} would be implemented here`);
-        }
-
-        async function viewVulnerability(id) {
-            // This would show vulnerability details in a modal
-            alert(`Vulnerability details for ${id} would be shown here`);
-        }
-
-        async function viewScanResults(scanId) {
-            try {
-                const response = await apiCall(`/scans/${scanId}`);
-                const data = await response.json();
-                
-                if (data.success && data.data) {
-                    const results = data.data.results || {};
-                    alert('Scan Results:\n\n' + JSON.stringify(results, null, 2));
-                } else {
-                    alert('No results available for this scan.');
-                }
-            } catch (error) {
-                alert('Failed to load scan results: ' + error.message);
+        // New section loading functions
+        async function loadPorts() {
+            // Placeholder for port scanning results
+            const portsList = document.getElementById('ports-list');
+            if (portsList) {
+                portsList.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #94a3b8;">Run a port scan to discover open ports</td></tr>';
             }
         }
 
-        async function stopScan(scanId) {
-            if (confirm('Are you sure you want to stop this scan?')) {
-                try {
-                    const response = await apiCall(`/scans/stop/${scanId}`, { method: 'POST' });
-                    if (response.ok) {
-                        loadScans();
-                        alert('Scan stopped successfully!');
-                    } else {
-                        alert('Failed to stop scan');
-                    }
-                } catch (error) {
-                    alert('Failed to stop scan: ' + error.message);
-                }
+        async function loadContentDiscovery() {
+            // Placeholder for content discovery results  
+            const contentList = document.getElementById('content-list');
+            if (contentList) {
+                contentList.innerHTML = '<tr><td colspan="6" style="text-align: center; color: #94a3b8;">Run content discovery to find hidden files and directories</td></tr>';
             }
+        }
+
+        async function loadJSAnalysis() {
+            // Placeholder for JS analysis results
+            const jsList = document.getElementById('js-files-list');
+            if (jsList) {
+                jsList.innerHTML = '<tr><td colspan="6" style="text-align: center; color: #94a3b8;">Run JS analysis to discover JavaScript files and extract secrets</td></tr>';
+            }
+        }
+
+        async function loadAPIDiscovery() {
+            // Placeholder for API discovery results
+            const apiList = document.getElementById('api-endpoints-list');
+            if (apiList) {
+                apiList.innerHTML = '<tr><td colspan="6" style="text-align: center; color: #94a3b8;">Run API discovery to find REST and GraphQL endpoints</td></tr>';
+            }
+        }
+        document.getElementById('global-target-filter').addEventListener('change', (e) => {
+            const selectedTargetId = e.target.value;
+            
+            // Update other filter dropdowns to match
+            ['subdomain-target-filter', 'directory-target-filter', 'vuln-target-filter'].forEach(filterId => {
+                const filter = document.getElementById(filterId);
+                if (filter) {
+                    filter.value = selectedTargetId;
+                }
+            });
+            
+            // Reload current tab data with the new filter
+            const activeTab = document.querySelector('.nav-item.active').dataset.tab;
+            switch(activeTab) {
+                case 'subdomains':
+                    loadSubdomains();
+                    break;
+                case 'directories':
+                    loadDirectories();
+                    break;
+                case 'vulnerabilities':
+                    loadVulnerabilities();
+                    break;
+            }
+        });
+
+        // Filter event listeners
+        ['subdomain-target-filter', 'subdomain-status-filter'].forEach(filterId => {
+            const element = document.getElementById(filterId);
+            if (element) {
+                element.addEventListener('change', () => loadSubdomains(1));
+            }
+        });
+
+        ['directory-target-filter', 'directory-subdomain-filter', 'directory-status-filter'].forEach(filterId => {
+            const element = document.getElementById(filterId);
+            if (element) {
+                element.addEventListener('change', () => loadDirectories(1));
+            }
+        });
+
+        ['vuln-target-filter', 'vuln-severity-filter', 'vuln-status-filter'].forEach(filterId => {
+            const element = document.getElementById(filterId);
+            if (element) {
+                element.addEventListener('change', () => loadVulnerabilities(1));
+            }
+        });
+
+        // Search input event listeners
+        const subdomainSearch = document.getElementById('subdomain-search');
+        if (subdomainSearch) {
+            subdomainSearch.addEventListener('input', debounce(() => loadSubdomains(1), 500));
+        }
+
+        const directorySearch = document.getElementById('directory-search');
+        if (directorySearch) {
+            directorySearch.addEventListener('input', debounce(() => loadDirectories(1), 500));
         }
 
         // Check authentication on load
-        window.addEventListener('load', () => {
+        window.addEventListener('load', async () => {
             const token = localStorage.getItem('token');
             if (token) {
-                // Try to validate token by loading data
-                loadDashboardData().then(() => {
-                    // If successful, show dashboard
-                    document.getElementById('auth-container').classList.add('hidden');
-                    document.getElementById('dashboard').classList.remove('hidden');
-                    document.getElementById('user-name').textContent = 'User'; // Will be updated when data loads
-                }).catch(() => {
-                    // If failed, clear token and show auth
+                try {
+                    // Try to validate token by loading basic data
+                    const response = await apiCall('/targets');
+                    if (response && response.ok) {
+                        // Token is valid, show dashboard
+                        document.getElementById('auth-container').classList.add('hidden');
+                        document.getElementById('dashboard').classList.remove('hidden');
+                        
+                        // Set a temporary user name until we load proper data
+                        document.getElementById('user-name').textContent = 'Loading...';
+                        
+                        // Load dashboard data
+                        await loadDashboardData();
+                    } else {
+                        // Token is invalid, clear it and show auth
+                        localStorage.removeItem('token');
+                        document.getElementById('auth-container').classList.remove('hidden');
+                        document.getElementById('dashboard').classList.add('hidden');
+                    }
+                } catch (error) {
+                    // Error validating token, clear it and show auth
+                    console.error('Token validation failed:', error);
                     localStorage.removeItem('token');
-                });
+                    document.getElementById('auth-container').classList.remove('hidden');
+                    document.getElementById('dashboard').classList.add('hidden');
+                }
+            } else {
+                // No token, show auth form
+                document.getElementById('auth-container').classList.remove('hidden');
+                document.getElementById('dashboard').classList.add('hidden');
+            }
+        });
+
+        // Auto-refresh for running scans
+        let refreshInterval = null;
+
+        function startAutoRefresh() {
+            if (refreshInterval) return; // Already running
+            
+            refreshInterval = setInterval(async () => {
+                const activeTab = document.querySelector('.nav-item.active')?.dataset.tab;
+                if (activeTab === 'scans') {
+                    try {
+                        const response = await apiCall('/scans/jobs');
+                        if (response && response.ok) {
+                            const data = await response.json();
+                            const scans = data.success ? data.data : [];
+                            const hasRunningScans = scans.some(scan => scan.status === 'running' || scan.status === 'pending');
+                            
+                            if (hasRunningScans) {
+                                loadScans(); // Refresh the scans list
+                            } else {
+                                stopAutoRefresh(); // No running scans, stop auto-refresh
+                            }
+                        }
+                    } catch (error) {
+                        console.error('Auto-refresh failed:', error);
+                    }
+                }
+            }, 5000); // Refresh every 5 seconds
+        }
+
+        function stopAutoRefresh() {
+            if (refreshInterval) {
+                clearInterval(refreshInterval);
+                refreshInterval = null;
+            }
+        }
+
+        // Start auto-refresh when viewing scans tab
+        document.addEventListener('click', (e) => {
+            if (e.target.classList.contains('nav-item') && e.target.getAttribute('data-tab') === 'scans') {
+                setTimeout(startAutoRefresh, 1000); // Start auto-refresh after tab loads
+            } else if (e.target.classList.contains('nav-item')) {
+                stopAutoRefresh(); // Stop auto-refresh when leaving scans tab
             }
         });
     </script>
