@@ -133,3 +133,4 @@ const Auth = {
 
 // Global logout function for onclick handlers
 window.logout = () => Auth.logout();
+window.Auth = Auth;

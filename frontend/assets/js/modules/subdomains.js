@@ -4,6 +4,7 @@ const Subdomains = {
     async init() {
         this.renderHTML();
         this.bindEvents();
+        await this.loadTargets(); // Add this line to load targets
         await this.load();
     },
 
@@ -92,6 +93,40 @@ const Subdomains = {
         const subdomainSearch = document.getElementById('subdomain-search');
         if (subdomainSearch) {
             subdomainSearch.addEventListener('input', Utils.debounce(() => this.load(1), 500));
+        }
+    },
+
+    // New method to load targets for the filter dropdown
+    async loadTargets() {
+        try {
+            const response = await API.targets.getAll();
+            if (!response) return;
+            
+            const data = await response.json();
+            const targets = data.success ? data.data : [];
+            
+            const targetSelect = document.getElementById('subdomain-target-filter');
+            if (targetSelect) {
+                // Keep the "All Targets" option and add target options
+                const currentValue = targetSelect.value;
+                targetSelect.innerHTML = '<option value="">All Targets</option>';
+                
+                targets.forEach(target => {
+                    const option = document.createElement('option');
+                    option.value = target.id;
+                    option.textContent = target.domain;
+                    targetSelect.appendChild(option);
+                });
+
+                // Restore previous selection if it still exists
+                if (currentValue && targets.find(t => t.id == currentValue)) {
+                    targetSelect.value = currentValue;
+                }
+
+                console.log(`Loaded ${targets.length} targets for subdomain filter`);
+            }
+        } catch (error) {
+            console.error('Failed to load targets for subdomain filter:', error);
         }
     },
 
@@ -306,6 +341,11 @@ const Subdomains = {
                 statusSpan.style.color = '#00cc00';
             }, 10000); // Keep visible for 10 seconds
         }
+    },
+
+    // Method to refresh targets (useful when called from other modules)
+    async refreshTargets() {
+        await this.loadTargets();
     }
 };
 

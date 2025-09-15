@@ -4,6 +4,7 @@ const Scans = {
     async init() {
         this.renderHTML();
         this.bindEvents();
+        await this.loadTargets(); // Add this line to load targets
         await this.load();
     },
 
@@ -74,6 +75,42 @@ const Scans = {
                 e.preventDefault();
                 await this.startScan();
             });
+        }
+    },
+
+    // New method to load targets for the dropdown
+    async loadTargets() {
+        try {
+            const response = await API.targets.getAll();
+            if (!response) return;
+            
+            const data = await response.json();
+            const targets = data.success ? data.data : [];
+            
+            const targetSelect = document.getElementById('scan-target');
+            if (targetSelect) {
+                // Clear existing options except the first one
+                targetSelect.innerHTML = '<option value="">Select target...</option>';
+                
+                // Add target options
+                targets.forEach(target => {
+                    const option = document.createElement('option');
+                    option.value = target.id;
+                    option.textContent = target.domain;
+                    targetSelect.appendChild(option);
+                });
+
+                // Log for debugging
+                console.log(`Loaded ${targets.length} targets for scan dropdown`);
+            }
+        } catch (error) {
+            console.error('Failed to load targets for scan form:', error);
+            
+            // Show error message in the form
+            const targetSelect = document.getElementById('scan-target');
+            if (targetSelect) {
+                targetSelect.innerHTML = '<option value="">Error loading targets</option>';
+            }
         }
     },
 
@@ -162,7 +199,27 @@ const Scans = {
             
             if (data.success && data.data) {
                 const results = data.data.results || {};
-                alert('Scan Results:\n\n' + JSON.stringify(results, null, 2));
+                
+                // Format the results in a more readable way
+                let resultsText = 'Scan Results:\n\n';
+                
+                if (results.subdomains && results.subdomains.length > 0) {
+                    resultsText += `Found ${results.subdomains.length} subdomains:\n`;
+                    results.subdomains.slice(0, 10).forEach(sub => {
+                        resultsText += `- ${sub}\n`;
+                    });
+                    if (results.subdomains.length > 10) {
+                        resultsText += `... and ${results.subdomains.length - 10} more\n`;
+                    }
+                } else {
+                    resultsText += 'No subdomains found or scan still processing.\n';
+                }
+                
+                if (results.alive_subdomains && results.alive_subdomains.length > 0) {
+                    resultsText += `\nLive subdomains: ${results.alive_subdomains.length}\n`;
+                }
+                
+                alert(resultsText);
             } else {
                 Utils.showMessage('No results available for this scan.', 'warning');
             }
@@ -185,6 +242,11 @@ const Scans = {
                 Utils.showMessage('Failed to stop scan: ' + error.message, 'error');
             }
         }
+    },
+
+    // Method to refresh targets (useful when called from other modules)
+    async refreshTargets() {
+        await this.loadTargets();
     }
 };
 

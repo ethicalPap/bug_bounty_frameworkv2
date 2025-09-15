@@ -49,3 +49,5 @@ const CONFIG = {
         500: 'status-failed'
     }
 };
+
+window.CONFIG = CONFIG;

@@ -121,3 +121,6 @@ const Utils = {
         paginationContainer.innerHTML = paginationHtml;
     }
 };
+
+window.Utils = Utils;
+window.AppState = AppState;

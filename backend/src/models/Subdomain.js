@@ -1,5 +1,7 @@
 // backend/src/models/Subdomain.js
 const knex = require('../config/database');
+const dns = require('dns').promises;
+const axios = require('axios');
 
 class Subdomain {
   static get tableName() {
@@ -74,7 +76,6 @@ class Subdomain {
   }
 
   static async checkLiveStatus(id, organizationId) {
-    // Simplified implementation - in production this would use httpx
     const subdomain = await knex(this.tableName)
       .join('targets', 'subdomains.target_id', 'targets.id')
       .where('targets.organization_id', organizationId)
@@ -84,18 +85,102 @@ class Subdomain {
     
     if (!subdomain) return null;
     
-    // Simulate checking (in production, use httpx or similar)
-    const isLive = Math.random() > 0.3;
-    const httpStatus = isLive ? 200 : null;
+    let ipAddress = null;
+    let httpStatus = null;
+    let title = null;
+    let isLive = false;
+    
+    console.log(`Checking live status for: ${subdomain.subdomain}`);
+    
+    try {
+      // Step 1: DNS lookup for IP address
+      console.log(`DNS lookup for: ${subdomain.subdomain}`);
+      const addresses = await dns.resolve4(subdomain.subdomain);
+      ipAddress = addresses[0];
+      console.log(`DNS resolved: ${subdomain.subdomain} -> ${ipAddress}`);
+    } catch (dnsError) {
+      console.log(`DNS lookup failed for ${subdomain.subdomain}: ${dnsError.message}`);
+    }
+    
+    // Step 2: HTTP check for status and title (only if DNS resolved)
+    if (ipAddress) {
+      try {
+        console.log(`HTTP check for: ${subdomain.subdomain}`);
+        const response = await axios.get(`http://${subdomain.subdomain}`, {
+          timeout: 8000,
+          maxRedirects: 3,
+          validateStatus: () => true, // Accept any status code
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (compatible; SecurityScanner/1.0)'
+          }
+        });
+        
+        httpStatus = response.status;
+        isLive = response.status >= 200 && response.status < 400;
+        
+        // Extract title from HTML
+        if (response.data && typeof response.data === 'string') {
+          const titleMatch = response.data.match(/<title[^>]*>([^<]+)<\/title>/i);
+          if (titleMatch) {
+            title = titleMatch[1].trim().substring(0, 200); // Limit title length
+            // Clean up title (remove extra whitespace, newlines)
+            title = title.replace(/\s+/g, ' ').trim();
+          }
+        }
+        
+        console.log(`HTTP success: ${subdomain.subdomain} -> ${httpStatus} (${title || 'No title'})`);
+        
+      } catch (httpError) {
+        console.log(`HTTP failed for ${subdomain.subdomain}, trying HTTPS...`);
+        
+        // Try HTTPS if HTTP fails
+        try {
+          const httpsResponse = await axios.get(`https://${subdomain.subdomain}`, {
+            timeout: 8000,
+            maxRedirects: 3,
+            validateStatus: () => true,
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (compatible; SecurityScanner/1.0)'
+            }
+          });
+          
+          httpStatus = httpsResponse.status;
+          isLive = httpsResponse.status >= 200 && httpsResponse.status < 400;
+          
+          // Extract title from HTTPS response
+          if (httpsResponse.data && typeof httpsResponse.data === 'string') {
+            const titleMatch = httpsResponse.data.match(/<title[^>]*>([^<]+)<\/title>/i);
+            if (titleMatch) {
+              title = titleMatch[1].trim().substring(0, 200);
+              title = title.replace(/\s+/g, ' ').trim();
+            }
+          }
+          
+          console.log(`HTTPS success: ${subdomain.subdomain} -> ${httpStatus} (${title || 'No title'})`);
+          
+        } catch (httpsError) {
+          console.log(`Both HTTP and HTTPS failed for ${subdomain.subdomain}: ${httpsError.message}`);
+          // If we have an IP but HTTP/HTTPS fails, still mark as partially active
+          isLive = false;
+        }
+      }
+    }
+    
+    // Step 3: Update subdomain with gathered information
+    const updateData = {
+      status: isLive ? 'active' : 'inactive',
+      ip_address: ipAddress,
+      http_status: httpStatus,
+      title: title,
+      last_seen: isLive ? new Date() : null,
+      updated_at: new Date()
+    };
+    
+    console.log(`Updating ${subdomain.subdomain} with:`, updateData);
     
     const [updated] = await knex(this.tableName)
       .where('id', id)
-      .update({
-        status: isLive ? 'active' : 'inactive',
-        http_status: httpStatus,
-        last_seen: new Date(),
-        updated_at: new Date()
-      })
+      .update(updateData)
       .returning('*');
     
     return updated;

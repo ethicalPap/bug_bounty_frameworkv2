@@ -14,10 +14,13 @@ const Navigation = {
             }
         });
 
-        // Global target filter
-        document.getElementById('global-target-filter').addEventListener('change', (e) => {
-            this.handleGlobalTargetFilter(e.target.value);
-        });
+        // Global target filter - add safety check
+        const globalFilter = document.getElementById('global-target-filter');
+        if (globalFilter) {
+            globalFilter.addEventListener('change', (e) => {
+                this.handleGlobalTargetFilter(e.target.value);
+            });
+        }
     },
 
     switchTab(tab) {
@@ -25,10 +28,17 @@ const Navigation = {
         document.querySelectorAll('.nav-item').forEach(item => {
             item.classList.remove('active');
         });
-        document.querySelector(`[data-tab="${tab}"]`).classList.add('active');
+        
+        const activeNavItem = document.querySelector(`[data-tab="${tab}"]`);
+        if (activeNavItem) {
+            activeNavItem.classList.add('active');
+        }
 
-        // Update title
-        document.getElementById('page-title').textContent = CONFIG.TAB_TITLES[tab];
+        // Update title - add safety check
+        const pageTitle = document.getElementById('page-title');
+        if (pageTitle && window.CONFIG && CONFIG.TAB_TITLES) {
+            pageTitle.textContent = CONFIG.TAB_TITLES[tab] || tab;
+        }
 
         // Load content for the specific tab
         this.loadTabContent(tab);
@@ -39,6 +49,7 @@ const Navigation = {
 
     async loadTabContent(tab) {
         const content = document.getElementById('main-content');
+        if (!content) return;
         
         // Clear current content
         content.innerHTML = '<div style="text-align: center; color: #006600; padding: 40px;">Loading...</div>';
@@ -46,39 +57,106 @@ const Navigation = {
         try {
             switch(tab) {
                 case 'targets':
-                    await Targets.init();
+                    if (window.Targets && typeof window.Targets.init === 'function') {
+                        await window.Targets.init();
+                    } else {
+                        this.showModuleNotAvailable('Targets');
+                    }
                     break;
+                    
                 case 'dashboard':
-                    await Dashboard.init();
+                    if (window.Dashboard && typeof window.Dashboard.init === 'function') {
+                        await window.Dashboard.init();
+                    } else {
+                        this.showModuleNotAvailable('Dashboard');
+                    }
                     break;
+                    
                 case 'subdomains':
-                    await Subdomains.init();
+                    if (window.Subdomains && typeof window.Subdomains.init === 'function') {
+                        await window.Subdomains.init();
+                    } else {
+                        this.showModuleNotAvailable('Subdomains');
+                    }
                     break;
+                    
                 case 'directories':
-                    await Directories.init();
+                    if (window.Directories && typeof window.Directories.init === 'function') {
+                        await window.Directories.init();
+                    } else {
+                        this.showModuleNotAvailable('Directories');
+                    }
                     break;
+                    
                 case 'vuln-scanning':
-                    await Vulnerabilities.init();
+                    if (window.Vulnerabilities && typeof window.Vulnerabilities.init === 'function') {
+                        await window.Vulnerabilities.init();
+                    } else {
+                        this.showModuleNotAvailable('Vulnerabilities');
+                    }
                     break;
+                    
                 case 'scans':
-                    await Scans.init();
+                    if (window.Scans && typeof window.Scans.init === 'function') {
+                        await window.Scans.init();
+                    } else {
+                        this.showModuleNotAvailable('Scans');
+                    }
                     break;
+                    
                 case 'port-scanning':
                 case 'content-discovery':
                 case 'js-analysis':
                 case 'api-discovery':
                     content.innerHTML = this.getPlaceholderContent(tab);
                     break;
+                    
                 case 'settings':
                     content.innerHTML = this.getSettingsContent();
                     break;
+                    
                 default:
                     content.innerHTML = '<div style="text-align: center; color: #ff0000; padding: 40px;">Tab not implemented yet</div>';
             }
         } catch (error) {
             console.error('Error loading tab content:', error);
-            content.innerHTML = '<div style="text-align: center; color: #ff0000; padding: 40px;">Error loading content</div>';
+            content.innerHTML = `
+                <div style="text-align: center; color: #ff0000; padding: 40px;">
+                    <h3>Error Loading Content</h3>
+                    <p>Failed to load ${tab} module</p>
+                    <p style="font-size: 12px; margin-top: 10px;">Check console for details</p>
+                    <button onclick="Navigation.loadTabContent('${tab}')" class="btn btn-secondary" style="margin-top: 15px;">
+                        Try Again
+                    </button>
+                </div>
+            `;
         }
+    },
+
+    showModuleNotAvailable(moduleName) {
+        const content = document.getElementById('main-content');
+        if (!content) return;
+        
+        content.innerHTML = `
+            <div style="text-align: center; color: #ffff00; padding: 40px;">
+                <h3>⚠️ Module Not Available</h3>
+                <p>The ${moduleName} module is not loaded or not available.</p>
+                <p style="font-size: 14px; margin-top: 15px;">
+                    Make sure to add <code>window.${moduleName} = ${moduleName};</code> at the end of ${moduleName.toLowerCase()}.js
+                </p>
+                <div style="margin-top: 20px;">
+                    <button onclick="location.reload()" class="btn btn-primary">
+                        🔄 Reload Page
+                    </button>
+                </div>
+                <div style="margin-top: 15px; font-size: 12px; color: #666;">
+                    <strong>Debug Info:</strong><br>
+                    Available modules: ${Object.keys(window).filter(key => 
+                        ['Targets', 'Dashboard', 'Scans', 'Subdomains', 'Directories', 'Vulnerabilities'].includes(key)
+                    ).join(', ') || 'None'}
+                </div>
+            </div>
+        `;
     },
 
     handleGlobalTargetFilter(selectedTargetId) {
@@ -96,20 +174,26 @@ const Navigation = {
         const activeTab = document.querySelector('.nav-item.active')?.dataset.tab;
         switch(activeTab) {
             case 'subdomains':
-                if (window.Subdomains) Subdomains.load();
+                if (window.Subdomains && typeof window.Subdomains.load === 'function') {
+                    window.Subdomains.load();
+                }
                 break;
             case 'directories':
-                if (window.Directories) Directories.load();
+                if (window.Directories && typeof window.Directories.load === 'function') {
+                    window.Directories.load();
+                }
                 break;
             case 'vuln-scanning':
-                if (window.Vulnerabilities) Vulnerabilities.load();
+                if (window.Vulnerabilities && typeof window.Vulnerabilities.load === 'function') {
+                    window.Vulnerabilities.load();
+                }
                 break;
         }
     },
 
     handleAutoRefresh(tab) {
         // Stop any existing refresh
-        if (AppState.refreshInterval) {
+        if (window.AppState && AppState.refreshInterval) {
             clearInterval(AppState.refreshInterval);
             AppState.refreshInterval = null;
         }
@@ -121,12 +205,25 @@ const Navigation = {
     },
 
     startAutoRefresh() {
+        if (!window.AppState) {
+            console.warn('AppState not available for auto-refresh');
+            return;
+        }
+        
         if (AppState.refreshInterval) return;
+        
+        const refreshInterval = window.CONFIG?.SCAN_REFRESH_INTERVAL || 5000;
         
         AppState.refreshInterval = setInterval(async () => {
             const activeTab = document.querySelector('.nav-item.active')?.dataset.tab;
-            if (activeTab === 'scans' && window.Scans) {
+            if (activeTab === 'scans' && window.Scans && typeof window.Scans.load === 'function') {
                 try {
+                    // Check if API is available
+                    if (!window.API || !window.API.scans) {
+                        console.warn('API not available for auto-refresh');
+                        return;
+                    }
+                    
                     const response = await API.scans.getJobs();
                     if (response && response.ok) {
                         const data = await response.json();
@@ -136,7 +233,7 @@ const Navigation = {
                         );
                         
                         if (hasRunningScans) {
-                            Scans.load();
+                            window.Scans.load();
                         } else {
                             this.stopAutoRefresh();
                         }
@@ -145,11 +242,11 @@ const Navigation = {
                     console.error('Auto-refresh failed:', error);
                 }
             }
-        }, CONFIG.SCAN_REFRESH_INTERVAL);
+        }, refreshInterval);
     },
 
     stopAutoRefresh() {
-        if (AppState.refreshInterval) {
+        if (window.AppState && AppState.refreshInterval) {
             clearInterval(AppState.refreshInterval);
             AppState.refreshInterval = null;
         }
@@ -180,6 +277,17 @@ const Navigation = {
         };
 
         const info = placeholders[tab];
+        if (!info) {
+            return `
+                <div class="card">
+                    <div class="card-title">Coming Soon</div>
+                    <p style="color: #006600; text-align: center; padding: 40px;">
+                        This feature is under development
+                    </p>
+                </div>
+            `;
+        }
+
         return `
             <div class="scan-info">
                 <h4>${info.title}</h4>
@@ -193,12 +301,14 @@ const Navigation = {
     },
 
     getSettingsContent() {
+        const apiBase = (window.CONFIG && window.CONFIG.API_BASE) || 'http://localhost:3001/api/v1';
+        
         return `
             <div class="card">
                 <div class="card-title">Settings</div>
                 <div class="form-group">
                     <label>API Endpoint</label>
-                    <input type="text" id="api-endpoint" value="${CONFIG.API_BASE}" readonly>
+                    <input type="text" id="api-endpoint" value="${apiBase}" readonly>
                 </div>
                 <div class="form-group">
                     <label>Theme</label>
@@ -206,8 +316,29 @@ const Navigation = {
                         <option>Hacker Matrix (Current)</option>
                     </select>
                 </div>
-                <button class="btn btn-primary" onclick="Utils.showMessage('Settings saved!', 'success')">Save Settings</button>
+                <div class="form-group">
+                    <label>Module Status</label>
+                    <div style="font-family: 'Courier New', monospace; font-size: 12px; color: #006600; padding: 10px; border: 1px solid #003300; background-color: #001100;">
+                        <div>CONFIG: ${window.CONFIG ? '✅ Loaded' : '❌ Not Found'}</div>
+                        <div>Utils: ${window.Utils ? '✅ Loaded' : '❌ Not Found'}</div>
+                        <div>AppState: ${window.AppState ? '✅ Loaded' : '❌ Not Found'}</div>
+                        <div>API: ${window.API ? '✅ Loaded' : '❌ Not Found'}</div>
+                        <div>Auth: ${window.Auth ? '✅ Loaded' : '❌ Not Found'}</div>
+                        <div>Targets: ${window.Targets ? '✅ Loaded' : '❌ Not Found'}</div>
+                        <div>Dashboard: ${window.Dashboard ? '✅ Loaded' : '❌ Not Found'}</div>
+                        <div>Scans: ${window.Scans ? '✅ Loaded' : '❌ Not Found'}</div>
+                        <div>Subdomains: ${window.Subdomains ? '✅ Loaded' : '❌ Not Found'}</div>
+                        <div>Directories: ${window.Directories ? '✅ Loaded' : '❌ Not Found'}</div>
+                        <div>Vulnerabilities: ${window.Vulnerabilities ? '✅ Loaded' : '❌ Not Found'}</div>
+                    </div>
+                </div>
+                <button class="btn btn-primary" onclick="console.log('Available modules:', Object.keys(window).filter(k => ['CONFIG', 'Utils', 'API', 'Auth', 'Targets', 'Dashboard', 'Scans', 'Subdomains', 'Directories', 'Vulnerabilities'].includes(k)))">
+                    Debug Modules
+                </button>
             </div>
         `;
     }
 };
+
+// Export Navigation to global scope
+window.Navigation = Navigation;
