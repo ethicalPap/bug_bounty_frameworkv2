@@ -1,4 +1,4 @@
-// assets/js/utils.js
+// frontend/assets/js/utils.js
 
 // State management
 const AppState = {
@@ -7,6 +7,7 @@ const AppState = {
     currentPageData: {
         subdomains: { page: 1, total: 0 },
         directories: { page: 1, total: 0 },
+        ports: { page: 1, total: 0 },
         vulnerabilities: { page: 1, total: 0 }
     },
     refreshInterval: null
@@ -110,13 +111,13 @@ const Utils = {
             return;
         }
         
-        paginationHtml += `<button onclick="window.${Utils.capitalizeFirst(type)}.load(${page - 1})" ${page <= 1 ? 'disabled' : ''} class="btn btn-secondary btn-small">Previous</button>`;
+        paginationHtml += `<button onclick="window.${Utils.capitalizeFirst(type === 'ports' ? 'PortScanning' : type)}.load(${page - 1})" ${page <= 1 ? 'disabled' : ''} class="btn btn-secondary btn-small">Previous</button>`;
         
         for (let i = Math.max(1, page - 2); i <= Math.min(pages, page + 2); i++) {
-            paginationHtml += `<button onclick="window.${Utils.capitalizeFirst(type)}.load(${i})" class="btn ${i === page ? 'btn-primary' : 'btn-secondary'} btn-small">${i}</button>`;
+            paginationHtml += `<button onclick="window.${Utils.capitalizeFirst(type === 'ports' ? 'PortScanning' : type)}.load(${i})" class="btn ${i === page ? 'btn-primary' : 'btn-secondary'} btn-small">${i}</button>`;
         }
         
-        paginationHtml += `<button onclick="window.${Utils.capitalizeFirst(type)}.load(${page + 1})" ${page >= pages ? 'disabled' : ''} class="btn btn-secondary btn-small">Next</button>`;
+        paginationHtml += `<button onclick="window.${Utils.capitalizeFirst(type === 'ports' ? 'PortScanning' : type)}.load(${page + 1})" ${page >= pages ? 'disabled' : ''} class="btn btn-secondary btn-small">Next</button>`;
         
         paginationContainer.innerHTML = paginationHtml;
     }

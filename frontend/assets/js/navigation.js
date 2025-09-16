@@ -1,4 +1,4 @@
-// assets/js/navigation.js
+// frontend/assets/js/navigation.js
 
 const Navigation = {
     init() {
@@ -88,6 +88,14 @@ const Navigation = {
                     }
                     break;
                     
+                case 'port-scanning':
+                    if (window.PortScanning && typeof window.PortScanning.init === 'function') {
+                        await window.PortScanning.init();
+                    } else {
+                        this.showModuleNotAvailable('PortScanning');
+                    }
+                    break;
+                    
                 case 'vuln-scanning':
                     if (window.Vulnerabilities && typeof window.Vulnerabilities.init === 'function') {
                         await window.Vulnerabilities.init();
@@ -104,7 +112,6 @@ const Navigation = {
                     }
                     break;
                     
-                case 'port-scanning':
                 case 'content-discovery':
                 case 'js-analysis':
                 case 'api-discovery':
@@ -152,7 +159,7 @@ const Navigation = {
                 <div style="margin-top: 15px; font-size: 12px; color: #666;">
                     <strong>Debug Info:</strong><br>
                     Available modules: ${Object.keys(window).filter(key => 
-                        ['Targets', 'Dashboard', 'Scans', 'Subdomains', 'Directories', 'Vulnerabilities'].includes(key)
+                        ['Targets', 'Dashboard', 'Scans', 'Subdomains', 'Directories', 'PortScanning', 'Vulnerabilities'].includes(key)
                     ).join(', ') || 'None'}
                 </div>
             </div>
@@ -161,7 +168,7 @@ const Navigation = {
 
     handleGlobalTargetFilter(selectedTargetId) {
         // Update other target filters to match
-        const filterIds = ['subdomain-target-filter', 'directory-target-filter', 'vuln-scan-target'];
+        const filterIds = ['subdomain-target-filter', 'directory-target-filter', 'port-target-filter', 'vuln-scan-target'];
         
         filterIds.forEach(filterId => {
             const filter = document.getElementById(filterId);
@@ -181,6 +188,11 @@ const Navigation = {
             case 'directories':
                 if (window.Directories && typeof window.Directories.load === 'function') {
                     window.Directories.load();
+                }
+                break;
+            case 'port-scanning':
+                if (window.PortScanning && typeof window.PortScanning.load === 'function') {
+                    window.PortScanning.load();
                 }
                 break;
             case 'vuln-scanning':
@@ -254,11 +266,6 @@ const Navigation = {
 
     getPlaceholderContent(tab) {
         const placeholders = {
-            'port-scanning': {
-                title: 'Port Scanning',
-                description: 'Scan for open ports on discovered subdomains using nmap. Identifies services running on different ports to expand the attack surface.',
-                content: 'Run a port scan to discover open ports'
-            },
             'content-discovery': {
                 title: 'Content Discovery',
                 description: 'Discover hidden files, directories, and endpoints using ffuf and wordlists. Finds admin panels, backup files, and other interesting resources.',
@@ -329,10 +336,11 @@ const Navigation = {
                         <div>Scans: ${window.Scans ? '✅ Loaded' : '❌ Not Found'}</div>
                         <div>Subdomains: ${window.Subdomains ? '✅ Loaded' : '❌ Not Found'}</div>
                         <div>Directories: ${window.Directories ? '✅ Loaded' : '❌ Not Found'}</div>
+                        <div>PortScanning: ${window.PortScanning ? '✅ Loaded' : '❌ Not Found'}</div>
                         <div>Vulnerabilities: ${window.Vulnerabilities ? '✅ Loaded' : '❌ Not Found'}</div>
                     </div>
                 </div>
-                <button class="btn btn-primary" onclick="console.log('Available modules:', Object.keys(window).filter(k => ['CONFIG', 'Utils', 'API', 'Auth', 'Targets', 'Dashboard', 'Scans', 'Subdomains', 'Directories', 'Vulnerabilities'].includes(k)))">
+                <button class="btn btn-primary" onclick="console.log('Available modules:', Object.keys(window).filter(k => ['CONFIG', 'Utils', 'API', 'Auth', 'Targets', 'Dashboard', 'Scans', 'Subdomains', 'Directories', 'PortScanning', 'Vulnerabilities'].includes(k)))">
                     Debug Modules
                 </button>
             </div>

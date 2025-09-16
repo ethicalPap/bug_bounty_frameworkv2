@@ -6,6 +6,7 @@ const scansController = require('../controllers/scans');
 const subdomainsController = require('../controllers/subdomains');
 const directoriesController = require('../controllers/directories');
 const vulnerabilitiesController = require('../controllers/vulnerabilities');
+const portsController = require('../controllers/ports');
 const { authenticateToken, requireRole } = require('../middleware/auth');
 
 const router = express.Router();
@@ -32,6 +33,12 @@ router.post('/subdomains/:id/check-live', subdomainsController.checkLiveStatus);
 // Directories
 router.get('/directories', directoriesController.getDirectories);
 router.get('/directories/stats', directoriesController.getStats);
+
+// Ports
+router.get('/ports', portsController.getPorts);
+router.get('/ports/stats', portsController.getStats);
+router.get('/ports/:id', portsController.getPortById);
+router.put('/ports/:id', portsController.updatePort);
 
 // Vulnerabilities
 router.get('/vulnerabilities', vulnerabilitiesController.getVulnerabilities);

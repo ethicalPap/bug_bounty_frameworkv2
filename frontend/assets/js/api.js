@@ -1,4 +1,4 @@
-// assets/js/api.js
+// frontend/assets/js/api.js
 
 const API = {
     async call(endpoint, options = {}) {
@@ -90,6 +90,29 @@ const API = {
 
         async getStats() {
             return API.call('/directories/stats');
+        }
+    },
+
+    // Ports
+    ports: {
+        async getAll(params = {}) {
+            const queryString = new URLSearchParams(params).toString();
+            return API.call(`/ports${queryString ? '?' + queryString : ''}`);
+        },
+
+        async get(id) {
+            return API.call(`/ports/${id}`);
+        },
+
+        async update(id, data) {
+            return API.call(`/ports/${id}`, {
+                method: 'PUT',
+                body: JSON.stringify(data)
+            });
+        },
+
+        async getStats() {
+            return API.call('/ports/stats');
         }
     },
 

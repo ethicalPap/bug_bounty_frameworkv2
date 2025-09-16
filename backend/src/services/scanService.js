@@ -9,7 +9,7 @@ const Target = require('../models/Target');
 const knex = require('../config/database'); // Add knex for database operations
 
 // Import models with proper error handling
-let Subdomain, Directory, Vulnerability;
+let Subdomain, Directory, Vulnerability, Port;
 try {
   Subdomain = require('../models/Subdomain');
   console.log('✅ Subdomain model loaded');
@@ -30,6 +30,15 @@ try {
 } catch (error) {
   console.warn('⚠️ Vulnerability model not available:', error.message);
 }
+
+
+try {
+  Port = require('../models/Port');
+  console.log('✅ Port model loaded');
+} catch (error) {
+  console.warn('⚠️ Port model not available:', error.message);
+}
+
 
 // Utils helper for JSON parsing
 const Utils = {
@@ -282,63 +291,346 @@ class ScanService {
    * Port scanning
    */
   async runPortScan(scan, target) {
-    console.log(`Running port scan for: ${target.domain}`);
+    console.log(`Running enhanced port scan for: ${target.domain}`);
     
-    await ScanJob.updateProgress(scan.id, 10);
+    await ScanJob.updateProgress(scan.id, 5);
 
     try {
-      // Use nmap for port scanning
-      const nmapCmd = `timeout 600 nmap -T4 --top-ports 1000 -Pn --open ${target.domain}`;
+      // Parse scan config with enhanced options
+      const config = this.safeJsonParse(scan.config, {});
+      const {
+        subdomain_id,
+        port_profile = 'top-1000',
+        custom_ports,
+        scan_technique = 'syn',
+        service_detection = 'version',
+        timing_template = 'T4',
+        max_parallel = 3,
+        live_hosts_only = true
+      } = config;
+
+      console.log('Enhanced port scan config:', config);
+
+      // Get scan targets
+      let scanTargets = [];
       
-      await ScanJob.updateProgress(scan.id, 30);
-
-      const { stdout: nmapOutput } = await execAsync(nmapCmd, {
-        timeout: 620000, // 10.3 minutes
-        maxBuffer: 1024 * 1024 * 10
-      });
-
-      await ScanJob.updateProgress(scan.id, 80);
-
-      // Parse nmap output
-      const openPorts = [];
-      const lines = nmapOutput.split('\n');
-      
-      for (const line of lines) {
-        // Match open ports: "80/tcp   open  http"
-        const portMatch = line.match(/^(\d+)\/(\w+)\s+open\s+(.+)$/);
-        if (portMatch) {
-          openPorts.push({
-            port: parseInt(portMatch[1]),
-            protocol: portMatch[2],
-            service: portMatch[3].trim(),
-            state: 'open'
+      if (subdomain_id) {
+        // Scan specific subdomain
+        try {
+          const subdomain = await knex('subdomains')
+            .where('id', subdomain_id)
+            .first();
+          
+          if (subdomain) {
+            scanTargets.push({
+              subdomain_id: subdomain.id,
+              hostname: subdomain.subdomain,
+              ip_address: subdomain.ip_address
+            });
+            console.log(`Scanning specific subdomain: ${subdomain.subdomain}`);
+          }
+        } catch (error) {
+          console.error('Failed to fetch selected subdomain:', error);
+        }
+      } else {
+        // Get subdomains for scanning
+        try {
+          let query = knex('subdomains')
+            .where('target_id', target.id);
+          
+          if (live_hosts_only) {
+            query = query.where('status', 'active');
+          }
+          
+          const subdomains = await query.limit(max_parallel * 5);
+          
+          scanTargets = subdomains.map(sub => ({
+            subdomain_id: sub.id,
+            hostname: sub.subdomain,
+            ip_address: sub.ip_address
+          }));
+          
+          console.log(`Found ${scanTargets.length} subdomains to scan`);
+          
+          // If no subdomains, scan root domain
+          if (scanTargets.length === 0) {
+            scanTargets.push({
+              subdomain_id: null,
+              hostname: target.domain,
+              ip_address: null
+            });
+            console.log(`No subdomains found, scanning root domain: ${target.domain}`);
+          }
+        } catch (error) {
+          console.error('Failed to fetch subdomains:', error);
+          scanTargets.push({
+            subdomain_id: null,
+            hostname: target.domain,
+            ip_address: null
           });
         }
       }
 
-      // Sort ports numerically
-      openPorts.sort((a, b) => a.port - b.port);
+      if (scanTargets.length === 0) {
+        throw new Error('No targets available for port scanning');
+      }
+
+      await ScanJob.updateProgress(scan.id, 15);
+
+      // Build nmap command
+      const nmapCommand = this.buildNmapCommand(port_profile, custom_ports, scan_technique, service_detection, timing_template);
+      console.log(`Using nmap command: ${nmapCommand}`);
+
+      let allDiscoveredPorts = [];
+      let totalProcessed = 0;
+      const batchSize = Math.min(max_parallel, 3);
+
+      // Process targets in batches
+      for (let i = 0; i < scanTargets.length; i += batchSize) {
+        const batch = scanTargets.slice(i, i + batchSize);
+        
+        console.log(`Processing batch ${Math.floor(i / batchSize) + 1}: ${batch.length} targets`);
+        
+        // Process batch in parallel
+        const batchPromises = batch.map(async (scanTarget) => {
+          return await this.scanSingleTarget(scanTarget, nmapCommand);
+        });
+        
+        const batchResults = await Promise.allSettled(batchPromises);
+        
+        // Collect successful results
+        batchResults.forEach((result, index) => {
+          if (result.status === 'fulfilled' && result.value) {
+            allDiscoveredPorts = allDiscoveredPorts.concat(result.value);
+          } else {
+            console.error(`Failed to scan ${batch[index].hostname}:`, result.reason);
+          }
+        });
+        
+        totalProcessed += batch.length;
+        const progressPercent = 15 + (totalProcessed / scanTargets.length) * 70;
+        await ScanJob.updateProgress(scan.id, Math.round(progressPercent));
+      }
+
+      console.log(`Found ${allDiscoveredPorts.length} total ports`);
+
+      // Store results in database if Port model is available
+      if (Port && allDiscoveredPorts.length > 0) {
+        try {
+          const portRecords = allDiscoveredPorts.map(port => ({
+            subdomain_id: port.subdomain_id,
+            port: port.port,
+            protocol: port.protocol,
+            state: port.state,
+            service: port.service,
+            version: port.version,
+            banner: port.banner,
+            service_info: port.service_info || {},
+            scan_job_id: scan.id
+          }));
+
+          console.log(`Storing ${portRecords.length} ports in database`);
+          const createdRecords = await Port.bulkCreate(portRecords);
+          console.log(`✅ Successfully stored ${createdRecords.length} ports`);
+        } catch (dbError) {
+          console.error('❌ Failed to store ports:', dbError.message);
+        }
+      }
+
+      await ScanJob.updateProgress(scan.id, 95);
 
       const results = {
-        open_ports: openPorts,
-        total_ports: openPorts.length,
-        scan_type: 'top_1000_ports',
+        discovered_ports: allDiscoveredPorts,
+        total_ports: allDiscoveredPorts.length,
+        open_ports: allDiscoveredPorts.filter(p => p.state === 'open').length,
+        scan_targets: scanTargets.length,
+        scan_config: config,
+        nmap_command: nmapCommand,
         scan_timestamp: new Date().toISOString(),
-        target_domain: target.domain,
-        nmap_command: 'nmap -T4 --top-ports 1000 -Pn --open'
+        target_domain: target.domain
       };
 
-      console.log(`Port scan completed for ${target.domain}: found ${openPorts.length} open ports`);
+      console.log(`✅ Port scan completed for ${target.domain}: found ${allDiscoveredPorts.length} ports (${results.open_ports} open)`);
       
       await ScanJob.updateProgress(scan.id, 100);
       return results;
 
     } catch (error) {
+      console.error(`❌ Port scan failed for ${target.domain}:`, error);
       if (error.code === 'ENOENT') {
         throw new Error('Nmap not found. Please install nmap in the container.');
       }
       throw new Error(`Port scan failed: ${error.message}`);
     }
+  }
+
+  // ADD these new methods to your ScanService class:
+
+  /**
+   * Build nmap command based on configuration
+   */
+  buildNmapCommand(profile, customPorts, technique, serviceDetection, timing) {
+    let command = 'nmap';
+    
+    // Add timing template
+    command += ` -${timing}`;
+    
+    // Add scan technique
+    switch (technique) {
+      case 'syn':
+        command += ' -sS';
+        break;
+      case 'connect':
+        command += ' -sT';
+        break;
+      case 'udp':
+        command += ' -sU';
+        break;
+      case 'comprehensive':
+        command += ' -sS -sU';
+        break;
+      default:
+        command += ' -sS';
+    }
+    
+    // Add port specification
+    if (profile === 'custom' && customPorts) {
+      command += ` -p ${customPorts}`;
+    } else {
+      switch (profile) {
+        case 'top-100':
+          command += ' --top-ports 100';
+          break;
+        case 'top-1000':
+          command += ' --top-ports 1000';
+          break;
+        case 'common-tcp':
+          command += ' -p 1-1024';
+          break;
+        case 'common-udp':
+          command += ' -sU --top-ports 100';
+          break;
+        case 'all-tcp':
+          command += ' -p 1-65535';
+          break;
+        default:
+          command += ' --top-ports 1000';
+      }
+    }
+    
+    // Add service detection
+    switch (serviceDetection) {
+      case 'basic':
+        break;
+      case 'version':
+        command += ' -sV';
+        break;
+      case 'aggressive':
+        command += ' -sV -sC -A';
+        break;
+    }
+    
+    // Additional flags
+    command += ' -Pn --open -oG -';
+    
+    return command;
+  }
+
+  /**
+   * Scan a single target with nmap
+   */
+  async scanSingleTarget(scanTarget, nmapCommand) {
+    try {
+      const { hostname, subdomain_id } = scanTarget;
+      
+      console.log(`Scanning ${hostname} with nmap...`);
+      
+      const fullCommand = `timeout 600 ${nmapCommand} ${hostname}`;
+      
+      const { stdout: nmapOutput } = await execAsync(fullCommand, {
+        timeout: 620000,
+        maxBuffer: 1024 * 1024 * 10
+      });
+
+      const ports = this.parseNmapOutput(nmapOutput, hostname, subdomain_id);
+      
+      console.log(`Found ${ports.length} ports on ${hostname}`);
+      return ports;
+      
+    } catch (error) {
+      if (error.code === 'ENOENT') {
+        console.error('Nmap not found');
+        return [];
+      }
+      
+      console.error(`Port scan failed for ${scanTarget.hostname}:`, error.message);
+      return [];
+    }
+  }
+
+  /**
+   * Parse nmap output for port information
+   */
+  parseNmapOutput(nmapOutput, hostname, subdomainId) {
+    const ports = [];
+    
+    try {
+      const lines = nmapOutput.split('\n');
+      
+      for (const line of lines) {
+        // Parse grepable output: Host: 192.168.1.1 ()	Ports: 22/open/tcp//ssh//OpenSSH 7.4/
+        if (line.startsWith('Host:') && line.includes('Ports:')) {
+          const portsSection = line.split('Ports:')[1];
+          if (!portsSection) continue;
+          
+          const portEntries = portsSection.split(',');
+          
+          for (const entry of portEntries) {
+            const parts = entry.trim().split('/');
+            if (parts.length >= 6) {
+              const [portNum, state, protocol, , service, version] = parts;
+              
+              if (state === 'open' || state === 'closed' || state === 'filtered') {
+                ports.push({
+                  subdomain_id: subdomainId,
+                  hostname: hostname,
+                  port: parseInt(portNum),
+                  protocol: protocol || 'tcp',
+                  state: state,
+                  service: service || null,
+                  version: version || null,
+                  banner: null,
+                  service_info: {}
+                });
+              }
+            }
+          }
+        }
+        
+        // Also parse regular format: "80/tcp   open  http"
+        const portMatch = line.match(/^(\d+)\/(tcp|udp)\s+(open|closed|filtered)\s+(.+)$/);
+        if (portMatch) {
+          const [, portNumber, protocol, state, service] = portMatch;
+          
+          ports.push({
+            subdomain_id: subdomainId,
+            hostname: hostname,
+            port: parseInt(portNumber),
+            protocol: protocol,
+            state: state,
+            service: service.trim() || null,
+            version: null,
+            banner: null,
+            service_info: {}
+          });
+        }
+      }
+      
+    } catch (parseError) {
+      console.error('Error parsing nmap output:', parseError.message);
+    }
+    
+    return ports;
   }
 
   /**
