@@ -22,7 +22,7 @@ const generateTokens = (userId, organizationId, role) => {
     role: role
   };
   
-  const accessToken = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '15m' });
+  const accessToken = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '15h' }); // 15 hour expiry so you can stay logged in that long
   const refreshToken = jwt.sign(payload, process.env.JWT_REFRESH_SECRET, { expiresIn: '7d' });
   
   return { accessToken, refreshToken };

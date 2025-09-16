@@ -6,6 +6,7 @@ exports.up = function(knex) {
     table.string('path').notNullable();
     table.string('url').notNullable();
     table.integer('status_code');
+    table.string('source'); // e.g., "gobuster", "ffuf", "custom"
     table.integer('content_length');
     table.integer('response_time');
     table.string('title');

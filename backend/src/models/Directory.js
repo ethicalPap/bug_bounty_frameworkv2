@@ -35,6 +35,10 @@ class Directory {
           query = query.where('directories.status_code', filters.status_code);
         }
       }
+
+      if (filters.source) {
+        query = query.where('directories.source', filters.source);
+      }
       
       if (filters.search) {
         query = query.where(function() {

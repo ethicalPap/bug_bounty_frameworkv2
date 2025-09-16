@@ -1,4 +1,4 @@
-// assets/js/modules/directories.js
+// frontend/assets/js/modules/directories.js - UPDATED FOR PASSIVE DISCOVERY
 
 const Directories = {
     async init() {
@@ -12,12 +12,12 @@ const Directories = {
         const content = document.getElementById('main-content');
         content.innerHTML = `
             <div class="scan-info">
-                <h4>📁 Content Discovery</h4>
-                <p>Discover hidden files, directories, and endpoints using content discovery techniques. Finds admin panels, backup files, configuration files, and other interesting resources.</p>
+                <h4>🔍 Passive Content Discovery</h4>
+                <p>Discover hidden files, directories, and endpoints using passive techniques like robots.txt analysis, sitemap crawling, Wayback Machine, JavaScript analysis, and web crawling. Stealthy approach that won't trigger rate limiting or blocking.</p>
             </div>
 
             <div class="card">
-                <div class="card-title">Start Content Discovery</div>
+                <div class="card-title">Start Passive Content Discovery</div>
                 <div id="content-discovery-messages"></div>
                 <form id="content-discovery-form">
                     <div style="display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: 16px; align-items: end;">
@@ -34,16 +34,62 @@ const Directories = {
                             </select>
                         </div>
                         <div class="form-group">
-                            <label>Wordlist</label>
-                            <select id="content-discovery-wordlist">
-                                <option value="common">Common Paths</option>
-                                <option value="big">Big Wordlist</option>
-                                <option value="medium">Medium Wordlist</option>
+                            <label>Discovery Method</label>
+                            <select id="content-discovery-method">
+                                <option value="comprehensive">Comprehensive (All Methods)</option>
+                                <option value="fast">Fast (robots.txt, sitemap, wayback)</option>
+                                <option value="crawl_only">Web Crawling Only</option>
+                                <option value="osint_only">OSINT Only (no crawling)</option>
                             </select>
                         </div>
-                        <button type="submit" class="btn btn-primary">📁 Start Discovery</button>
+                        <button type="submit" class="btn btn-primary">🕷️ Start Discovery</button>
+                    </div>
+                    
+                    <!-- Advanced Options -->
+                    <div style="margin-top: 15px; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px;">
+                        <div class="form-group">
+                            <label>Max Crawl Depth</label>
+                            <select id="crawl-depth">
+                                <option value="1">1 level (fast)</option>
+                                <option value="2" selected>2 levels (recommended)</option>
+                                <option value="3">3 levels (thorough)</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Max Pages</label>
+                            <select id="max-pages">
+                                <option value="25">25 pages (fast)</option>
+                                <option value="50" selected>50 pages (recommended)</option>
+                                <option value="100">100 pages (thorough)</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Include JavaScript Analysis</label>
+                            <select id="js-analysis">
+                                <option value="true" selected>Yes (recommended)</option>
+                                <option value="false">No (faster)</option>
+                            </select>
+                        </div>
                     </div>
                 </form>
+                
+                <!-- Discovery Methods Info -->
+                <div style="margin-top: 20px; padding: 15px; border: 1px solid #003300; background-color: #001100;">
+                    <h5 style="color: #00ff00; margin-bottom: 10px;">🛡️ Passive Discovery Methods Used:</h5>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 13px; color: #00cc00;">
+                        <div>📋 robots.txt analysis</div>
+                        <div>🗺️ sitemap.xml parsing</div>
+                        <div>🕐 Wayback Machine archives</div>
+                        <div>🕷️ Gentle web crawling</div>
+                        <div>📄 JavaScript endpoint extraction</div>
+                        <div>🌐 Common Crawl data</div>
+                        <div>🔒 Certificate Transparency logs</div>
+                        <div>🕸️ ZAP Ajax Spider (if available)</div>
+                    </div>
+                    <div style="margin-top: 10px; font-size: 12px; color: #666666;">
+                        ⚡ Stealth mode: No brute forcing, no rate limiting concerns, WAF-friendly
+                    </div>
+                </div>
             </div>
 
             <div class="filters">
@@ -57,6 +103,19 @@ const Directories = {
                     <label>Subdomain</label>
                     <select id="directory-subdomain-filter">
                         <option value="">All Subdomains</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label>Discovery Source</label>
+                    <select id="directory-source-filter">
+                        <option value="">All Sources</option>
+                        <option value="robots.txt">robots.txt</option>
+                        <option value="sitemap.xml">Sitemap</option>
+                        <option value="wayback_machine">Wayback Machine</option>
+                        <option value="web_crawl">Web Crawl</option>
+                        <option value="javascript_analysis">JavaScript</option>
+                        <option value="common_crawl">Common Crawl</option>
+                        <option value="zap_spider">ZAP Spider</option>
                     </select>
                 </div>
                 <div class="filter-group">
@@ -77,13 +136,14 @@ const Directories = {
             </div>
 
             <div class="card">
-                <div class="card-title">Discovered Directories & Files</div>
+                <div class="card-title">Discovered Content & Endpoints</div>
                 <div class="table-container">
                     <table class="table">
                         <thead>
                             <tr>
                                 <th>Path</th>
                                 <th>Subdomain</th>
+                                <th>Source</th>
                                 <th>Status</th>
                                 <th>Size</th>
                                 <th>Title</th>
@@ -92,7 +152,7 @@ const Directories = {
                         </thead>
                         <tbody id="directories-list">
                             <tr>
-                                <td colspan="6" style="text-align: center; color: #006600;">Loading directories...</td>
+                                <td colspan="7" style="text-align: center; color: #006600;">Loading discovered content...</td>
                             </tr>
                         </tbody>
                     </table>
@@ -108,7 +168,7 @@ const Directories = {
         if (contentDiscoveryForm) {
             contentDiscoveryForm.addEventListener('submit', async (e) => {
                 e.preventDefault();
-                await this.startContentDiscovery();
+                await this.startPassiveDiscovery();
             });
         }
 
@@ -130,7 +190,7 @@ const Directories = {
         }
 
         // Other filters
-        ['directory-subdomain-filter', 'directory-status-filter'].forEach(filterId => {
+        ['directory-subdomain-filter', 'directory-source-filter', 'directory-status-filter'].forEach(filterId => {
             const element = document.getElementById(filterId);
             if (element) {
                 element.addEventListener('change', () => this.load(1));
@@ -166,7 +226,6 @@ const Directories = {
                     targetSelect.appendChild(option);
                 });
 
-                // Restore previous selection
                 if (currentValue && targets.find(t => t.id == currentValue)) {
                     targetSelect.value = currentValue;
                 }
@@ -185,17 +244,13 @@ const Directories = {
                     contentTargetSelect.appendChild(option);
                 });
 
-                // Restore previous selection
                 if (currentValue && targets.find(t => t.id == currentValue)) {
                     contentTargetSelect.value = currentValue;
-                    // Reload subdomains for the restored target
                     await this.loadContentDiscoverySubdomains();
                 }
             }
 
-            console.log(`Loaded ${targets.length} targets for directory filter`);
-            
-            // Load subdomains for the initially selected target (if any)
+            console.log(`Loaded ${targets.length} targets for passive discovery`);
             await this.loadSubdomains();
             
         } catch (error) {
@@ -211,14 +266,10 @@ const Directories = {
             
             if (!subdomainSelect) return;
 
-            // Store current selection
             const currentValue = subdomainSelect.value;
-            
-            // Reset subdomain dropdown
             subdomainSelect.innerHTML = '<option value="">All Subdomains</option>';
             
             if (!targetId) {
-                // If no target selected, load all subdomains
                 const response = await API.subdomains.getAll({ limit: 1000 });
                 if (response && response.ok) {
                     const data = await response.json();
@@ -230,11 +281,8 @@ const Directories = {
                         option.textContent = `${subdomain.subdomain} (${subdomain.target_domain})`;
                         subdomainSelect.appendChild(option);
                     });
-                    
-                    console.log(`Loaded ${subdomains.length} subdomains (all targets)`);
                 }
             } else {
-                // Load subdomains for specific target
                 const response = await API.subdomains.getAll({ 
                     target_id: targetId,
                     limit: 1000
@@ -250,12 +298,9 @@ const Directories = {
                         option.textContent = subdomain.subdomain;
                         subdomainSelect.appendChild(option);
                     });
-                    
-                    console.log(`Loaded ${subdomains.length} subdomains for target ${targetId}`);
                 }
             }
             
-            // Restore previous selection if it still exists
             if (currentValue) {
                 const optionExists = Array.from(subdomainSelect.options).some(option => option.value === currentValue);
                 if (optionExists) {
@@ -276,17 +321,11 @@ const Directories = {
             
             if (!subdomainSelect) return;
 
-            // Store current selection
             const currentValue = subdomainSelect.value;
-            
-            // Reset subdomain dropdown
             subdomainSelect.innerHTML = '<option value="">All subdomains</option>';
             
-            if (!targetId) {
-                return;
-            }
+            if (!targetId) return;
 
-            // Load subdomains for specific target
             const response = await API.subdomains.getAll({ 
                 target_id: targetId,
                 limit: 1000
@@ -302,11 +341,8 @@ const Directories = {
                     option.textContent = subdomain.subdomain;
                     subdomainSelect.appendChild(option);
                 });
-                
-                console.log(`Loaded ${subdomains.length} subdomains for content discovery`);
             }
             
-            // Restore previous selection if it still exists
             if (currentValue) {
                 const optionExists = Array.from(subdomainSelect.options).some(option => option.value === currentValue);
                 if (optionExists) {
@@ -323,7 +359,7 @@ const Directories = {
         try {
             const targetId = document.getElementById('directory-target-filter')?.value;
             const subdomainId = document.getElementById('directory-subdomain-filter')?.value;
-            const subdomainStatus = document.getElementById('directory-subdomain-status-filter')?.value;
+            const sourceFilter = document.getElementById('directory-source-filter')?.value;
             const statusCode = document.getElementById('directory-status-filter')?.value;
             const search = document.getElementById('directory-search')?.value;
             
@@ -334,7 +370,7 @@ const Directories = {
             
             if (targetId) params.target_id = targetId;
             if (subdomainId) params.subdomain_id = subdomainId;
-            if (subdomainStatus) params.subdomain_status = subdomainStatus;
+            if (sourceFilter) params.source = sourceFilter;
             if (statusCode) params.status_code = statusCode;
             if (search) params.search = search;
 
@@ -358,7 +394,7 @@ const Directories = {
         } catch (error) {
             console.error('Failed to load directories:', error);
             document.getElementById('directories-list').innerHTML = 
-                '<tr><td colspan="6" style="text-align: center; color: #ff0000;">Failed to load directories</td></tr>';
+                '<tr><td colspan="7" style="text-align: center; color: #ff0000;">Failed to load directories</td></tr>';
         }
     },
 
@@ -371,7 +407,12 @@ const Directories = {
                     <td style="font-family: 'Courier New', monospace; color: #00ff00;">${directory.path}</td>
                     <td style="color: #00cc00;">${directory.subdomain}</td>
                     <td>
-                        <span class="status ${Utils.getStatusColor(directory.status_code)}">${directory.status_code}</span>
+                        <span class="status" style="padding: 2px 6px; border: 1px solid #006600; color: #00aa00; font-size: 11px;">
+                            ${this.getSourceIcon(directory.source || 'unknown')} ${directory.source || 'unknown'}
+                        </span>
+                    </td>
+                    <td>
+                        <span class="status ${Utils.getStatusColor(directory.status_code)}">${directory.status_code || '-'}</span>
                     </td>
                     <td>${Utils.formatBytes(directory.content_length)}</td>
                     <td style="max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${directory.title || ''}">${directory.title || '-'}</td>
@@ -381,15 +422,33 @@ const Directories = {
                 </tr>
             `).join('');
         } else {
-            directoriesList.innerHTML = '<tr><td colspan="6" style="text-align: center; color: #006600;">No directories found. Run a content discovery scan to find directories!</td></tr>';
+            directoriesList.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #006600;">No content discovered yet. Run a passive content discovery scan to find directories and endpoints!</td></tr>';
         }
     },
 
-    // Start content discovery scan
-    async startContentDiscovery() {
+    getSourceIcon(source) {
+        const icons = {
+            'robots.txt': '📋',
+            'sitemap.xml': '🗺️',
+            'wayback_machine': '🕐',
+            'web_crawl': '🕷️',
+            'javascript_analysis': '📄',
+            'common_crawl': '🌐',
+            'certificate_transparency': '🔒',
+            'zap_spider': '🕸️',
+            'unknown': '❓'
+        };
+        return icons[source] || '❓';
+    },
+
+    // Start passive content discovery scan
+    async startPassiveDiscovery() {
         const targetId = document.getElementById('content-discovery-target').value;
         const subdomainId = document.getElementById('content-discovery-subdomain').value;
-        const wordlist = document.getElementById('content-discovery-wordlist').value;
+        const method = document.getElementById('content-discovery-method').value;
+        const crawlDepth = document.getElementById('crawl-depth').value;
+        const maxPages = document.getElementById('max-pages').value;
+        const jsAnalysis = document.getElementById('js-analysis').value === 'true';
         
         if (!targetId) {
             Utils.showMessage('Please select a target', 'error', 'content-discovery-messages');
@@ -399,28 +458,58 @@ const Directories = {
         try {
             const scanTypes = ['content_discovery'];
             const config = {
-                wordlist: wordlist,
-                subdomain_id: subdomainId || null
+                discovery_method: method,
+                subdomain_id: subdomainId || null,
+                max_depth: parseInt(crawlDepth),
+                max_pages: parseInt(maxPages),
+                javascript_analysis: jsAnalysis,
+                passive_mode: true // Flag to indicate passive discovery
             };
+            
+            Utils.showMessage('🕷️ Starting passive content discovery...', 'info', 'content-discovery-messages');
             
             const response = await API.scans.start(targetId, scanTypes, 'medium', config);
             
             if (response && response.ok) {
-                Utils.showMessage('Content discovery scan started successfully! Check the Subdomain Scans tab to monitor progress.', 'success', 'content-discovery-messages');
+                const data = await response.json();
+                console.log('Passive content discovery started:', data);
+                
+                const methodDescription = this.getMethodDescription(method);
+                Utils.showMessage(
+                    `🔍 Passive content discovery started successfully! Using ${methodDescription}. Check the Subdomain Scans tab to monitor progress.`, 
+                    'success', 
+                    'content-discovery-messages'
+                );
                 
                 // Reset form
                 document.getElementById('content-discovery-subdomain').value = '';
-                document.getElementById('content-discovery-wordlist').value = 'common';
+                document.getElementById('content-discovery-method').value = 'comprehensive';
+                
+                // Refresh the directories list after a delay
+                setTimeout(() => {
+                    this.load();
+                }, 5000);
+                
             } else {
                 const errorData = await response.json();
-                Utils.showMessage('Failed to start content discovery: ' + (errorData.error || errorData.message || 'Unknown error'), 'error', 'content-discovery-messages');
+                Utils.showMessage('Failed to start passive discovery: ' + (errorData.error || errorData.message || 'Unknown error'), 'error', 'content-discovery-messages');
             }
         } catch (error) {
-            Utils.showMessage('Failed to start content discovery: ' + error.message, 'error', 'content-discovery-messages');
+            Utils.showMessage('Failed to start passive discovery: ' + error.message, 'error', 'content-discovery-messages');
         }
     },
 
-    // Method to refresh targets and subdomains (useful when called from other modules)
+    getMethodDescription(method) {
+        const descriptions = {
+            'comprehensive': 'all passive methods (robots.txt, sitemap, wayback, crawling, JS analysis)',
+            'fast': 'fast methods (robots.txt, sitemap, wayback machine)',
+            'crawl_only': 'web crawling only',
+            'osint_only': 'OSINT methods only (no active crawling)'
+        };
+        return descriptions[method] || 'passive discovery methods';
+    },
+
+    // Method to refresh targets and subdomains
     async refreshFilters() {
         await this.loadTargets();
     }
