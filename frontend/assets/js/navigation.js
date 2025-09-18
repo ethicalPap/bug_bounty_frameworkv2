@@ -1,4 +1,4 @@
-// frontend/assets/js/navigation.js
+// frontend/assets/js/navigation.js - ENHANCED WITH PORT SCANNING AUTO-REFRESH
 
 const Navigation = {
     init() {
@@ -24,6 +24,9 @@ const Navigation = {
     },
 
     switchTab(tab) {
+        // Cleanup any active auto-refresh from previous tab
+        this.cleanupPreviousTab();
+
         // Update navigation
         document.querySelectorAll('.nav-item').forEach(item => {
             item.classList.remove('active');
@@ -43,8 +46,33 @@ const Navigation = {
         // Load content for the specific tab
         this.loadTabContent(tab);
 
-        // Handle auto-refresh for scans
+        // Handle auto-refresh for specific tabs
         this.handleAutoRefresh(tab);
+    },
+
+    // NEW: Cleanup method for tab switching
+    cleanupPreviousTab() {
+        // Stop general auto-refresh
+        if (window.AppState && AppState.refreshInterval) {
+            clearInterval(AppState.refreshInterval);
+            AppState.refreshInterval = null;
+        }
+
+        // Stop port scanning specific auto-refresh
+        if (window.PortScanning && typeof window.PortScanning.cleanup === 'function') {
+            window.PortScanning.cleanup();
+        }
+
+        // Stop any other module-specific intervals
+        if (window.Subdomains && window.Subdomains.refreshInterval) {
+            clearInterval(window.Subdomains.refreshInterval);
+            window.Subdomains.refreshInterval = null;
+        }
+
+        if (window.Directories && window.Directories.refreshInterval) {
+            clearInterval(window.Directories.refreshInterval);
+            window.Directories.refreshInterval = null;
+        }
     },
 
     async loadTabContent(tab) {
@@ -191,6 +219,9 @@ const Navigation = {
                 }
                 break;
             case 'port-scanning':
+                if (window.PortScanning && typeof window.PortScanning.loadSubdomains === 'function') {
+                    window.PortScanning.loadSubdomains();
+                }
                 if (window.PortScanning && typeof window.PortScanning.load === 'function') {
                     window.PortScanning.load();
                 }
@@ -210,13 +241,15 @@ const Navigation = {
             AppState.refreshInterval = null;
         }
 
-        // Start auto-refresh for scans tab
+        // Start auto-refresh for specific tabs
         if (tab === 'scans') {
-            setTimeout(() => this.startAutoRefresh(), 1000);
+            setTimeout(() => this.startScanAutoRefresh(), 1000);
         }
+        // Note: Port scanning has its own auto-refresh mechanism that starts in the init() method
+        // No need to start it here as it's handled by the PortScanning module itself
     },
 
-    startAutoRefresh() {
+    startScanAutoRefresh() {
         if (!window.AppState) {
             console.warn('AppState not available for auto-refresh');
             return;
@@ -324,6 +357,14 @@ const Navigation = {
                     </select>
                 </div>
                 <div class="form-group">
+                    <label>Auto-refresh Status</label>
+                    <div style="font-family: 'Courier New', monospace; font-size: 12px; color: #006600; padding: 10px; border: 1px solid #003300; background-color: #001100;">
+                        <div>General Auto-refresh: ${window.AppState?.refreshInterval ? '🟢 Active' : '🔴 Inactive'}</div>
+                        <div>Port Scanning Auto-refresh: ${window.PortScanning?.refreshInterval ? '🟢 Active' : '🔴 Inactive'}</div>
+                        <div>Active Scans Being Monitored: ${window.PortScanning?.activeScanJobId ? '🟢 Yes' : '🔴 No'}</div>
+                    </div>
+                </div>
+                <div class="form-group">
                     <label>Module Status</label>
                     <div style="font-family: 'Courier New', monospace; font-size: 12px; color: #006600; padding: 10px; border: 1px solid #003300; background-color: #001100;">
                         <div>CONFIG: ${window.CONFIG ? '✅ Loaded' : '❌ Not Found'}</div>
@@ -342,6 +383,9 @@ const Navigation = {
                 </div>
                 <button class="btn btn-primary" onclick="console.log('Available modules:', Object.keys(window).filter(k => ['CONFIG', 'Utils', 'API', 'Auth', 'Targets', 'Dashboard', 'Scans', 'Subdomains', 'Directories', 'PortScanning', 'Vulnerabilities'].includes(k)))">
                     Debug Modules
+                </button>
+                <button class="btn btn-secondary" onclick="Navigation.cleanupPreviousTab(); console.log('Cleaned up all auto-refresh intervals');">
+                    Stop All Auto-refresh
                 </button>
             </div>
         `;

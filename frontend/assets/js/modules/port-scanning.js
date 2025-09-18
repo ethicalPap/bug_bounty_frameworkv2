@@ -1,19 +1,38 @@
-// frontend/assets/js/modules/port-scanning.js
+// frontend/assets/js/modules/port-scanning.js - ENHANCED WITH REAL-TIME UPDATES
 
 const PortScanning = {
+    refreshInterval: null,
+    activeScanJobId: null,
+
     async init() {
         this.renderHTML();
         this.bindEvents();
         await this.loadTargets();
         await this.load();
+        this.startAutoRefresh(); // Start real-time updates
     },
 
     renderHTML() {
         const content = document.getElementById('main-content');
         content.innerHTML = `
+            <!-- Real-time status indicator -->
+            <div id="port-scan-status" style="display: none; background-color: #001100; border: 2px solid #00ff00; padding: 12px; margin-bottom: 15px;">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <div class="spinner" style="margin: 0;"></div>
+                    <span id="port-scan-status-text" style="color: #00ff00; font-family: 'Courier New', monospace;">Port scan in progress...</span>
+                    <button onclick="PortScanning.stopActiveScan()" class="btn btn-danger btn-small" style="margin-left: auto;">Stop Scan</button>
+                </div>
+                <div id="port-scan-progress" style="margin-top: 8px;">
+                    <div style="background-color: #003300; border: 1px solid #00ff00; height: 8px; width: 100%;">
+                        <div id="port-scan-progress-bar" style="background-color: #00ff00; height: 100%; width: 0%; transition: width 0.3s ease;"></div>
+                    </div>
+                    <div id="port-scan-progress-text" style="font-size: 12px; color: #00cc00; margin-top: 4px;"></div>
+                </div>
+            </div>
+
             <div class="scan-info">
-                <h4>🔌 Port Scanning</h4>
-                <p>Discover open ports and services on your targets using nmap. Identify running services, versions, and potential attack vectors across your discovered subdomains.</p>
+                <h4>🔌 Port Scanning <span id="port-scan-live-indicator" style="color: #00ff00; font-size: 12px;">[LIVE]</span></h4>
+                <p>Discover open ports and services on your targets using nmap. Scans update automatically in real-time.</p>
             </div>
 
             <div class="card">
@@ -44,7 +63,7 @@ const PortScanning = {
                                 <option value="custom">Custom Port Range</option>
                             </select>
                         </div>
-                        <button type="submit" class="btn btn-primary">🔌 Start Port Scan</button>
+                        <button type="submit" class="btn btn-primary" id="port-scan-btn">🔌 Start Port Scan</button>
                     </div>
                     
                     <!-- Advanced Options -->
@@ -143,7 +162,10 @@ const PortScanning = {
             </div>
 
             <div class="card">
-                <div class="card-title">Discovered Ports & Services</div>
+                <div class="card-title">
+                    Discovered Ports & Services
+                    <span id="last-updated" style="font-size: 12px; color: #666; float: right;"></span>
+                </div>
                 
                 <!-- Port Stats -->
                 <div id="port-stats" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; margin-bottom: 20px; padding: 15px; border: 1px solid #003300; background-color: #001100;">
@@ -248,6 +270,113 @@ const PortScanning = {
         const serviceSearch = document.getElementById('service-search');
         if (serviceSearch) {
             serviceSearch.addEventListener('input', Utils.debounce(() => this.load(1), 500));
+        }
+    },
+
+    // NEW: Start auto-refresh functionality
+    startAutoRefresh() {
+        // Stop any existing refresh
+        this.stopAutoRefresh();
+        
+        console.log('🔄 Starting port scanning auto-refresh');
+        
+        this.refreshInterval = setInterval(async () => {
+            try {
+                // Check for active port scans
+                await this.checkActiveScanJobs();
+                
+                // Refresh port data
+                await this.load(AppState.currentPageData.ports?.page || 1);
+                
+                // Update last updated time
+                document.getElementById('last-updated').textContent = 
+                    `Last updated: ${new Date().toLocaleTimeString()}`;
+                
+            } catch (error) {
+                console.error('Auto-refresh failed:', error);
+            }
+        }, 3000); // Refresh every 3 seconds
+    },
+
+    // NEW: Stop auto-refresh
+    stopAutoRefresh() {
+        if (this.refreshInterval) {
+            clearInterval(this.refreshInterval);
+            this.refreshInterval = null;
+            console.log('🛑 Stopped port scanning auto-refresh');
+        }
+    },
+
+    // NEW: Check for active port scan jobs
+    async checkActiveScanJobs() {
+        try {
+            const response = await API.scans.getJobs({ 
+                job_type: 'port_scan',
+                status: ['pending', 'running'],
+                limit: 50 
+            });
+            
+            if (response && response.ok) {
+                const data = await response.json();
+                const activeScans = data.success ? data.data : [];
+                
+                if (activeScans.length > 0) {
+                    this.showScanProgress(activeScans[0]); // Show the most recent active scan
+                } else {
+                    this.hideScanProgress();
+                }
+            }
+        } catch (error) {
+            console.error('Failed to check active scan jobs:', error);
+        }
+    },
+
+    // NEW: Show scan progress
+    showScanProgress(scan) {
+        const statusDiv = document.getElementById('port-scan-status');
+        const statusText = document.getElementById('port-scan-status-text');
+        const progressBar = document.getElementById('port-scan-progress-bar');
+        const progressText = document.getElementById('port-scan-progress-text');
+        
+        if (statusDiv && statusText && progressBar && progressText) {
+            this.activeScanJobId = scan.id;
+            
+            statusDiv.style.display = 'block';
+            statusText.textContent = `Port scan in progress for ${scan.domain || 'target'}...`;
+            
+            const progress = scan.progress_percentage || 0;
+            progressBar.style.width = `${progress}%`;
+            
+            const elapsed = scan.started_at ? 
+                Math.round((Date.now() - new Date(scan.started_at).getTime()) / 1000) : 0;
+            
+            progressText.textContent = `Progress: ${progress}% • Elapsed: ${elapsed}s • Type: ${scan.job_type}`;
+        }
+    },
+
+    // NEW: Hide scan progress
+    hideScanProgress() {
+        const statusDiv = document.getElementById('port-scan-status');
+        if (statusDiv) {
+            statusDiv.style.display = 'none';
+        }
+        this.activeScanJobId = null;
+    },
+
+    // NEW: Stop active scan
+    async stopActiveScan() {
+        if (this.activeScanJobId) {
+            try {
+                const response = await API.scans.stop(this.activeScanJobId);
+                if (response && response.ok) {
+                    Utils.showMessage('Port scan stopped successfully!', 'success', 'port-scan-messages');
+                    this.hideScanProgress();
+                } else {
+                    Utils.showMessage('Failed to stop port scan', 'error', 'port-scan-messages');
+                }
+            } catch (error) {
+                Utils.showMessage('Failed to stop scan: ' + error.message, 'error', 'port-scan-messages');
+            }
         }
     },
 
@@ -547,6 +676,13 @@ const PortScanning = {
         }
         
         try {
+            // Set button loading state
+            const scanBtn = document.getElementById('port-scan-btn');
+            if (scanBtn) {
+                scanBtn.disabled = true;
+                scanBtn.innerHTML = '<span class="spinner"></span>Starting Scan...';
+            }
+            
             const scanTypes = ['port_scan'];
             const config = {
                 subdomain_id: subdomainId || null,
@@ -568,7 +704,7 @@ const PortScanning = {
                 console.log('Port scan started:', data);
                 
                 Utils.showMessage(
-                    `🔌 Port scan started successfully! Scanning ${profile} ports${subdomainId ? ' on selected subdomain' : ' on all active subdomains'}. Check the Subdomain Scans tab to monitor progress.`, 
+                    `🔌 Port scan started successfully! Scanning ${profile} ports${subdomainId ? ' on selected subdomain' : ' on all active subdomains'}. Progress will update automatically below.`, 
                     'success', 
                     'port-scan-messages'
                 );
@@ -577,10 +713,10 @@ const PortScanning = {
                 document.getElementById('port-scan-subdomain').value = '';
                 document.getElementById('port-scan-profile').value = 'top-1000';
                 
-                // Refresh the ports list after a delay
+                // Start checking for active scans immediately
                 setTimeout(() => {
-                    this.load();
-                }, 5000);
+                    this.checkActiveScanJobs();
+                }, 1000);
                 
             } else {
                 const errorData = await response.json();
@@ -588,6 +724,13 @@ const PortScanning = {
             }
         } catch (error) {
             Utils.showMessage('Failed to start port scan: ' + error.message, 'error', 'port-scan-messages');
+        } finally {
+            // Reset button
+            const scanBtn = document.getElementById('port-scan-btn');
+            if (scanBtn) {
+                scanBtn.disabled = false;
+                scanBtn.innerHTML = '🔌 Start Port Scan';
+            }
         }
     },
 
@@ -618,6 +761,12 @@ const PortScanning = {
         }
         
         return null; // For non-web services, we can't build a URL
+    },
+
+    // Cleanup method
+    cleanup() {
+        this.stopAutoRefresh();
+        this.hideScanProgress();
     }
 };
 
