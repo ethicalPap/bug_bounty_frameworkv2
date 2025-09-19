@@ -51,28 +51,28 @@ services:
     environment:
       NODE_ENV: production
       PORT: 3001
-      
+     
       # Database Configuration
       DB_HOST: postgres
       DB_PORT: 5432
       DB_NAME: framework
       DB_USER: papv2
       DB_PASSWORD: password
-      
+     
       # Redis Configuration
       REDIS_HOST: redis
       REDIS_PORT: 6379
-      
+     
       # JWT Secrets (CHANGE IN PRODUCTION!)
       JWT_SECRET: your-super-secret-jwt-key-change-in-production-12345
       JWT_REFRESH_SECRET: your-super-secret-refresh-key-change-in-production-67890
-      
+     
       # Frontend URL
       FRONTEND_URL: http://localhost:3000
-      
+     
       # Run database initialization
       RUN_SEEDS: "false"
-      
+     
     depends_on:
       postgres:
         condition: service_healthy
@@ -90,6 +90,13 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
+    # Network capabilities for nmap SYN scans
+    cap_add:
+      - NET_RAW        # Allows raw socket creation for nmap SYN scans
+      - NET_ADMIN      # Allows network administration tasks
+    # Optional: Additional security options if needed
+    # security_opt:
+    #   - apparmor:unconfined
 
   # Frontend (nginx serving the frontend directory)
   frontend:

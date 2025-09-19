@@ -1,9 +1,8 @@
-// backend/src/services/contentDiscoveryService.js - PASSIVE STEALTH DISCOVERY
+// backend/src/services/contentDiscoveryService.js - Using native fetch instead of axios
 
 const { exec } = require('child_process');
 const { promisify } = require('util');
 const execAsync = promisify(exec);
-const axios = require('axios');
 const cheerio = require('cheerio');
 const ScanJob = require('../models/ScanJob');
 const knex = require('../config/database');
@@ -47,7 +46,6 @@ async function runEnhancedContentDiscovery(scan, target) {
     let scanTargets = [];
     
     if (subdomain_id) {
-      // Scan specific subdomain
       try {
         const subdomain = await knex('subdomains')
           .where('id', subdomain_id)
@@ -65,12 +63,11 @@ async function runEnhancedContentDiscovery(scan, target) {
         console.error('Failed to fetch selected subdomain:', error);
       }
     } else {
-      // Scan all active subdomains for this target
       try {
         const subdomains = await knex('subdomains')
           .where('target_id', target.id)
           .where('status', 'active')
-          .limit(10); // Reasonable limit
+          .limit(10);
         
         scanTargets = subdomains.map(sub => ({
           subdomain_id: sub.id,
@@ -80,7 +77,6 @@ async function runEnhancedContentDiscovery(scan, target) {
         
         console.log(`Found ${scanTargets.length} active subdomains to scan`);
         
-        // If no subdomains, scan root domain
         if (scanTargets.length === 0) {
           scanTargets.push({
             subdomain_id: null,
@@ -138,14 +134,7 @@ async function runEnhancedContentDiscovery(scan, target) {
         targetContent = targetContent.concat(jsContent);
       }
       
-      // Phase 5: ZAP Ajax Spider (if available)
-      if (discovery_method === 'comprehensive' || discovery_method === 'spider_only') {
-        await ScanJob.updateProgress(scan.id, 65 + (totalProcessed / scanTargets.length) * 15);
-        const zapContent = await runZapAjaxSpider(scanTarget, max_depth);
-        targetContent = targetContent.concat(zapContent);
-      }
-      
-      // Phase 6: HTML analysis for forms, parameters, AJAX calls
+      // Phase 5: HTML analysis for forms, parameters, AJAX calls
       await ScanJob.updateProgress(scan.id, 75 + (totalProcessed / scanTargets.length) * 10);
       const htmlContent = await analyzeHTMLContent(scanTarget, parameter_extraction);
       targetContent = targetContent.concat(htmlContent);
@@ -214,7 +203,6 @@ async function runEnhancedContentDiscovery(scan, target) {
         'sitemap.xml parsing', 
         javascript_execution ? 'JavaScript analysis' : null,
         discovery_method.includes('wayback') ? 'Wayback Machine' : null,
-        discovery_method.includes('spider') ? 'ZAP Ajax Spider' : null,
         'HTML content analysis'
       ].filter(Boolean),
       scan_timestamp: new Date().toISOString(),
@@ -240,17 +228,17 @@ async function analyzeRobotsTxt(scanTarget) {
   try {
     console.log(`📋 Analyzing robots.txt for ${scanTarget.hostname}`);
     
-    const response = await axios.get(`${scanTarget.base_url}/robots.txt`, {
+    const response = await fetch(`${scanTarget.base_url}/robots.txt`, {
       timeout: 10000,
-      validateStatus: () => true,
       headers: {
         'User-Agent': 'Mozilla/5.0 (compatible; SecurityScanner/1.0)'
       }
     });
 
-    if (response.status === 200 && response.data) {
+    if (response.ok) {
+      const data = await response.text();
       const content = [];
-      const lines = response.data.split('\n');
+      const lines = data.split('\n');
       
       lines.forEach(line => {
         const disallowMatch = line.match(/^Disallow:\s*(.+)$/i);
@@ -325,16 +313,16 @@ async function analyzeSitemap(scanTarget) {
     
     for (const sitemapUrl of sitemapUrls) {
       try {
-        const response = await axios.get(sitemapUrl, {
+        const response = await fetch(sitemapUrl, {
           timeout: 10000,
-          validateStatus: () => true,
           headers: {
             'User-Agent': 'Mozilla/5.0 (compatible; SecurityScanner/1.0)'
           }
         });
 
-        if (response.status === 200 && response.data) {
-          const urlMatches = response.data.match(/<loc>(.*?)<\/loc>/g);
+        if (response.ok) {
+          const data = await response.text();
+          const urlMatches = data.match(/<loc>(.*?)<\/loc>/g);
           
           if (urlMatches) {
             urlMatches.forEach(match => {
@@ -382,16 +370,16 @@ async function analyzeWaybackMachine(scanTarget) {
     
     const waybackUrl = `http://web.archive.org/cdx/search/cdx?url=${scanTarget.hostname}/*&output=json&collapse=urlkey&limit=1000`;
     
-    const response = await axios.get(waybackUrl, {
+    const response = await fetch(waybackUrl, {
       timeout: 15000,
       headers: {
         'User-Agent': 'Mozilla/5.0 (compatible; SecurityScanner/1.0)'
       }
     });
 
-    if (response.status === 200 && response.data) {
+    if (response.ok) {
+      const data = await response.json();
       const content = [];
-      const data = Array.isArray(response.data) ? response.data : [];
       
       // Skip header row
       data.slice(1).forEach(entry => {
@@ -435,16 +423,17 @@ async function analyzeJavaScript(scanTarget, parameterExtraction) {
     const content = [];
     
     // First, get the main page to find JS files
-    const response = await axios.get(scanTarget.base_url, {
+    const response = await fetch(scanTarget.base_url, {
       timeout: 10000,
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
       }
     });
 
-    if (response.status !== 200) return [];
+    if (!response.ok) return [];
     
-    const $ = cheerio.load(response.data);
+    const html = await response.text();
+    const $ = cheerio.load(html);
     const jsUrls = [];
     
     // Find script tags
@@ -463,31 +452,29 @@ async function analyzeJavaScript(scanTarget, parameterExtraction) {
     // Analyze each JS file
     for (const jsUrl of jsUrls.slice(0, 10)) { // Limit to 10 JS files
       try {
-        const jsResponse = await axios.get(jsUrl, {
+        const jsResponse = await fetch(jsUrl, {
           timeout: 10000,
           headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
           }
         });
 
-        if (jsResponse.status === 200 && jsResponse.data) {
-          const jsContent = jsResponse.data;
+        if (jsResponse.ok) {
+          const jsContent = await jsResponse.text();
           
           // Extract API endpoints
           const apiPatterns = [
             /['"`]\/api\/[^'"`\s]+['"`]/g,
             /['"`]\/v\d+\/[^'"`\s]+['"`]/g,
             /['"`]https?:\/\/[^'"`\s]+\/api\/[^'"`\s]+['"`]/g,
-            /fetch\(['"`]([^'"`]+)['"`]\)/g,
-            /axios\.[a-z]+\(['"`]([^'"`]+)['"`]/g,
-            /\$\.ajax\(\s*\{\s*url:\s*['"`]([^'"`]+)['"`]/g
+            /fetch\(['"`]([^'"`]+)['"`]\)/g
           ];
           
           apiPatterns.forEach(pattern => {
             const matches = jsContent.match(pattern);
             if (matches) {
               matches.forEach(match => {
-                const cleaned = match.replace(/['"`]/g, '').replace(/fetch\(|axios\.[a-z]+\(|\$\.ajax\(\s*\{\s*url:\s*/, '');
+                const cleaned = match.replace(/['"`]/g, '').replace(/fetch\(/, '');
                 if (cleaned.startsWith('/') || cleaned.includes(scanTarget.hostname)) {
                   const url = cleaned.startsWith('/') ? `${scanTarget.base_url}${cleaned}` : cleaned;
                   content.push({
@@ -508,11 +495,7 @@ async function analyzeJavaScript(scanTarget, parameterExtraction) {
             /\.innerHTML\s*=/g,
             /\.outerHTML\s*=/g,
             /document\.write\(/g,
-            /document\.writeln\(/g,
-            /eval\(/g,
-            /Function\(/g,
-            /\.insertAdjacentHTML\(/g,
-            /\$\([^)]+\)\.html\(/g
+            /eval\(/g
           ];
           
           xssSinks.forEach(pattern => {
@@ -527,35 +510,6 @@ async function analyzeJavaScript(scanTarget, parameterExtraction) {
               });
             }
           });
-          
-          // Extract parameters from JavaScript
-          if (parameterExtraction === 'comprehensive' || parameterExtraction === 'search_params') {
-            const paramPatterns = [
-              /['"`]([a-zA-Z_][a-zA-Z0-9_]*)\s*[=:]\s*[^'"`\s&]+['"`]/g,
-              /\?([a-zA-Z_][a-zA-Z0-9_]*)=/g,
-              /&([a-zA-Z_][a-zA-Z0-9_]*)=/g
-            ];
-            
-            paramPatterns.forEach(pattern => {
-              const matches = jsContent.match(pattern);
-              if (matches) {
-                matches.forEach(match => {
-                  const paramMatch = match.match(/([a-zA-Z_][a-zA-Z0-9_]*)/);
-                  if (paramMatch) {
-                    content.push({
-                      path: `?${paramMatch[1]}=`,
-                      url: `${scanTarget.base_url}?${paramMatch[1]}=value`,
-                      source: 'javascript_analysis',
-                      content_type: 'parameter',
-                      risk_level: 'low',
-                      parameters: [paramMatch[1]],
-                      notes: 'Parameter found in JavaScript'
-                    });
-                  }
-                });
-              }
-            });
-          }
         }
       } catch (jsError) {
         console.log(`Failed to analyze JS file ${jsUrl}: ${jsError.message}`);
@@ -572,86 +526,6 @@ async function analyzeJavaScript(scanTarget, parameterExtraction) {
 }
 
 /**
- * Run ZAP Ajax Spider for dynamic content discovery
- */
-async function runZapAjaxSpider(scanTarget, maxDepth) {
-  try {
-    console.log(`🕸️ Attempting ZAP Ajax Spider for ${scanTarget.hostname}`);
-    
-    // Check if ZAP is available
-    try {
-      await execAsync('which zap-cli', { timeout: 5000 });
-    } catch (error) {
-      console.log('ZAP not available, skipping Ajax Spider');
-      return [];
-    }
-    
-    const content = [];
-    
-    // Start ZAP daemon
-    const zapPort = 8080 + Math.floor(Math.random() * 1000);
-    
-    try {
-      // Start ZAP in daemon mode
-      const zapStart = `zap-cli start --start-options '-daemon -port ${zapPort}' &`;
-      await execAsync(zapStart, { timeout: 30000 });
-      
-      // Wait for ZAP to start
-      await new Promise(resolve => setTimeout(resolve, 10000));
-      
-      // Run Ajax Spider
-      const spiderCmd = `zap-cli -p ${zapPort} ajax-spider ${scanTarget.base_url} --max-duration 2`;
-      await execAsync(spiderCmd, { timeout: 120000 });
-      
-      // Get results
-      const resultsCmd = `zap-cli -p ${zapPort} report -o json`;
-      const { stdout: results } = await execAsync(resultsCmd, { timeout: 30000 });
-      
-      if (results) {
-        const zapResults = JSON.parse(results);
-        
-        if (zapResults.site && zapResults.site[0] && zapResults.site[0].alerts) {
-          zapResults.site[0].alerts.forEach(alert => {
-            if (alert.instances) {
-              alert.instances.forEach(instance => {
-                if (instance.uri) {
-                  try {
-                    const urlObj = new URL(instance.uri);
-                    content.push({
-                      path: urlObj.pathname + urlObj.search,
-                      url: instance.uri,
-                      source: 'zap_spider',
-                      content_type: 'endpoint',
-                      risk_level: alert.riskdesc?.toLowerCase() || 'low',
-                      notes: `ZAP Spider: ${alert.name || 'Dynamic endpoint'}`
-                    });
-                  } catch (urlError) {
-                    // Invalid URL
-                  }
-                }
-              });
-            }
-          });
-        }
-      }
-      
-      // Stop ZAP
-      await execAsync(`zap-cli -p ${zapPort} shutdown`, { timeout: 10000 });
-      
-    } catch (zapError) {
-      console.log(`ZAP Ajax Spider failed: ${zapError.message}`);
-    }
-    
-    console.log(`Found ${content.length} items from ZAP Ajax Spider`);
-    return content;
-  } catch (error) {
-    console.log(`ZAP Ajax Spider not available for ${scanTarget.hostname}`);
-  }
-  
-  return [];
-}
-
-/**
  * Analyze HTML content for forms, parameters, and AJAX calls
  */
 async function analyzeHTMLContent(scanTarget, parameterExtraction) {
@@ -660,16 +534,17 @@ async function analyzeHTMLContent(scanTarget, parameterExtraction) {
     
     const content = [];
     
-    const response = await axios.get(scanTarget.base_url, {
+    const response = await fetch(scanTarget.base_url, {
       timeout: 10000,
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
       }
     });
 
-    if (response.status !== 200) return [];
+    if (!response.ok) return [];
     
-    const $ = cheerio.load(response.data);
+    const html = await response.text();
+    const $ = cheerio.load(html);
     
     // Analyze forms
     $('form').each((i, form) => {
@@ -714,37 +589,6 @@ async function analyzeHTMLContent(scanTarget, parameterExtraction) {
       }
     });
     
-    // Look for AJAX calls in inline scripts
-    $('script:not([src])').each((i, script) => {
-      const scriptContent = $(script).html();
-      if (scriptContent) {
-        const ajaxPatterns = [
-          /fetch\(['"`]([^'"`]+)['"`]\)/g,
-          /\$\.get\(['"`]([^'"`]+)['"`]/g,
-          /\$\.post\(['"`]([^'"`]+)['"`]/g,
-          /axios\.[a-z]+\(['"`]([^'"`]+)['"`]/g
-        ];
-        
-        ajaxPatterns.forEach(pattern => {
-          let match;
-          while ((match = pattern.exec(scriptContent)) !== null) {
-            const url = match[1];
-            if (url.startsWith('/') || url.includes(scanTarget.hostname)) {
-              const fullUrl = url.startsWith('/') ? `${scanTarget.base_url}${url}` : url;
-              content.push({
-                path: new URL(fullUrl, scanTarget.base_url).pathname,
-                url: fullUrl,
-                source: 'ajax_discovery',
-                content_type: 'ajax',
-                risk_level: 'medium',
-                notes: 'AJAX call found in inline script'
-              });
-            }
-          }
-        });
-      }
-    });
-    
     console.log(`Found ${content.length} items from HTML analysis`);
     return content;
   } catch (error) {
@@ -760,6 +604,5 @@ module.exports = {
   analyzeSitemap,
   analyzeWaybackMachine,
   analyzeJavaScript,
-  runZapAjaxSpider,
   analyzeHTMLContent
 };

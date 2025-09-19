@@ -1,3 +1,4 @@
+// backend/database/migrations/010_enhance_directories_table.js - FIXED
 exports.up = function(knex) {
   return knex.schema.alterTable('directories', function(table) {
     // Add new columns for enhanced content discovery
@@ -5,11 +6,11 @@ exports.up = function(knex) {
     table.enum('risk_level', ['low', 'medium', 'high', 'critical']).defaultTo('low');
     table.text('parameters'); // Comma-separated list of parameters
     table.text('notes'); // Additional notes about the discovery
-    table.text('body_preview', 1000); // Preview of response body (up to 1000 chars)
+    // REMOVED: table.text('body_preview', 1000); // This column already exists from migration 007
     
     // Add indexes for better performance
     table.index(['content_type']);
-    table.index(['risk_level']);
+    table.index(['risk_level']); 
     table.index(['source']);
   });
 };
@@ -21,11 +22,10 @@ exports.down = function(knex) {
     table.dropIndex(['risk_level']); 
     table.dropIndex(['source']);
     
-    // Remove columns
+    // Remove columns (excluding body_preview since it was in original table)
     table.dropColumn('content_type');
     table.dropColumn('risk_level');
     table.dropColumn('parameters');
     table.dropColumn('notes');
-    table.dropColumn('body_preview');
   });
 };

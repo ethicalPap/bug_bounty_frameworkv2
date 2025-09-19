@@ -1,6 +1,8 @@
-// frontend/assets/js/modules/directories.js - UPDATED FOR PASSIVE DISCOVERY
+// frontend/assets/js/modules/directories.js - FIXED with element safety checks
 
 const Directories = {
+    refreshInterval: null,
+
     async init() {
         this.renderHTML();
         this.bindEvents();
@@ -10,6 +12,11 @@ const Directories = {
 
     renderHTML() {
         const content = document.getElementById('main-content');
+        if (!content) {
+            console.error('main-content element not found');
+            return;
+        }
+        
         content.innerHTML = `
             <div class="scan-info">
                 <h4>🔍 Passive Content Discovery</h4>
@@ -109,13 +116,13 @@ const Directories = {
                     <label>Discovery Source</label>
                     <select id="directory-source-filter">
                         <option value="">All Sources</option>
-                        <option value="robots.txt">robots.txt</option>
+                        <option value="robots_txt">robots.txt</option>
                         <option value="sitemap.xml">Sitemap</option>
                         <option value="wayback_machine">Wayback Machine</option>
-                        <option value="web_crawl">Web Crawl</option>
                         <option value="javascript_analysis">JavaScript</option>
-                        <option value="common_crawl">Common Crawl</option>
-                        <option value="zap_spider">ZAP Spider</option>
+                        <option value="link_extraction">Link Extraction</option>
+                        <option value="form_analysis">Form Analysis</option>
+                        <option value="ajax_discovery">AJAX Discovery</option>
                     </select>
                 </div>
                 <div class="filter-group">
@@ -199,7 +206,7 @@ const Directories = {
 
         // Search with debounce
         const directorySearch = document.getElementById('directory-search');
-        if (directorySearch) {
+        if (directorySearch && window.Utils && typeof window.Utils.debounce === 'function') {
             directorySearch.addEventListener('input', Utils.debounce(() => this.load(1), 500));
         }
     },
@@ -207,6 +214,11 @@ const Directories = {
     // Load targets for the target dropdown
     async loadTargets() {
         try {
+            if (!window.API || !API.targets) {
+                console.warn('API not available for loading targets');
+                return;
+            }
+
             const response = await API.targets.getAll();
             if (!response) return;
             
@@ -261,6 +273,11 @@ const Directories = {
     // Load subdomains based on selected target
     async loadSubdomains() {
         try {
+            if (!window.API || !API.subdomains) {
+                console.warn('API not available for loading subdomains');
+                return;
+            }
+
             const targetId = document.getElementById('directory-target-filter')?.value;
             const subdomainSelect = document.getElementById('directory-subdomain-filter');
             
@@ -316,6 +333,11 @@ const Directories = {
     // Load subdomains for content discovery form
     async loadContentDiscoverySubdomains() {
         try {
+            if (!window.API || !API.subdomains) {
+                console.warn('API not available for loading content discovery subdomains');
+                return;
+            }
+
             const targetId = document.getElementById('content-discovery-target')?.value;
             const subdomainSelect = document.getElementById('content-discovery-subdomain');
             
@@ -357,6 +379,12 @@ const Directories = {
 
     async load(page = 1) {
         try {
+            if (!window.API || !API.directories) {
+                console.warn('API not available for loading directories');
+                this.showNoAPIMessage();
+                return;
+            }
+
             const targetId = document.getElementById('directory-target-filter')?.value;
             const subdomainId = document.getElementById('directory-subdomain-filter')?.value;
             const sourceFilter = document.getElementById('directory-source-filter')?.value;
@@ -365,7 +393,7 @@ const Directories = {
             
             const params = {
                 page: page,
-                limit: CONFIG.DEFAULT_PAGE_SIZE
+                limit: (window.CONFIG && CONFIG.DEFAULT_PAGE_SIZE) || 50
             };
             
             if (targetId) params.target_id = targetId;
@@ -381,40 +409,50 @@ const Directories = {
             
             if (data.success) {
                 const directories = data.data;
-                AppState.currentPageData.directories = { page, total: data.pagination.total };
+                if (window.AppState) {
+                    AppState.currentPageData.directories = { page, total: data.pagination.total };
+                }
                 
                 this.renderDirectoriesList(directories);
                 
-                if (data.pagination.pages > 1) {
+                if (data.pagination.pages > 1 && window.Utils) {
                     Utils.updatePagination('directories', data.pagination);
                 } else {
-                    document.getElementById('directories-pagination').innerHTML = '';
+                    const paginationElement = document.getElementById('directories-pagination');
+                    if (paginationElement) {
+                        paginationElement.innerHTML = '';
+                    }
                 }
             }
         } catch (error) {
             console.error('Failed to load directories:', error);
-            document.getElementById('directories-list').innerHTML = 
-                '<tr><td colspan="7" style="text-align: center; color: #ff0000;">Failed to load directories</td></tr>';
+            this.showErrorMessage('Failed to load directories. Check console for details.');
         }
     },
 
     renderDirectoriesList(directories) {
         const directoriesList = document.getElementById('directories-list');
         
+        // Safety check - ensure element exists
+        if (!directoriesList) {
+            console.error('directories-list element not found');
+            return;
+        }
+        
         if (directories.length > 0) {
             directoriesList.innerHTML = directories.map(directory => `
                 <tr>
-                    <td style="font-family: 'Courier New', monospace; color: #00ff00;">${directory.path}</td>
-                    <td style="color: #00cc00;">${directory.subdomain}</td>
+                    <td style="font-family: 'Courier New', monospace; color: #00ff00;">${directory.path || directory.url}</td>
+                    <td style="color: #00cc00;">${directory.subdomain || '-'}</td>
                     <td>
                         <span class="status" style="padding: 2px 6px; border: 1px solid #006600; color: #00aa00; font-size: 11px;">
                             ${this.getSourceIcon(directory.source || 'unknown')} ${directory.source || 'unknown'}
                         </span>
                     </td>
                     <td>
-                        <span class="status ${Utils.getStatusColor(directory.status_code)}">${directory.status_code || '-'}</span>
+                        <span class="status ${this.getStatusColor(directory.status_code)}">${directory.status_code || '-'}</span>
                     </td>
-                    <td>${Utils.formatBytes(directory.content_length)}</td>
+                    <td>${this.formatBytes(directory.content_length)}</td>
                     <td style="max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${directory.title || ''}">${directory.title || '-'}</td>
                     <td>
                         <button onclick="window.open('${directory.url}', '_blank')" class="btn btn-secondary btn-small">Open</button>
@@ -426,32 +464,68 @@ const Directories = {
         }
     },
 
+    showErrorMessage(message) {
+        const directoriesList = document.getElementById('directories-list');
+        if (directoriesList) {
+            directoriesList.innerHTML = `<tr><td colspan="7" style="text-align: center; color: #ff0000;">${message}</td></tr>`;
+        }
+    },
+
+    showNoAPIMessage() {
+        const directoriesList = document.getElementById('directories-list');
+        if (directoriesList) {
+            directoriesList.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #ffff00;">API not available. Please check your connection.</td></tr>';
+        }
+    },
+
     getSourceIcon(source) {
         const icons = {
-            'robots.txt': '📋',
+            'robots_txt': '📋',
             'sitemap.xml': '🗺️',
             'wayback_machine': '🕐',
-            'web_crawl': '🕷️',
             'javascript_analysis': '📄',
-            'common_crawl': '🌐',
-            'certificate_transparency': '🔒',
-            'zap_spider': '🕸️',
+            'link_extraction': '🔗',
+            'form_analysis': '📝',
+            'ajax_discovery': '⚡',
             'unknown': '❓'
         };
         return icons[source] || '❓';
     },
 
+    getStatusColor(statusCode) {
+        if (!statusCode) return '';
+        
+        if (statusCode >= 200 && statusCode < 300) return 'status-completed';
+        if (statusCode >= 300 && statusCode < 400) return 'status-running';
+        if (statusCode >= 400 && statusCode < 500) return 'severity-medium';
+        if (statusCode >= 500) return 'severity-high';
+        return '';
+    },
+
+    formatBytes(bytes) {
+        if (!bytes || bytes === 0) return '-';
+        const k = 1024;
+        const sizes = ['B', 'KB', 'MB', 'GB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+    },
+
     // Start passive content discovery scan
     async startPassiveDiscovery() {
-        const targetId = document.getElementById('content-discovery-target').value;
-        const subdomainId = document.getElementById('content-discovery-subdomain').value;
-        const method = document.getElementById('content-discovery-method').value;
-        const crawlDepth = document.getElementById('crawl-depth').value;
-        const maxPages = document.getElementById('max-pages').value;
-        const jsAnalysis = document.getElementById('js-analysis').value === 'true';
+        const targetId = document.getElementById('content-discovery-target')?.value;
+        const subdomainId = document.getElementById('content-discovery-subdomain')?.value;
+        const method = document.getElementById('content-discovery-method')?.value;
+        const crawlDepth = document.getElementById('crawl-depth')?.value;
+        const maxPages = document.getElementById('max-pages')?.value;
+        const jsAnalysis = document.getElementById('js-analysis')?.value === 'true';
         
         if (!targetId) {
-            Utils.showMessage('Please select a target', 'error', 'content-discovery-messages');
+            this.showMessage('Please select a target', 'error');
+            return;
+        }
+        
+        if (!window.API || !API.scans) {
+            this.showMessage('API not available', 'error');
             return;
         }
         
@@ -462,11 +536,11 @@ const Directories = {
                 subdomain_id: subdomainId || null,
                 max_depth: parseInt(crawlDepth),
                 max_pages: parseInt(maxPages),
-                javascript_analysis: jsAnalysis,
+                javascript_execution: jsAnalysis,
                 passive_mode: true // Flag to indicate passive discovery
             };
             
-            Utils.showMessage('🕷️ Starting passive content discovery...', 'info', 'content-discovery-messages');
+            this.showMessage('🕷️ Starting passive content discovery...', 'info');
             
             const response = await API.scans.start(targetId, scanTypes, 'medium', config);
             
@@ -475,15 +549,16 @@ const Directories = {
                 console.log('Passive content discovery started:', data);
                 
                 const methodDescription = this.getMethodDescription(method);
-                Utils.showMessage(
-                    `🔍 Passive content discovery started successfully! Using ${methodDescription}. Check the Subdomain Scans tab to monitor progress.`, 
-                    'success', 
-                    'content-discovery-messages'
+                this.showMessage(
+                    `🔍 Passive content discovery started successfully! Using ${methodDescription}. Check the Scans tab to monitor progress.`, 
+                    'success'
                 );
                 
                 // Reset form
-                document.getElementById('content-discovery-subdomain').value = '';
-                document.getElementById('content-discovery-method').value = 'comprehensive';
+                const subdomainSelect = document.getElementById('content-discovery-subdomain');
+                const methodSelect = document.getElementById('content-discovery-method');
+                if (subdomainSelect) subdomainSelect.value = '';
+                if (methodSelect) methodSelect.value = 'comprehensive';
                 
                 // Refresh the directories list after a delay
                 setTimeout(() => {
@@ -492,10 +567,19 @@ const Directories = {
                 
             } else {
                 const errorData = await response.json();
-                Utils.showMessage('Failed to start passive discovery: ' + (errorData.error || errorData.message || 'Unknown error'), 'error', 'content-discovery-messages');
+                this.showMessage('Failed to start passive discovery: ' + (errorData.error || errorData.message || 'Unknown error'), 'error');
             }
         } catch (error) {
-            Utils.showMessage('Failed to start passive discovery: ' + error.message, 'error', 'content-discovery-messages');
+            this.showMessage('Failed to start passive discovery: ' + error.message, 'error');
+        }
+    },
+
+    showMessage(message, type) {
+        const messagesDiv = document.getElementById('content-discovery-messages');
+        if (messagesDiv && window.Utils && typeof window.Utils.showMessage === 'function') {
+            Utils.showMessage(message, type, 'content-discovery-messages');
+        } else {
+            console.log(`[${type}] ${message}`);
         }
     },
 
@@ -512,6 +596,14 @@ const Directories = {
     // Method to refresh targets and subdomains
     async refreshFilters() {
         await this.loadTargets();
+    },
+
+    // Cleanup method to stop any auto-refresh
+    cleanup() {
+        if (this.refreshInterval) {
+            clearInterval(this.refreshInterval);
+            this.refreshInterval = null;
+        }
     }
 };
 

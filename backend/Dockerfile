@@ -1,5 +1,5 @@
-# backend/Dockerfile
-FROM node:18-alpine
+# backend/Dockerfile - Updated to Node.js 20
+FROM node:20-alpine
 
 # Install system dependencies including PostgreSQL client
 RUN apk update && apk add --no-cache \

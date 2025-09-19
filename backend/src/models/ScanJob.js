@@ -130,7 +130,7 @@ class ScanJob {
 
   static async updateProgress(id, percentage, status = null) {
     const updateData = {
-      progress_percentage: percentage,
+      progress_percentage: Math.round(percentage),
       updated_at: new Date()
     };
     
