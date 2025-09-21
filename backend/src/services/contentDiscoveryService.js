@@ -1,4 +1,4 @@
-// backend/src/services/contentDiscoveryService.js - Using native fetch instead of axios
+// backend/src/services/contentDiscoveryService.js - FIXED VERSION
 
 const { exec } = require('child_process');
 const { promisify } = require('util');
@@ -78,17 +78,24 @@ async function runEnhancedContentDiscovery(scan, target) {
         console.log(`Found ${scanTargets.length} active subdomains to scan`);
         
         if (scanTargets.length === 0) {
+          // Create a subdomain record for the root domain if none exists
+          const rootSubdomainId = await ensureRootSubdomain(target);
+          
           scanTargets.push({
-            subdomain_id: null,
+            subdomain_id: rootSubdomainId,
             hostname: target.domain,
             base_url: `https://${target.domain}`
           });
-          console.log(`No subdomains found, scanning root domain: ${target.domain}`);
+          console.log(`No subdomains found, created root domain entry: ${target.domain}`);
         }
       } catch (error) {
         console.error('Failed to fetch subdomains:', error);
+        
+        // Create a subdomain record for the root domain as fallback
+        const rootSubdomainId = await ensureRootSubdomain(target);
+        
         scanTargets.push({
-          subdomain_id: null,
+          subdomain_id: rootSubdomainId,
           hostname: target.domain,
           base_url: `https://${target.domain}`
         });
@@ -141,7 +148,7 @@ async function runEnhancedContentDiscovery(scan, target) {
       
       // Add scan metadata to each discovered item
       targetContent.forEach(item => {
-        item.subdomain_id = scanTarget.subdomain_id;
+        item.subdomain_id = scanTarget.subdomain_id; // This is now guaranteed to be non-null
         item.scan_job_id = scan.id;
         item.discovered_at = new Date();
       });
@@ -161,7 +168,7 @@ async function runEnhancedContentDiscovery(scan, target) {
     if (Directory && allDiscoveredContent.length > 0) {
       try {
         const contentRecords = allDiscoveredContent.map(item => ({
-          subdomain_id: item.subdomain_id,
+          subdomain_id: item.subdomain_id, // Now guaranteed to be non-null
           path: item.path,
           url: item.url,
           status_code: item.status_code || null,
@@ -218,6 +225,45 @@ async function runEnhancedContentDiscovery(scan, target) {
   } catch (error) {
     console.error(`❌ Passive content discovery failed for ${target.domain}:`, error);
     throw new Error(`Content discovery failed: ${error.message}`);
+  }
+}
+
+/**
+ * Ensure a subdomain record exists for the root domain
+ * Returns the subdomain_id for the root domain
+ */
+async function ensureRootSubdomain(target) {
+  try {
+    // Check if root domain subdomain already exists
+    let rootSubdomain = await knex('subdomains')
+      .where('target_id', target.id)
+      .where('subdomain', target.domain)
+      .first();
+    
+    if (!rootSubdomain) {
+      // Create root domain subdomain record
+      console.log(`Creating root subdomain record for: ${target.domain}`);
+      
+      const [newSubdomain] = await knex('subdomains')
+        .insert({
+          target_id: target.id,
+          subdomain: target.domain,
+          status: 'active',
+          first_discovered: new Date(),
+          last_seen: new Date(),
+          created_at: new Date(),
+          updated_at: new Date()
+        })
+        .returning('*');
+      
+      rootSubdomain = newSubdomain;
+      console.log(`✅ Created root subdomain record with ID: ${rootSubdomain.id}`);
+    }
+    
+    return rootSubdomain.id;
+  } catch (error) {
+    console.error('Failed to ensure root subdomain:', error);
+    throw new Error(`Cannot create root subdomain: ${error.message}`);
   }
 }
 
@@ -527,6 +573,7 @@ async function analyzeJavaScript(scanTarget, parameterExtraction) {
 
 /**
  * Analyze HTML content for forms, parameters, and AJAX calls
+ * Optionally fetch HTTP status codes for discovered links
  */
 async function analyzeHTMLContent(scanTarget, parameterExtraction) {
   try {
@@ -574,11 +621,12 @@ async function analyzeHTMLContent(scanTarget, parameterExtraction) {
       });
     });
     
-    // Extract links
+    // Extract links (limit to reasonable number for passive discovery)
+    const discoveredLinks = [];
     $('a[href]').each((i, link) => {
       const href = $(link).attr('href');
       if (href && href.startsWith('/') && !href.startsWith('//')) {
-        content.push({
+        discoveredLinks.push({
           path: href,
           url: `${scanTarget.base_url}${href}`,
           source: 'link_extraction',
@@ -589,7 +637,39 @@ async function analyzeHTMLContent(scanTarget, parameterExtraction) {
       }
     });
     
-    console.log(`Found ${content.length} items from HTML analysis`);
+    // Limit the number of links to avoid overwhelming the scan
+    const limitedLinks = discoveredLinks.slice(0, 50);
+    content.push(...limitedLinks);
+    
+    // Optional: Quick HTTP check for a few important links (limit to avoid being too aggressive)
+    const importantLinks = limitedLinks.filter(link => 
+      link.path.includes('admin') || 
+      link.path.includes('api') || 
+      link.path.includes('login') ||
+      link.path.includes('config')
+    ).slice(0, 5); // Only check 5 important links
+    
+    for (const link of importantLinks) {
+      try {
+        const linkResponse = await fetch(link.url, {
+          method: 'HEAD', // Use HEAD request to avoid downloading full content
+          timeout: 5000,
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (compatible; SecurityScanner/1.0)'
+          }
+        });
+        
+        // Update the link with status code
+        link.status_code = linkResponse.status;
+        link.notes += ` (HTTP ${linkResponse.status})`;
+        
+      } catch (linkError) {
+        // Don't fail the scan if we can't check individual links
+        console.log(`Could not check status for ${link.url}: ${linkError.message}`);
+      }
+    }
+    
+    console.log(`Found ${content.length} items from HTML analysis (${importantLinks.length} with status codes)`);
     return content;
   } catch (error) {
     console.log(`HTML analysis failed for ${scanTarget.hostname}: ${error.message}`);
@@ -600,6 +680,7 @@ async function analyzeHTMLContent(scanTarget, parameterExtraction) {
 
 module.exports = {
   runEnhancedContentDiscovery,
+  ensureRootSubdomain,
   analyzeRobotsTxt,
   analyzeSitemap,
   analyzeWaybackMachine,

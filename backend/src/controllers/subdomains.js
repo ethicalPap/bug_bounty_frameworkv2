@@ -8,6 +8,7 @@ const getSubdomains = async (req, res) => {
     const { 
       target_id,
       status,
+      http_status,  // ← ADD THIS LINE
       page = 1, 
       limit = 50,
       search,
@@ -20,6 +21,7 @@ const getSubdomains = async (req, res) => {
     const filters = {
       target_id,
       status,
+      http_status,  // ← ADD THIS LINE
       search,
       sortBy,
       sortOrder: sortOrder.toLowerCase(),
@@ -29,7 +31,7 @@ const getSubdomains = async (req, res) => {
 
     const [subdomains, total] = await Promise.all([
       Subdomain.findAll(user.organization_id, filters),
-      Subdomain.count(user.organization_id, { target_id, status })
+      Subdomain.count(user.organization_id, { target_id, status, http_status })  // ← ADD http_status HERE
     ]);
 
     res.json({

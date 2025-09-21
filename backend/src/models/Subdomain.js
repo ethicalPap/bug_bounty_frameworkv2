@@ -26,6 +26,18 @@ class Subdomain {
       query = query.where('subdomains.status', filters.status);
     }
     
+    // ← ADD HTTP STATUS FILTER HERE
+    if (filters.http_status) {
+      // Parse the http_status - it could be a single value or comma-separated
+      const statusCodes = filters.http_status.toString().split(',').map(code => parseInt(code.trim())).filter(code => !isNaN(code));
+      
+      if (statusCodes.length === 1) {
+        query = query.where('subdomains.http_status', statusCodes[0]);
+      } else if (statusCodes.length > 1) {
+        query = query.whereIn('subdomains.http_status', statusCodes);
+      }
+    }
+    
     if (filters.search) {
       query = query.where('subdomains.subdomain', 'ilike', `%${filters.search}%`);
     }
@@ -56,6 +68,18 @@ class Subdomain {
     
     if (filters.status) {
       query = query.where('subdomains.status', filters.status);
+    }
+    
+    // ← ADD HTTP STATUS FILTER HERE TOO
+    if (filters.http_status) {
+      // Parse the http_status - it could be a single value or comma-separated
+      const statusCodes = filters.http_status.toString().split(',').map(code => parseInt(code.trim())).filter(code => !isNaN(code));
+      
+      if (statusCodes.length === 1) {
+        query = query.where('subdomains.http_status', statusCodes[0]);
+      } else if (statusCodes.length > 1) {
+        query = query.whereIn('subdomains.http_status', statusCodes);
+      }
     }
     
     const result = await query.count('subdomains.id as count').first();

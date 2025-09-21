@@ -1,4 +1,4 @@
-// backend/src/models/Directory.js - UPDATED VERSION
+// backend/src/models/Directory.js - FIXED VERSION
 const knex = require('../config/database');
 
 class Directory {
@@ -117,13 +117,20 @@ class Directory {
     try {
       console.log(`Attempting to bulk create ${directories.length} directories`);
       
-      // Validate required fields
+      // Validate required fields and filter out records with null subdomain_id
       const validDirectories = directories.filter(dir => {
+        if (!dir.subdomain_id) {
+          console.warn('Skipping directory record with null subdomain_id:', dir.path || 'unknown path');
+          return false;
+        }
+        
         const isValid = dir.path && dir.url && dir.status_code;
         if (!isValid) {
-          console.warn('Invalid directory record:', dir);
+          console.warn('Invalid directory record (missing required fields):', dir);
+          return false;
         }
-        return isValid;
+        
+        return true;
       });
 
       if (validDirectories.length === 0) {
@@ -131,9 +138,11 @@ class Directory {
         return [];
       }
 
+      console.log(`Validated ${validDirectories.length} out of ${directories.length} directory records`);
+
       // Prepare directory records with proper timestamps
       const directoryRecords = validDirectories.map(dir => ({
-        subdomain_id: dir.subdomain_id || null,
+        subdomain_id: parseInt(dir.subdomain_id), // Ensure it's an integer
         path: dir.path,
         url: dir.url,
         status_code: parseInt(dir.status_code),
@@ -148,9 +157,33 @@ class Directory {
         updated_at: new Date()
       }));
 
+      // Verify subdomain_ids exist before inserting
+      const subdomainIds = [...new Set(directoryRecords.map(d => d.subdomain_id))];
+      const existingSubdomains = await knex('subdomains')
+        .whereIn('id', subdomainIds)
+        .select('id');
+      
+      const existingSubdomainIds = new Set(existingSubdomains.map(s => s.id));
+      
+      // Filter out records with non-existent subdomain_ids
+      const validatedRecords = directoryRecords.filter(dir => {
+        if (!existingSubdomainIds.has(dir.subdomain_id)) {
+          console.warn(`Skipping directory - subdomain_id ${dir.subdomain_id} does not exist: ${dir.path}`);
+          return false;
+        }
+        return true;
+      });
+
+      if (validatedRecords.length === 0) {
+        console.warn('No directories with valid subdomain references to create');
+        return [];
+      }
+
+      console.log(`Final validation: ${validatedRecords.length} directories with valid subdomain references`);
+
       // Use upsert to handle duplicates
       const result = await knex(this.tableName)
-        .insert(directoryRecords)
+        .insert(validatedRecords)
         .onConflict(['subdomain_id', 'path'])
         .merge([
           'status_code', 
@@ -164,7 +197,7 @@ class Directory {
         ])
         .returning('*');
 
-      console.log(`Successfully created/updated ${result.length} directory records`);
+      console.log(`✅ Successfully created/updated ${result.length} directory records`);
       return result;
       
     } catch (error) {
@@ -178,28 +211,15 @@ class Directory {
       
       // Check for constraint violations
       if (error.message.includes('violates') || error.message.includes('constraint')) {
-        console.error('Database constraint violation. Some directories may reference non-existent subdomains.');
+        console.error('Database constraint violation:', error.message);
         
-        // Try to create only directories with valid subdomain_id
-        try {
-          const validSubdomainDirectories = directories.filter(async (dir) => {
-            if (!dir.subdomain_id) return true; // Allow null subdomain_id
-            
-            try {
-              const subdomain = await knex('subdomains').where('id', dir.subdomain_id).first();
-              return !!subdomain;
-            } catch {
-              return false;
-            }
-          });
-          
-          if (validSubdomainDirectories.length > 0) {
-            console.log(`Retrying with ${validSubdomainDirectories.length} valid directories`);
-            return await this.bulkCreate(validSubdomainDirectories);
-          }
-        } catch (retryError) {
-          console.error('Retry failed:', retryError.message);
+        // If it's specifically about subdomain_id being null
+        if (error.message.includes('subdomain_id') && error.message.includes('not-null')) {
+          console.error('❌ NULL subdomain_id detected. This should not happen with the new validation.');
+          console.error('Directories with null subdomain_id have been filtered out in validation.');
         }
+        
+        return [];
       }
       
       return [];
@@ -310,6 +330,67 @@ class Directory {
     } catch (error) {
       console.error('Error in Directory.findByStatusRange:', error.message);
       return [];
+    }
+  }
+
+  // Helper method to validate a single directory record
+  static validateDirectoryRecord(dir) {
+    const errors = [];
+    
+    if (!dir.subdomain_id) {
+      errors.push('subdomain_id is required');
+    } else if (!Number.isInteger(parseInt(dir.subdomain_id))) {
+      errors.push('subdomain_id must be a valid integer');
+    }
+    
+    if (!dir.path) {
+      errors.push('path is required');
+    }
+    
+    if (!dir.url) {
+      errors.push('url is required');
+    }
+    
+    if (!dir.status_code) {
+      errors.push('status_code is required');
+    } else if (!Number.isInteger(parseInt(dir.status_code))) {
+      errors.push('status_code must be a valid integer');
+    }
+    
+    return {
+      isValid: errors.length === 0,
+      errors: errors
+    };
+  }
+
+  // Helper method to ensure subdomain exists for a target
+  static async ensureSubdomainExists(targetId, subdomainName) {
+    try {
+      let subdomain = await knex('subdomains')
+        .where('target_id', targetId)
+        .where('subdomain', subdomainName)
+        .first();
+      
+      if (!subdomain) {
+        const [newSubdomain] = await knex('subdomains')
+          .insert({
+            target_id: targetId,
+            subdomain: subdomainName,
+            status: 'active',
+            first_discovered: new Date(),
+            created_at: new Date(),
+            updated_at: new Date()
+          })
+          .returning('*');
+        
+        subdomain = newSubdomain;
+        console.log(`Created new subdomain record: ${subdomainName} (ID: ${subdomain.id})`);
+      }
+      
+      return subdomain.id;
+    } catch (error) {
+      console.error('Error ensuring subdomain exists:', error);
+      throw error;
     }
   }
 }

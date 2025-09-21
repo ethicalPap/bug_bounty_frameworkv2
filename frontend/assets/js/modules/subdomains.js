@@ -4,7 +4,6 @@ const Subdomains = {
     async init() {
         this.renderHTML();
         this.bindEvents();
-        await this.loadTargets(); // Add this line to load targets
         await this.load();
     },
 
@@ -12,12 +11,6 @@ const Subdomains = {
         const content = document.getElementById('main-content');
         content.innerHTML = `
             <div class="filters">
-                <div class="filter-group">
-                    <label>Target</label>
-                    <select id="subdomain-target-filter">
-                        <option value="">All Targets</option>
-                    </select>
-                </div>
                 <div class="filter-group">
                     <label>Status</label>
                     <select id="subdomain-status-filter">
@@ -27,10 +20,20 @@ const Subdomains = {
                     </select>
                 </div>
                 <div class="filter-group">
-                    <label>Search</label>
+                    <label>HTTP Status Code</label>
+                    <input type="text" id="subdomain-http-status-filter" placeholder="200, 404, etc." style="width: 120px;">
+                </div>
+                <div class="filter-group">
+                    <label>Search Subdomain</label>
                     <input type="text" id="subdomain-search" placeholder="Search subdomains...">
                 </div>
-                <button onclick="Subdomains.load()" class="btn btn-primary">🔄 Refresh</button>
+                <div class="filter-group">
+                    <label>&nbsp;</label>
+                    <div style="display: flex; gap: 8px;">
+                        <button onclick="Subdomains.search()" class="btn btn-primary">🔍 Search</button>
+                        <button onclick="Subdomains.clearFilters()" class="btn btn-secondary">🗑️ Clear</button>
+                    </div>
+                </div>
             </div>
 
             <div class="card">
@@ -81,19 +84,25 @@ const Subdomains = {
     },
 
     bindEvents() {
-        // Filter events
-        ['subdomain-target-filter', 'subdomain-status-filter'].forEach(filterId => {
+        // Filter events - only bind change events for dropdowns
+        ['subdomain-status-filter'].forEach(filterId => {
             const element = document.getElementById(filterId);
             if (element) {
-                element.addEventListener('change', () => this.load(1));
+                element.addEventListener('change', () => this.search());
             }
         });
 
-        // Search with debounce
-        const subdomainSearch = document.getElementById('subdomain-search');
-        if (subdomainSearch) {
-            subdomainSearch.addEventListener('input', Utils.debounce(() => this.load(1), 500));
-        }
+        // Enter key support for input fields
+        ['subdomain-http-status-filter', 'subdomain-search'].forEach(filterId => {
+            const element = document.getElementById(filterId);
+            if (element) {
+                element.addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter') {
+                        this.search();
+                    }
+                });
+            }
+        });
     },
 
     // New method to load targets for the filter dropdown
@@ -132,8 +141,13 @@ const Subdomains = {
 
     async load(page = 1) {
         try {
+            // Show loading message
+            document.getElementById('subdomains-list').innerHTML = 
+                '<tr><td colspan="8" style="text-align: center; color: #ffff00;">🔍 Searching subdomains...</td></tr>';
+            
             const targetId = document.getElementById('subdomain-target-filter')?.value;
             const status = document.getElementById('subdomain-status-filter')?.value;
+            const httpStatus = document.getElementById('subdomain-http-status-filter')?.value;
             const search = document.getElementById('subdomain-search')?.value;
             
             const params = {
@@ -143,10 +157,18 @@ const Subdomains = {
             
             if (targetId) params.target_id = targetId;
             if (status) params.status = status;
-            if (search) params.search = search;
+            if (httpStatus && httpStatus.trim()) params.http_status = httpStatus.trim();
+            if (search && search.trim()) params.search = search.trim();
+
+            console.log('📡 API call params:', params);
 
             const response = await API.subdomains.getAll(params);
-            if (!response) return;
+            if (!response) {
+                console.error('❌ No response from API');
+                return;
+            }
+            
+            console.log('📡 API response status:', response.status);
             
             if (!response.ok) {
                 console.error('Failed to fetch subdomains:', response.status);
@@ -156,12 +178,26 @@ const Subdomains = {
             }
             
             const data = await response.json();
+            console.log('📦 API response data:', data);
             
             if (data.success) {
                 const subdomains = data.data;
+                console.log(`✅ Found ${subdomains.length} subdomains`);
+                
                 AppState.currentPageData.subdomains = { page, total: data.pagination.total };
                 
                 this.renderSubdomainsList(subdomains);
+                
+                // Show result count message
+                const resultMessage = httpStatus && httpStatus.trim() ? 
+                    `Found ${subdomains.length} subdomains with HTTP status ${httpStatus.trim()}` :
+                    `Found ${subdomains.length} subdomains`;
+                
+                if (subdomains.length === 0 && (httpStatus?.trim() || search?.trim())) {
+                    Utils.showMessage('No subdomains found matching your search criteria', 'warning');
+                } else if (httpStatus?.trim() || search?.trim()) {
+                    Utils.showMessage(resultMessage, 'success');
+                }
                 
                 if (data.pagination.pages > 1) {
                     Utils.updatePagination('subdomains', data.pagination);
@@ -169,12 +205,53 @@ const Subdomains = {
                     const paginationEl = document.getElementById('subdomains-pagination');
                     if (paginationEl) paginationEl.innerHTML = '';
                 }
+            } else {
+                console.error('❌ API returned success: false', data);
+                document.getElementById('subdomains-list').innerHTML = 
+                    '<tr><td colspan="8" style="text-align: center; color: #ff0000;">API error: ' + (data.error || 'Unknown error') + '</td></tr>';
             }
         } catch (error) {
             console.error('Failed to load subdomains:', error);
             document.getElementById('subdomains-list').innerHTML = 
-                '<tr><td colspan="8" style="text-align: center; color: #ff0000;">Error loading subdomains</td></tr>';
+                '<tr><td colspan="8" style="text-align: center; color: #ff0000;">Error loading subdomains: ' + error.message + '</td></tr>';
         }
+    },
+
+    // New search method that's called by the search button
+    async search(page = 1) {
+        console.log('🔍 Search button clicked');
+        
+        // Get current filter values for debugging
+        const targetId = document.getElementById('subdomain-target-filter')?.value;
+        const status = document.getElementById('subdomain-status-filter')?.value;
+        const httpStatus = document.getElementById('subdomain-http-status-filter')?.value;
+        const search = document.getElementById('subdomain-search')?.value;
+        
+        console.log('Current filter values:', {
+            targetId,
+            status,
+            httpStatus,
+            search
+        });
+        
+        await this.load(page);
+    },
+
+    // New method to clear all filters
+    clearFilters() {
+        // Clear all filter inputs and selects (excluding global target filter)
+        const statusFilter = document.getElementById('subdomain-status-filter');
+        const httpStatusFilter = document.getElementById('subdomain-http-status-filter');
+        const searchFilter = document.getElementById('subdomain-search');
+        
+        if (statusFilter) statusFilter.value = '';
+        if (httpStatusFilter) httpStatusFilter.value = '';
+        if (searchFilter) searchFilter.value = '';
+        
+        // Reload with cleared filters
+        this.load(1);
+        
+        Utils.showMessage('Filters cleared', 'info');
     },
 
     renderSubdomainsList(subdomains) {
@@ -186,18 +263,39 @@ const Subdomains = {
                     <td style="font-weight: 600; color: #00ff00;">${subdomain.subdomain}</td>
                     <td>${subdomain.target_domain}</td>
                     <td><span class="status status-${subdomain.status}">${subdomain.status}</span></td>
-                    <td>${subdomain.http_status || '-'}</td>
+                    <td>
+                        ${subdomain.http_status ? 
+                            `<span class="status ${this.getHttpStatusColor(subdomain.http_status)}">${subdomain.http_status}</span>` : 
+                            '-'
+                        }
+                    </td>
                     <td style="font-family: 'Courier New', monospace; color: #00cc00;">${subdomain.ip_address || '-'}</td>
                     <td style="max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${subdomain.title || ''}">${subdomain.title || '-'}</td>
                     <td style="font-size: 12px; color: #006600;">${subdomain.last_seen ? new Date(subdomain.last_seen).toLocaleDateString() : '-'}</td>
                     <td>
                         <button onclick="Subdomains.checkLive(${subdomain.id})" class="btn btn-secondary btn-small">Check Live</button>
+                        ${subdomain.http_status && (subdomain.http_status === 200 || subdomain.http_status === 301 || subdomain.http_status === 302) ? 
+                            `<button onclick="window.open('https://${subdomain.subdomain}', '_blank')" class="btn btn-success btn-small">Open</button>` : 
+                            ''
+                        }
                     </td>
                 </tr>
             `).join('');
         } else {
             subdomainsList.innerHTML = '<tr><td colspan="8" style="text-align: center; color: #006600;">No subdomains found. Run a subdomain scan to discover subdomains!</td></tr>';
         }
+    },
+
+    // New method to get HTTP status color
+    getHttpStatusColor(statusCode) {
+        if (!statusCode) return 'status-inactive';
+        
+        const code = parseInt(statusCode);
+        if (code >= 200 && code < 300) return 'status-completed'; // Green for success
+        if (code >= 300 && code < 400) return 'status-running';   // Yellow for redirects
+        if (code >= 400 && code < 500) return 'severity-medium'; // Orange for client errors
+        if (code >= 500) return 'severity-high';                 // Red for server errors
+        return 'status-inactive';
     },
 
     async checkLive(id) {
@@ -233,6 +331,7 @@ const Subdomains = {
             // Get current filters to determine which subdomains to check
             const targetId = document.getElementById('subdomain-target-filter')?.value;
             const status = document.getElementById('subdomain-status-filter')?.value;
+            const httpStatus = document.getElementById('subdomain-http-status-filter')?.value;
             const search = document.getElementById('subdomain-search')?.value;
             
             const params = {
@@ -242,6 +341,7 @@ const Subdomains = {
             
             if (targetId) params.target_id = targetId;
             if (status) params.status = status;
+            if (httpStatus) params.http_status = httpStatus.trim();
             if (search) params.search = search;
 
             // Get all subdomains that match current filters

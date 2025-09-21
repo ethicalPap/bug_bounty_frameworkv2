@@ -49,7 +49,7 @@
             <div class="nav-item active" data-tab="targets">🎯 Targets</div>
             <div class="nav-item" data-tab="dashboard">📊 Dashboard</div>
             <div class="nav-item" data-tab="scans">🔍 Subdomain Scans</div>
-            <div class="nav-item" data-tab="subdomains">🌐 Subdomains</div>
+            <div class="nav-item" data-tab="subdomains">🌐 Live Hosts</div>
             <div class="nav-item" data-tab="directories">📁 Directories</div>
             <div class="nav-item" data-tab="port-scanning">🔌 Port Scanning</div>
             <div class="nav-item" data-tab="content-discovery">🔍 Content Discovery</div>
@@ -70,9 +70,12 @@
             <div class="header">
                 <h1 id="page-title">Targets</h1>
                 <div class="header-actions">
-                    <select id="global-target-filter">
-                        <option value="">All Targets</option>
-                    </select>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <label for="global-target-filter" style="color: #00cc00; font-size: 13px; font-weight: bold; text-transform: uppercase; letter-spacing: 1px;">Targets:</label>
+                        <select id="global-target-filter">
+                            <option value="">All Targets</option>
+                        </select>
+                    </div>
                 </div>
             </div>
             <div class="content" id="main-content">

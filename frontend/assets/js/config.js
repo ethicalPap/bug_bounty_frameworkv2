@@ -38,7 +38,7 @@ const CONFIG = {
         targets: 'Targets',
         dashboard: 'Dashboard', 
         scans: 'Subdomain Scans',
-        subdomains: 'Subdomains',
+        subdomains: 'Live Hosts',
         directories: 'Directories',
         'port-scanning': 'Port Scanning',
         'content-discovery': 'Content Discovery',

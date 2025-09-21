@@ -1,4 +1,4 @@
-// assets/js/modules/dashboard.js
+// assets/js/modules/dashboard.js - FIXED RECENT ACTIVITY
 
 const Dashboard = {
     async init() {
@@ -136,30 +136,92 @@ const Dashboard = {
 
     async loadRecentActivity() {
         try {
-            const scansResponse = await API.scans.getJobs({ limit: 5 });
-            if (scansResponse && scansResponse.ok) {
-                const scansData = await scansResponse.json();
-                const recentScans = scansData.success ? scansData.data : [];
-                
-                const recentActivity = document.getElementById('recent-activity');
-                if (recentScans.length > 0) {
-                    recentActivity.innerHTML = recentScans.map(scan => 
-                        `<div style="padding: 12px 0; border-bottom: 1px solid #003300; display: flex; justify-content: space-between; align-items: center;">
+            // Load both scans and targets to properly map target names
+            const [scansResponse, targetsResponse] = await Promise.all([
+                API.scans.getJobs({ limit: 10 }),
+                API.targets.getAll()
+            ]);
+            
+            if (!scansResponse || !scansResponse.ok || !targetsResponse || !targetsResponse.ok) {
+                throw new Error('Failed to fetch data');
+            }
+            
+            const scansData = await scansResponse.json();
+            const targetsData = await targetsResponse.json();
+            
+            const recentScans = scansData.success ? scansData.data : [];
+            const targets = targetsData.success ? targetsData.data : [];
+            
+            // Create a target lookup map
+            const targetMap = new Map();
+            targets.forEach(target => {
+                targetMap.set(target.id, target.domain);
+            });
+            
+            const recentActivity = document.getElementById('recent-activity');
+            if (recentScans.length > 0) {
+                recentActivity.innerHTML = recentScans.map(scan => {
+                    // Try multiple field names to get the target domain
+                    let targetDomain = scan.domain || 
+                                     scan.target_domain || 
+                                     (scan.target_id ? targetMap.get(scan.target_id) : null) ||
+                                     'Unknown Target';
+                    
+                    // Clean up the job type display
+                    let jobType = scan.job_type || 'Unknown Scan';
+                    const jobTypeMap = {
+                        'subdomain_scan': 'Subdomain Discovery',
+                        'port_scan': 'Port Scanning',
+                        'content_discovery': 'Content Discovery', 
+                        'vulnerability_scan': 'Vulnerability Scan',
+                        'js_files_scan': 'JavaScript Analysis',
+                        'api_discovery': 'API Discovery'
+                    };
+                    jobType = jobTypeMap[jobType] || jobType.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+                    
+                    // Format the time
+                    const timeAgo = this.getTimeAgo(scan.created_at);
+                    
+                    return `
+                        <div style="padding: 12px 0; border-bottom: 1px solid #003300; display: flex; justify-content: space-between; align-items: center;">
                             <div>
-                                <strong style="color: #00ff00;">${scan.domain || 'Unknown Target'}</strong>
-                                <span style="color: #006600;"> - ${scan.job_type || 'Unknown Scan'}</span>
+                                <strong style="color: #00ff00;">${targetDomain}</strong>
+                                <span style="color: #006600;"> - ${jobType}</span>
+                                <div style="font-size: 11px; color: #666; margin-top: 2px;">${timeAgo}</div>
                             </div>
-                            <span class="status status-${scan.status}">${scan.status}</span>
-                        </div>`
-                    ).join('');
-                } else {
-                    recentActivity.innerHTML = '<p style="color: #006600;">No recent scan activity</p>';
-                }
+                            <span class="status status-${scan.status}">${scan.status.toUpperCase()}</span>
+                        </div>
+                    `;
+                }).join('');
+            } else {
+                recentActivity.innerHTML = '<p style="color: #006600;">No recent scan activity</p>';
             }
         } catch (error) {
             console.error('Failed to load recent activity:', error);
-            document.getElementById('recent-activity').innerHTML = '<p style="color: #006600;">Recent activity unavailable</p>';
+            document.getElementById('recent-activity').innerHTML = `
+                <p style="color: #ff0000;">Failed to load recent activity</p>
+                <p style="font-size: 12px; color: #666;">Check console for details</p>
+            `;
         }
+    },
+
+    // Helper function to format time ago
+    getTimeAgo(dateString) {
+        if (!dateString) return 'Unknown time';
+        
+        const now = new Date();
+        const past = new Date(dateString);
+        const diffMs = now - past;
+        const diffMins = Math.floor(diffMs / 60000);
+        const diffHours = Math.floor(diffMins / 60);
+        const diffDays = Math.floor(diffHours / 24);
+        
+        if (diffMins < 1) return 'Just now';
+        if (diffMins < 60) return `${diffMins}m ago`;
+        if (diffHours < 24) return `${diffHours}h ago`;
+        if (diffDays < 7) return `${diffDays}d ago`;
+        
+        return past.toLocaleDateString();
     }
 };
 
