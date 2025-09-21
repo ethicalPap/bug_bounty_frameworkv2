@@ -1,4 +1,4 @@
-// frontend/assets/js/navigation.js - ENHANCED WITH PORT SCANNING AUTO-REFRESH
+// frontend/assets/js/navigation.js - Updated with proper cleanup for scan-specific auto-refresh
 
 const Navigation = {
     init() {
@@ -40,17 +40,33 @@ const Navigation = {
         // Update title - add safety check
         const pageTitle = document.getElementById('page-title');
         if (pageTitle && window.CONFIG && CONFIG.TAB_TITLES) {
-            pageTitle.textContent = CONFIG.TAB_TITLES[tab] || tab;
+            pageTitle.textContent = CONFIG.TAB_TITLES[tab] || this.getTabDisplayName(tab);
         }
 
         // Load content for the specific tab
         this.loadTabContent(tab);
-
-        // Handle auto-refresh for specific tabs
-        this.handleAutoRefresh(tab);
     },
 
-    // NEW: Cleanup method for tab switching
+    // Get display name for tabs
+    getTabDisplayName(tab) {
+        const displayNames = {
+            'targets': 'Targets',
+            'dashboard': 'Dashboard', 
+            'scans': 'Subdomain Scans',
+            'subdomains': 'Live Hosts',
+            'directories': 'Directories',
+            'port-scanning': 'Port Scanning',
+            'content-discovery': 'Content Discovery',
+            'js-analysis': 'JS Analysis',
+            'api-discovery': 'API Discovery',
+            'vuln-scanning': 'Vulnerability Scanning',
+            'settings': 'Settings'
+        };
+        
+        return displayNames[tab] || tab;
+    },
+
+    // Enhanced cleanup method for tab switching
     cleanupPreviousTab() {
         // Stop general auto-refresh
         if (window.AppState && AppState.refreshInterval) {
@@ -58,21 +74,40 @@ const Navigation = {
             AppState.refreshInterval = null;
         }
 
-        // Stop port scanning specific auto-refresh
-        if (window.PortScanning && typeof window.PortScanning.cleanup === 'function') {
-            window.PortScanning.cleanup();
-        }
+        // Stop module-specific auto-refresh intervals
+        const modulesToCleanup = [
+            'Scans',         // Subdomain scans auto-refresh
+            'Subdomains',    // Live hosts auto-refresh  
+            'PortScanning',  // Port scanning auto-refresh
+            'Directories',   // Directory auto-refresh
+            'Vulnerabilities' // Vuln scanning auto-refresh
+        ];
 
-        // Stop any other module-specific intervals
-        if (window.Subdomains && window.Subdomains.refreshInterval) {
-            clearInterval(window.Subdomains.refreshInterval);
-            window.Subdomains.refreshInterval = null;
-        }
-
-        if (window.Directories && window.Directories.refreshInterval) {
-            clearInterval(window.Directories.refreshInterval);
-            window.Directories.refreshInterval = null;
-        }
+        modulesToCleanup.forEach(moduleName => {
+            const module = window[moduleName];
+            if (module && typeof module.cleanup === 'function') {
+                try {
+                    module.cleanup();
+                    console.log(`✅ Cleaned up ${moduleName} module`);
+                } catch (error) {
+                    console.warn(`⚠️ Failed to cleanup ${moduleName}:`, error);
+                }
+            }
+            
+            // Also check for refreshInterval property
+            if (module && module.refreshInterval) {
+                clearInterval(module.refreshInterval);
+                module.refreshInterval = null;
+                console.log(`✅ Cleared ${moduleName} refreshInterval`);
+            }
+            
+            // Check for scanJobsRefreshInterval (for subdomains module)
+            if (module && module.scanJobsRefreshInterval) {
+                clearInterval(module.scanJobsRefreshInterval);
+                module.scanJobsRefreshInterval = null;
+                console.log(`✅ Cleared ${moduleName} scanJobsRefreshInterval`);
+            }
+        });
     },
 
     async loadTabContent(tab) {
@@ -97,6 +132,14 @@ const Navigation = {
                         await window.Dashboard.init();
                     } else {
                         this.showModuleNotAvailable('Dashboard');
+                    }
+                    break;
+                    
+                case 'scans':
+                    if (window.Scans && typeof window.Scans.init === 'function') {
+                        await window.Scans.init();
+                    } else {
+                        this.showModuleNotAvailable('Scans');
                     }
                     break;
                     
@@ -132,14 +175,6 @@ const Navigation = {
                     }
                     break;
                     
-                case 'scans':
-                    if (window.Scans && typeof window.Scans.init === 'function') {
-                        await window.Scans.init();
-                    } else {
-                        this.showModuleNotAvailable('Scans');
-                    }
-                    break;
-                    
                 case 'content-discovery':
                 case 'js-analysis':
                 case 'api-discovery':
@@ -158,7 +193,7 @@ const Navigation = {
             content.innerHTML = `
                 <div style="text-align: center; color: #ff0000; padding: 40px;">
                     <h3>Error Loading Content</h3>
-                    <p>Failed to load ${tab} module</p>
+                    <p>Failed to load ${this.getTabDisplayName(tab)} module</p>
                     <p style="font-size: 12px; margin-top: 10px;">Check console for details</p>
                     <button onclick="Navigation.loadTabContent('${tab}')" class="btn btn-secondary" style="margin-top: 15px;">
                         Try Again
@@ -196,7 +231,13 @@ const Navigation = {
 
     handleGlobalTargetFilter(selectedTargetId) {
         // Update other target filters to match
-        const filterIds = ['subdomain-target-filter', 'directory-target-filter', 'port-target-filter', 'vuln-scan-target'];
+        const filterIds = [
+            'subdomain-target-filter', 
+            'directory-target-filter', 
+            'port-target-filter', 
+            'vuln-scan-target',
+            'live-scan-target'  // Add the new live scan target filter
+        ];
         
         filterIds.forEach(filterId => {
             const filter = document.getElementById(filterId);
@@ -231,69 +272,6 @@ const Navigation = {
                     window.Vulnerabilities.load();
                 }
                 break;
-        }
-    },
-
-    handleAutoRefresh(tab) {
-        // Stop any existing refresh
-        if (window.AppState && AppState.refreshInterval) {
-            clearInterval(AppState.refreshInterval);
-            AppState.refreshInterval = null;
-        }
-
-        // Start auto-refresh for specific tabs
-        if (tab === 'scans') {
-            setTimeout(() => this.startScanAutoRefresh(), 1000);
-        }
-        // Note: Port scanning has its own auto-refresh mechanism that starts in the init() method
-        // No need to start it here as it's handled by the PortScanning module itself
-    },
-
-    startScanAutoRefresh() {
-        if (!window.AppState) {
-            console.warn('AppState not available for auto-refresh');
-            return;
-        }
-        
-        if (AppState.refreshInterval) return;
-        
-        const refreshInterval = window.CONFIG?.SCAN_REFRESH_INTERVAL || 5000;
-        
-        AppState.refreshInterval = setInterval(async () => {
-            const activeTab = document.querySelector('.nav-item.active')?.dataset.tab;
-            if (activeTab === 'scans' && window.Scans && typeof window.Scans.load === 'function') {
-                try {
-                    // Check if API is available
-                    if (!window.API || !window.API.scans) {
-                        console.warn('API not available for auto-refresh');
-                        return;
-                    }
-                    
-                    const response = await API.scans.getJobs();
-                    if (response && response.ok) {
-                        const data = await response.json();
-                        const scans = data.success ? data.data : [];
-                        const hasRunningScans = scans.some(scan => 
-                            scan.status === 'running' || scan.status === 'pending'
-                        );
-                        
-                        if (hasRunningScans) {
-                            window.Scans.load();
-                        } else {
-                            this.stopAutoRefresh();
-                        }
-                    }
-                } catch (error) {
-                    console.error('Auto-refresh failed:', error);
-                }
-            }
-        }, refreshInterval);
-    },
-
-    stopAutoRefresh() {
-        if (window.AppState && AppState.refreshInterval) {
-            clearInterval(AppState.refreshInterval);
-            AppState.refreshInterval = null;
         }
     },
 
@@ -343,6 +321,19 @@ const Navigation = {
     getSettingsContent() {
         const apiBase = (window.CONFIG && window.CONFIG.API_BASE) || 'http://localhost:3001/api/v1';
         
+        // Get active module intervals for debugging
+        const getModuleStatus = (moduleName) => {
+            const module = window[moduleName];
+            if (!module) return '❌ Not Loaded';
+            
+            let status = '✅ Loaded';
+            if (module.refreshInterval) status += ' | 🔄 Auto-refresh Active';
+            if (module.scanJobsRefreshInterval) status += ' | 🔄 Scan Jobs Auto-refresh Active';
+            if (typeof module.cleanup === 'function') status += ' | 🧹 Has Cleanup';
+            
+            return status;
+        };
+        
         return `
             <div class="card">
                 <div class="card-title">Settings</div>
@@ -360,8 +351,11 @@ const Navigation = {
                     <label>Auto-refresh Status</label>
                     <div style="font-family: 'Courier New', monospace; font-size: 12px; color: #006600; padding: 10px; border: 1px solid #003300; background-color: #001100;">
                         <div>General Auto-refresh: ${window.AppState?.refreshInterval ? '🟢 Active' : '🔴 Inactive'}</div>
-                        <div>Port Scanning Auto-refresh: ${window.PortScanning?.refreshInterval ? '🟢 Active' : '🔴 Inactive'}</div>
-                        <div>Active Scans Being Monitored: ${window.PortScanning?.activeScanJobId ? '🟢 Yes' : '🔴 No'}</div>
+                        <div>Subdomain Scans Module: ${getModuleStatus('Scans')}</div>
+                        <div>Live Hosts Module: ${getModuleStatus('Subdomains')}</div>
+                        <div>Port Scanning Module: ${getModuleStatus('PortScanning')}</div>
+                        <div>Directories Module: ${getModuleStatus('Directories')}</div>
+                        <div>Vulnerabilities Module: ${getModuleStatus('Vulnerabilities')}</div>
                     </div>
                 </div>
                 <div class="form-group">
@@ -372,23 +366,70 @@ const Navigation = {
                         <div>AppState: ${window.AppState ? '✅ Loaded' : '❌ Not Found'}</div>
                         <div>API: ${window.API ? '✅ Loaded' : '❌ Not Found'}</div>
                         <div>Auth: ${window.Auth ? '✅ Loaded' : '❌ Not Found'}</div>
-                        <div>Targets: ${window.Targets ? '✅ Loaded' : '❌ Not Found'}</div>
-                        <div>Dashboard: ${window.Dashboard ? '✅ Loaded' : '❌ Not Found'}</div>
-                        <div>Scans: ${window.Scans ? '✅ Loaded' : '❌ Not Found'}</div>
-                        <div>Subdomains: ${window.Subdomains ? '✅ Loaded' : '❌ Not Found'}</div>
-                        <div>Directories: ${window.Directories ? '✅ Loaded' : '❌ Not Found'}</div>
-                        <div>PortScanning: ${window.PortScanning ? '✅ Loaded' : '❌ Not Found'}</div>
-                        <div>Vulnerabilities: ${window.Vulnerabilities ? '✅ Loaded' : '❌ Not Found'}</div>
+                        <div>Navigation: ${window.Navigation ? '✅ Loaded' : '❌ Not Found'}</div>
+                        <hr style="border-color: #003300; margin: 8px 0;">
+                        <div>Targets: ${getModuleStatus('Targets')}</div>
+                        <div>Dashboard: ${getModuleStatus('Dashboard')}</div>
+                        <div>Scans (Subdomain): ${getModuleStatus('Scans')}</div>
+                        <div>Subdomains (Live Hosts): ${getModuleStatus('Subdomains')}</div>
+                        <div>Directories: ${getModuleStatus('Directories')}</div>
+                        <div>PortScanning: ${getModuleStatus('PortScanning')}</div>
+                        <div>Vulnerabilities: ${getModuleStatus('Vulnerabilities')}</div>
                     </div>
                 </div>
-                <button class="btn btn-primary" onclick="console.log('Available modules:', Object.keys(window).filter(k => ['CONFIG', 'Utils', 'API', 'Auth', 'Targets', 'Dashboard', 'Scans', 'Subdomains', 'Directories', 'PortScanning', 'Vulnerabilities'].includes(k)))">
-                    Debug Modules
-                </button>
-                <button class="btn btn-secondary" onclick="Navigation.cleanupPreviousTab(); console.log('Cleaned up all auto-refresh intervals');">
-                    Stop All Auto-refresh
-                </button>
+                <div class="form-group">
+                    <label>Actions</label>
+                    <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                        <button class="btn btn-primary" onclick="console.log('Available modules:', Object.keys(window).filter(k => ['CONFIG', 'Utils', 'API', 'Auth', 'Targets', 'Dashboard', 'Scans', 'Subdomains', 'Directories', 'PortScanning', 'Vulnerabilities'].includes(k)))">
+                            Debug Modules
+                        </button>
+                        <button class="btn btn-secondary" onclick="Navigation.cleanupPreviousTab(); console.log('✅ Cleaned up all auto-refresh intervals');">
+                            Stop All Auto-refresh
+                        </button>
+                        <button class="btn btn-secondary" onclick="Navigation.forceCleanupAllIntervals();">
+                            Force Cleanup All
+                        </button>
+                    </div>
+                </div>
             </div>
         `;
+    },
+
+    // Force cleanup all intervals (for debugging)
+    forceCleanupAllIntervals() {
+        let clearedCount = 0;
+        
+        // Clear all intervals up to a reasonable limit
+        for (let i = 1; i < 1000; i++) {
+            try {
+                clearInterval(i);
+                clearedCount++;
+            } catch (e) {
+                // Ignore errors
+            }
+        }
+        
+        // Reset module intervals
+        const modules = ['Scans', 'Subdomains', 'PortScanning', 'Directories', 'Vulnerabilities'];
+        modules.forEach(moduleName => {
+            const module = window[moduleName];
+            if (module) {
+                if (module.refreshInterval) {
+                    module.refreshInterval = null;
+                }
+                if (module.scanJobsRefreshInterval) {
+                    module.scanJobsRefreshInterval = null;
+                }
+            }
+        });
+        
+        // Reset AppState
+        if (window.AppState) {
+            AppState.refreshInterval = null;
+        }
+        
+        console.log(`🧹 Force cleanup completed - cleared ${clearedCount} intervals`);
+        alert(`Force cleanup completed - cleared ${clearedCount} intervals`);
     }
 };
 

@@ -1,4 +1,4 @@
-// backend/src/services/scanService.js - UPDATED with Enhanced Content Discovery
+// backend/src/services/scanService.js - UPDATED with Live Hosts Scan Support
 const { exec } = require('child_process');
 const path = require('path');
 const fs = require('fs').promises;
@@ -7,6 +7,8 @@ const execAsync = promisify(exec);
 const ScanJob = require('../models/ScanJob');
 const Target = require('../models/Target');
 const knex = require('../config/database');
+const dns = require('dns').promises;
+const axios = require('axios');
 
 // Import enhanced port scanning service
 const { runEnhancedPortScan } = require('./portScanningService');
@@ -98,6 +100,9 @@ class ScanService {
         case 'subdomain_scan':
           results = await this.runSubdomainScan(scan, target);
           break;
+        case 'live_hosts_scan':
+          results = await this.runLiveHostsScan(scan, target);
+          break;
         case 'port_scan':
           results = await this.runPortScan(scan, target);
           break;
@@ -133,6 +138,257 @@ class ScanService {
       throw error;
     } finally {
       this.activeScanJobs.delete(scan.id);
+    }
+  }
+
+  /**
+   * Live hosts scanning - NEW METHOD
+   */
+  async runLiveHostsScan(scan, target) {
+    console.log(`Running live hosts scan for: ${target.domain}`);
+    
+    await ScanJob.updateProgress(scan.id, 5);
+    
+    try {
+      // Parse scan config
+      const config = typeof scan.config === 'string' ? JSON.parse(scan.config) : scan.config || {};
+      const {
+        target_id,
+        batch_size = 5,
+        request_timeout = 8000,
+        include_http_check = true,
+        include_https_check = true,
+        extract_titles = true,
+        dns_resolution = true
+      } = config;
+
+      console.log('Live hosts scan config:', config);
+
+      // Get all subdomains for this target that need to be checked
+      let subdomains = [];
+      
+      if (Subdomain) {
+        try {
+          subdomains = await knex('subdomains')
+            .where('target_id', target.id)
+            .select('*');
+          
+          console.log(`Found ${subdomains.length} subdomains to check for live status`);
+        } catch (error) {
+          console.error('Failed to fetch subdomains for live check:', error);
+          throw new Error('Could not fetch subdomains for live host verification');
+        }
+      } else {
+        throw new Error('Subdomain model not available for live host scanning');
+      }
+
+      if (subdomains.length === 0) {
+        throw new Error('No subdomains found to check. Run a subdomain scan first.');
+      }
+
+      await ScanJob.updateProgress(scan.id, 15);
+
+      let checkedSubdomains = 0;
+      let liveHosts = [];
+      let newlyDiscoveredLive = [];
+      let updatedSubdomains = [];
+      const startTime = Date.now();
+
+      // Process subdomains in batches
+      for (let i = 0; i < subdomains.length; i += batch_size) {
+        const batch = subdomains.slice(i, i + batch_size);
+        
+        console.log(`Processing batch ${Math.floor(i / batch_size) + 1}: ${batch.length} subdomains`);
+        
+        // Process batch in parallel
+        const batchPromises = batch.map(async (subdomain) => {
+          return await this.checkSingleSubdomainLive(subdomain, {
+            dns_resolution,
+            include_http_check,
+            include_https_check,
+            extract_titles,
+            request_timeout
+          });
+        });
+        
+        const batchResults = await Promise.allSettled(batchPromises);
+        
+        // Process results
+        for (let j = 0; j < batchResults.length; j++) {
+          const result = batchResults[j];
+          const subdomain = batch[j];
+          
+          if (result.status === 'fulfilled' && result.value) {
+            const checkResult = result.value;
+            
+            // Update subdomain in database
+            try {
+              const updateData = {
+                status: checkResult.isLive ? 'active' : 'inactive',
+                ip_address: checkResult.ipAddress,
+                http_status: checkResult.httpStatus,
+                title: checkResult.title,
+                last_seen: checkResult.isLive ? new Date() : subdomain.last_seen,
+                updated_at: new Date()
+              };
+
+              await knex('subdomains')
+                .where('id', subdomain.id)
+                .update(updateData);
+
+              updatedSubdomains.push({
+                ...subdomain,
+                ...updateData
+              });
+
+              if (checkResult.isLive) {
+                liveHosts.push(subdomain.subdomain);
+                
+                // Check if this is newly discovered as live
+                if (subdomain.status !== 'active') {
+                  newlyDiscoveredLive.push(subdomain.subdomain);
+                }
+              }
+              
+            } catch (updateError) {
+              console.error(`Failed to update subdomain ${subdomain.subdomain}:`, updateError);
+            }
+          } else {
+            console.error(`Failed to check subdomain ${subdomain.subdomain}:`, result.reason);
+          }
+          
+          checkedSubdomains++;
+        }
+        
+        // Update progress
+        const progressPercent = 15 + (checkedSubdomains / subdomains.length) * 75;
+        await ScanJob.updateProgress(scan.id, Math.round(progressPercent));
+        
+        // Small delay between batches to be respectful
+        if (i + batch_size < subdomains.length) {
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+      }
+
+      const endTime = Date.now();
+      const totalTime = Math.round((endTime - startTime) / 1000);
+      const successRate = Math.round((liveHosts.length / subdomains.length) * 100);
+
+      console.log(`Live hosts scan completed: ${liveHosts.length}/${subdomains.length} live (${successRate}%) in ${totalTime}s`);
+
+      await ScanJob.updateProgress(scan.id, 95);
+
+      const results = {
+        total_checked: subdomains.length,
+        live_hosts: liveHosts.length,
+        live_host_list: liveHosts,
+        newly_discovered: newlyDiscoveredLive,
+        success_rate: successRate,
+        scan_duration_seconds: totalTime,
+        updated_subdomains: updatedSubdomains.length,
+        scan_timestamp: new Date().toISOString(),
+        target_domain: target.domain,
+        scan_config: config,
+        batch_processing: {
+          batch_size: batch_size,
+          total_batches: Math.ceil(subdomains.length / batch_size)
+        }
+      };
+
+      console.log(`✅ Live hosts scan completed for ${target.domain}: ${liveHosts.length} live hosts found`);
+      
+      await ScanJob.updateProgress(scan.id, 100);
+      return results;
+
+    } catch (error) {
+      console.error(`❌ Live hosts scan failed for ${target.domain}:`, error);
+      throw new Error(`Live hosts scan failed: ${error.message}`);
+    }
+  }
+
+  /**
+   * Check a single subdomain for live status - helper method
+   */
+  async checkSingleSubdomainLive(subdomain, options = {}) {
+    const {
+      dns_resolution = true,
+      include_http_check = true,
+      include_https_check = true,
+      extract_titles = true,
+      request_timeout = 8000
+    } = options;
+
+    let ipAddress = null;
+    let httpStatus = null;
+    let title = null;
+    let isLive = false;
+    
+    console.log(`Checking live status for: ${subdomain.subdomain}`);
+    
+    try {
+      // Step 1: DNS lookup for IP address
+      if (dns_resolution) {
+        try {
+          console.log(`DNS lookup for: ${subdomain.subdomain}`);
+          const addresses = await dns.resolve4(subdomain.subdomain);
+          ipAddress = addresses[0];
+          console.log(`DNS resolved: ${subdomain.subdomain} -> ${ipAddress}`);
+        } catch (dnsError) {
+          console.log(`DNS lookup failed for ${subdomain.subdomain}: ${dnsError.message}`);
+          return { isLive: false, ipAddress: null, httpStatus: null, title: null };
+        }
+      }
+      
+      // Step 2: HTTP/HTTPS checks (only if DNS resolved or if we're skipping DNS)
+      if (ipAddress || !dns_resolution) {
+        const protocols = [];
+        if (include_http_check) protocols.push('http');
+        if (include_https_check) protocols.push('https');
+        
+        for (const protocol of protocols) {
+          try {
+            console.log(`${protocol.toUpperCase()} check for: ${subdomain.subdomain}`);
+            const response = await axios.get(`${protocol}://${subdomain.subdomain}`, {
+              timeout: request_timeout,
+              maxRedirects: 3,
+              validateStatus: () => true, // Accept any status code
+              headers: {
+                'User-Agent': 'Mozilla/5.0 (compatible; SecurityScanner/1.0)'
+              }
+            });
+            
+            httpStatus = response.status;
+            isLive = response.status >= 200 && response.status < 500; // Consider 4xx as live but problematic
+            
+            // Extract title from HTML if requested
+            if (extract_titles && response.data && typeof response.data === 'string') {
+              const titleMatch = response.data.match(/<title[^>]*>([^<]+)<\/title>/i);
+              if (titleMatch) {
+                title = titleMatch[1].trim().substring(0, 200); // Limit title length
+                title = title.replace(/\s+/g, ' ').trim(); // Clean up whitespace
+              }
+            }
+            
+            console.log(`${protocol.toUpperCase()} success: ${subdomain.subdomain} -> ${httpStatus} (${title || 'No title'})`);
+            break; // Success, no need to try other protocol
+            
+          } catch (httpError) {
+            console.log(`${protocol.toUpperCase()} failed for ${subdomain.subdomain}: ${httpError.message}`);
+            // Continue to next protocol
+          }
+        }
+      }
+      
+      return {
+        isLive: isLive,
+        ipAddress: ipAddress,
+        httpStatus: httpStatus,
+        title: title
+      };
+      
+    } catch (error) {
+      console.error(`Error checking ${subdomain.subdomain}:`, error.message);
+      return { isLive: false, ipAddress: null, httpStatus: null, title: null };
     }
   }
 
@@ -310,7 +566,6 @@ class ScanService {
       throw error;
     }
   }
-
 
   /**
    * JavaScript files scan
@@ -511,20 +766,24 @@ class ScanService {
       const subdomainResults = await this.runSubdomainScan(scan, target);
       
       await ScanJob.updateProgress(scan.id, 30);
-      const portResults = await this.runPortScan(scan, target);
+      const liveHostsResults = await this.runLiveHostsScan(scan, target);
       
       await ScanJob.updateProgress(scan.id, 50);
+      const portResults = await this.runPortScan(scan, target);
+      
+      await ScanJob.updateProgress(scan.id, 70);
       // Use enhanced content discovery for full scan
       const contentResults = await runEnhancedContentDiscovery(scan, target);
       
-      await ScanJob.updateProgress(scan.id, 70);
+      await ScanJob.updateProgress(scan.id, 85);
       const apiResults = await this.runAPIDiscovery(scan, target);
       
-      await ScanJob.updateProgress(scan.id, 90);
+      await ScanJob.updateProgress(scan.id, 95);
       const vulnResults = await this.runVulnerabilityScan(scan, target);
       
       const results = {
         subdomain_scan: subdomainResults,
+        live_hosts_scan: liveHostsResults,
         port_scan: portResults,
         content_discovery: contentResults,
         api_discovery: apiResults,
@@ -532,6 +791,7 @@ class ScanService {
         scan_timestamp: new Date().toISOString(),
         summary: {
           total_subdomains: subdomainResults.total_count || 0,
+          live_hosts: liveHostsResults.live_hosts || 0,
           total_ports: portResults.total_ports || 0,
           total_content_items: contentResults.total_items || 0,
           total_apis: apiResults.total_endpoints || 0,
@@ -572,6 +832,10 @@ class ScanService {
         case 'subdomain_scan':
           currentStats.subdomains = results.total_count || 0;
           currentStats.alive_subdomains = results.alive_count || 0;
+          break;
+        case 'live_hosts_scan':
+          currentStats.live_hosts = results.live_hosts || 0;
+          currentStats.last_live_check = new Date().toISOString();
           break;
         case 'port_scan':
           currentStats.open_ports = results.total_ports || 0;
