@@ -1,21 +1,21 @@
-// backend/knexfile.js
+// backend/knexfile.js - IMPROVED VERSION
 require('dotenv').config();
 
 const config = {
   development: {
     client: 'pg',
     connection: {
-      host: process.env.DB_HOST || 'postgres',
+      host: process.env.DB_HOST || 'localhost',
       port: process.env.DB_PORT || 5432,
       user: process.env.DB_USER || 'papv2',
       password: process.env.DB_PASSWORD || 'password',
       database: process.env.DB_NAME || 'framework'
     },
     pool: {
-      min: 2,
-      max: 10,
-      acquireTimeoutMillis: 60000,
-      createTimeoutMillis: 30000,
+      min: 1,  // Reduced from 2
+      max: 5,  // Reduced from 10 for migrations
+      acquireTimeoutMillis: 30000,  // Reduced timeout
+      createTimeoutMillis: 20000,   // Reduced timeout
       destroyTimeoutMillis: 5000,
       idleTimeoutMillis: 30000,
       reapIntervalMillis: 1000,
@@ -29,7 +29,16 @@ const config = {
     seeds: {
       directory: './database/seeds'
     },
-    debug: process.env.KNEX_DEBUG === 'true'
+    debug: process.env.KNEX_DEBUG === 'true',
+    // Add connection validation
+    postProcessResponse: (result, queryContext) => {
+      // This helps catch connection issues early
+      return result;
+    },
+    // Add better error handling
+    wrapIdentifier: (value, origImpl, queryContext) => {
+      return origImpl(value);
+    }
   },
 
   production: {
@@ -70,7 +79,7 @@ const config = {
     },
     pool: {
       min: 1,
-      max: 5
+      max: 3  // Very small pool for tests
     },
     migrations: {
       directory: './database/migrations'

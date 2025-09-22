@@ -1,4 +1,4 @@
-// backend/src/config/database.js - FIXED WITH PROPER CONNECTION MANAGEMENT
+// backend/src/config/database.js - FIXED VERSION
 const knex = require('knex');
 const knexConfig = require('../../knexfile');
 
@@ -18,13 +18,62 @@ console.log(`🔗 Database config:`, {
 // Create and export the knex instance
 const db = knex(config);
 
-// Enhanced connection testing with proper error handling
-db.raw('SELECT 1')
-  .then(() => {
+// DON'T test connection immediately - this can cause pool exhaustion
+// Let the connection be established when actually needed
+
+// Add connection pool monitoring
+db.on('query', (query) => {
+  if (process.env.DEBUG_SQL === 'true') {
+    console.log('🔍 SQL Query:', query.sql);
+  }
+});
+
+// Monitor connection pool health - but only if debugging is enabled
+const monitorPool = () => {
+  if (process.env.DEBUG_POOL !== 'true') return;
+  
+  try {
+    const pool = db.client.pool;
+    if (pool) {
+      console.log(`📊 Pool status: used=${pool.numUsed()}, free=${pool.numFree()}, pending=${pool.numPendingAcquires()}, pending_creates=${pool.numPendingCreates()}`);
+    }
+  } catch (error) {
+    // Ignore pool monitoring errors
+  }
+};
+
+// Only monitor if debugging is enabled
+if (process.env.DEBUG_POOL === 'true') {
+  const interval = setInterval(monitorPool, 30000);
+  
+  // Clear interval on process exit
+  process.once('exit', () => clearInterval(interval));
+}
+
+// Graceful shutdown handling
+const gracefulShutdown = async (signal) => {
+  console.log(`🔄 Received ${signal}, shutting down database connections...`);
+  try {
+    await db.destroy();
+    console.log('✅ Database connections closed');
+    process.exit(0);
+  } catch (error) {
+    console.error('❌ Error closing database connections:', error);
+    process.exit(1);
+  }
+};
+
+process.on('SIGINT', gracefulShutdown);
+process.on('SIGTERM', gracefulShutdown);
+
+// Test connection when explicitly requested
+db.testConnection = async () => {
+  try {
+    await db.raw('SELECT 1');
     console.log('✅ Database connected successfully');
     console.log(`🏊 Connection pool: min=${config.pool?.min || 'default'}, max=${config.pool?.max || 'default'}`);
-  })
-  .catch((err) => {
+    return true;
+  } catch (err) {
     console.error('❌ Database connection failed:', err.message);
     console.error('🔧 Connection config:', {
       host: config.connection.host,
@@ -43,52 +92,10 @@ db.raw('SELECT 1')
     } else if (err.message.includes('does not exist')) {
       console.error('💡 Suggestion: Create the database or check the database name');
     }
-  });
-
-// Add connection pool monitoring
-db.on('query', (query) => {
-  if (process.env.DEBUG_SQL === 'true') {
-    console.log('🔍 SQL Query:', query.sql);
-  }
-});
-
-// Monitor connection pool health
-const monitorPool = () => {
-  const pool = db.client.pool;
-  if (pool) {
-    console.log(`📊 Pool status: used=${pool.numUsed()}, free=${pool.numFree()}, pending=${pool.numPendingAcquires()}, pending_creates=${pool.numPendingCreates()}`);
+    
+    throw err;
   }
 };
-
-// Log pool status every 30 seconds in debug mode
-if (process.env.DEBUG_POOL === 'true') {
-  setInterval(monitorPool, 30000);
-}
-
-// Graceful shutdown handling
-process.on('SIGINT', async () => {
-  console.log('🔄 Gracefully shutting down database connections...');
-  try {
-    await db.destroy();
-    console.log('✅ Database connections closed');
-    process.exit(0);
-  } catch (error) {
-    console.error('❌ Error closing database connections:', error);
-    process.exit(1);
-  }
-});
-
-process.on('SIGTERM', async () => {
-  console.log('🔄 Received SIGTERM, shutting down database connections...');
-  try {
-    await db.destroy();
-    console.log('✅ Database connections closed');
-    process.exit(0);
-  } catch (error) {
-    console.error('❌ Error closing database connections:', error);
-    process.exit(1);
-  }
-});
 
 // Export database instance
 module.exports = db;

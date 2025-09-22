@@ -1,4 +1,4 @@
-// backend/src/models/Directory.js - ROBUST VERSION WITH COLUMN DETECTION
+// backend/src/models/Directory.js - FIXED VERSION WITH BATCH PROCESSING
 const knex = require('../config/database');
 
 class Directory {
@@ -196,6 +196,7 @@ class Directory {
     }
   }
 
+  // FIXED: Improved bulkCreate with batch processing and better error handling
   static async bulkCreate(directories) {
     if (!directories || directories.length === 0) {
       console.log('No directories to create');
@@ -211,22 +212,8 @@ class Directory {
       
       console.log(`Enhanced columns available: ${hasEnhancedColumns}`);
       
-      // Validate required fields and filter out records with null subdomain_id
-      const validDirectories = directories.filter(dir => {
-        if (!dir.subdomain_id) {
-          console.warn('Skipping directory record with null subdomain_id:', dir.path || 'unknown path');
-          return false;
-        }
-        
-        // Only require path and url, status_code can be null for passive discovery
-        const isValid = dir.path && dir.url;
-        if (!isValid) {
-          console.warn('Invalid directory record (missing path or url):', dir);
-          return false;
-        }
-        
-        return true;
-      });
+      // Validate and clean data
+      const validDirectories = this.validateAndCleanDirectories(directories);
 
       if (validDirectories.length === 0) {
         console.warn('No valid directories to create after validation');
@@ -236,52 +223,10 @@ class Directory {
       console.log(`Validated ${validDirectories.length} out of ${directories.length} directory records`);
 
       // Prepare directory records with only columns that exist in the table
-      const directoryRecords = validDirectories.map(dir => {
-        // Base record with columns that always exist
-        const record = {
-          subdomain_id: parseInt(dir.subdomain_id),
-          path: dir.path,
-          url: dir.url,
-          status_code: dir.status_code ? parseInt(dir.status_code) : null,
-          content_length: dir.content_length ? parseInt(dir.content_length) : null,
-          response_time: dir.response_time ? parseInt(dir.response_time) : null,
-          title: dir.title ? dir.title.substring(0, 255) : null,
-          headers: dir.headers || null,
-          body_preview: dir.body_preview ? dir.body_preview.substring(0, 1000) : null,
-          method: dir.method || 'GET',
-          source: dir.source || 'unknown',
-          scan_job_id: dir.scan_job_id || null,
-          created_at: new Date(),
-          updated_at: new Date()
-        };
-
-        // Add enhanced columns only if they exist in the table
-        if (hasEnhancedColumns) {
-          record.content_type = dir.content_type || 'endpoint';
-          record.risk_level = dir.risk_level || 'low';
-          record.parameters = dir.parameters ? (Array.isArray(dir.parameters) ? dir.parameters.join(',') : String(dir.parameters)) : null;
-          record.notes = dir.notes || null;
-        }
-
-        return record;
-      });
+      const directoryRecords = this.prepareDirectoryRecords(validDirectories, hasEnhancedColumns);
 
       // Verify subdomain_ids exist before inserting
-      const subdomainIds = [...new Set(directoryRecords.map(d => d.subdomain_id))];
-      const existingSubdomains = await knex('subdomains')
-        .whereIn('id', subdomainIds)
-        .select('id');
-      
-      const existingSubdomainIds = new Set(existingSubdomains.map(s => s.id));
-      
-      // Filter out records with non-existent subdomain_ids
-      const validatedRecords = directoryRecords.filter(dir => {
-        if (!existingSubdomainIds.has(dir.subdomain_id)) {
-          console.warn(`Skipping directory - subdomain_id ${dir.subdomain_id} does not exist: ${dir.path}`);
-          return false;
-        }
-        return true;
-      });
+      const validatedRecords = await this.validateSubdomainReferences(directoryRecords);
 
       if (validatedRecords.length === 0) {
         console.warn('No directories with valid subdomain references to create');
@@ -290,31 +235,53 @@ class Directory {
 
       console.log(`Final validation: ${validatedRecords.length} directories with valid subdomain references`);
 
-      // Use upsert to handle duplicates - only merge columns that exist
-      const mergeColumns = [
-        'status_code', 
-        'content_length', 
-        'response_time', 
-        'title', 
-        'headers',
-        'body_preview',
-        'scan_job_id',
-        'updated_at'
-      ];
+      // FIXED: Process in batches to avoid query size limits
+      const BATCH_SIZE = 50; // Reasonable batch size
+      let allCreatedRecords = [];
 
-      // Add enhanced columns to merge list if they exist
-      if (hasEnhancedColumns) {
-        mergeColumns.push('content_type', 'risk_level', 'parameters', 'notes');
+      for (let i = 0; i < validatedRecords.length; i += BATCH_SIZE) {
+        const batch = validatedRecords.slice(i, i + BATCH_SIZE);
+        console.log(`Processing batch ${Math.floor(i / BATCH_SIZE) + 1}: ${batch.length} records`);
+
+        try {
+          // Use upsert to handle duplicates - only merge columns that exist
+          const mergeColumns = [
+            'status_code', 
+            'content_length', 
+            'response_time', 
+            'title', 
+            'headers',
+            'body_preview',
+            'scan_job_id',
+            'updated_at'
+          ];
+
+          // Add enhanced columns to merge list if they exist
+          if (hasEnhancedColumns) {
+            mergeColumns.push('content_type', 'risk_level', 'parameters', 'notes');
+          }
+
+          const batchResults = await knex(this.tableName)
+            .insert(batch)
+            .onConflict(['subdomain_id', 'path'])
+            .merge(mergeColumns)
+            .returning('*');
+
+          allCreatedRecords = allCreatedRecords.concat(batchResults);
+          console.log(`✅ Batch ${Math.floor(i / BATCH_SIZE) + 1} completed: ${batchResults.length} records`);
+
+        } catch (batchError) {
+          console.error(`❌ Batch ${Math.floor(i / BATCH_SIZE) + 1} failed:`, batchError.message);
+          
+          // Try to process records individually to identify problematic ones
+          console.log('🔄 Attempting individual record processing...');
+          const individualResults = await this.processRecordsIndividually(batch, hasEnhancedColumns);
+          allCreatedRecords = allCreatedRecords.concat(individualResults);
+        }
       }
 
-      const result = await knex(this.tableName)
-        .insert(validatedRecords)
-        .onConflict(['subdomain_id', 'path'])
-        .merge(mergeColumns)
-        .returning('*');
-
-      console.log(`✅ Successfully created/updated ${result.length} directory records`);
-      return result;
+      console.log(`✅ Successfully created/updated ${allCreatedRecords.length} directory records`);
+      return allCreatedRecords;
       
     } catch (error) {
       console.error('Error in Directory.bulkCreate:', error.message);
@@ -332,15 +299,133 @@ class Directory {
         return [];
       }
       
-      // Check for constraint violations
-      if (error.message.includes('violates') || error.message.includes('constraint')) {
-        console.error('Database constraint violation:', error.message);
-        return [];
-      }
-      
       console.error('Full error details:', error);
       return [];
     }
+  }
+
+  // Helper method to validate and clean directory data
+  static validateAndCleanDirectories(directories) {
+    return directories.filter(dir => {
+      if (!dir.subdomain_id) {
+        console.warn('Skipping directory record with null subdomain_id:', dir.path || 'unknown path');
+        return false;
+      }
+      
+      // Only require path and url, status_code can be null for passive discovery
+      const isValid = dir.path && dir.url;
+      if (!isValid) {
+        console.warn('Invalid directory record (missing path or url):', {
+          path: dir.path,
+          url: dir.url,
+          subdomain_id: dir.subdomain_id
+        });
+        return false;
+      }
+      
+      return true;
+    });
+  }
+
+  // Helper method to prepare directory records for insertion
+  static prepareDirectoryRecords(validDirectories, hasEnhancedColumns) {
+    return validDirectories.map(dir => {
+      // Base record with columns that always exist
+      const record = {
+        subdomain_id: parseInt(dir.subdomain_id),
+        path: dir.path,
+        url: dir.url,
+        status_code: dir.status_code ? parseInt(dir.status_code) : null,
+        content_length: dir.content_length ? parseInt(dir.content_length) : null,
+        response_time: dir.response_time ? parseInt(dir.response_time) : null,
+        title: dir.title ? String(dir.title).substring(0, 255) : null,
+        headers: dir.headers || null,
+        body_preview: dir.body_preview ? String(dir.body_preview).substring(0, 1000) : null,
+        method: dir.method || 'GET',
+        source: dir.source || 'unknown',
+        scan_job_id: dir.scan_job_id || null,
+        created_at: new Date(),
+        updated_at: new Date()
+      };
+
+      // Add enhanced columns only if they exist in the table
+      if (hasEnhancedColumns) {
+        record.content_type = dir.content_type || 'endpoint';
+        record.risk_level = dir.risk_level || 'low';
+        record.parameters = dir.parameters ? (Array.isArray(dir.parameters) ? dir.parameters.join(',') : String(dir.parameters)) : null;
+        record.notes = dir.notes || null;
+      }
+
+      return record;
+    });
+  }
+
+  // Helper method to validate subdomain references
+  static async validateSubdomainReferences(directoryRecords) {
+    const subdomainIds = [...new Set(directoryRecords.map(d => d.subdomain_id))];
+    
+    try {
+      const existingSubdomains = await knex('subdomains')
+        .whereIn('id', subdomainIds)
+        .select('id');
+      
+      const existingSubdomainIds = new Set(existingSubdomains.map(s => s.id));
+      
+      // Filter out records with non-existent subdomain_ids
+      return directoryRecords.filter(dir => {
+        if (!existingSubdomainIds.has(dir.subdomain_id)) {
+          console.warn(`Skipping directory - subdomain_id ${dir.subdomain_id} does not exist: ${dir.path}`);
+          return false;
+        }
+        return true;
+      });
+    } catch (error) {
+      console.error('Error validating subdomain references:', error.message);
+      return directoryRecords; // Return all records if validation fails
+    }
+  }
+
+  // Helper method to process records individually when batch fails
+  static async processRecordsIndividually(batch, hasEnhancedColumns) {
+    const results = [];
+    const mergeColumns = [
+      'status_code', 
+      'content_length', 
+      'response_time', 
+      'title', 
+      'headers',
+      'body_preview',
+      'scan_job_id',
+      'updated_at'
+    ];
+
+    if (hasEnhancedColumns) {
+      mergeColumns.push('content_type', 'risk_level', 'parameters', 'notes');
+    }
+
+    for (const record of batch) {
+      try {
+        const result = await knex(this.tableName)
+          .insert(record)
+          .onConflict(['subdomain_id', 'path'])
+          .merge(mergeColumns)
+          .returning('*');
+        
+        results.push(...result);
+      } catch (individualError) {
+        console.error(`Failed to process individual record:`, {
+          path: record.path,
+          subdomain_id: record.subdomain_id,
+          error: individualError.message
+        });
+        
+        // Log the problematic record for debugging
+        console.error('Problematic record data:', JSON.stringify(record, null, 2));
+      }
+    }
+
+    console.log(`Individual processing completed: ${results.length}/${batch.length} successful`);
+    return results;
   }
 
   static async getStatsByTarget(organizationId) {
