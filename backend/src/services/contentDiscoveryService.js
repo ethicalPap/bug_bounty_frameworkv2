@@ -1,4 +1,4 @@
-// backend/src/services/contentDiscoveryService.js - FIXED VERSION
+// backend/src/services/contentDiscoveryService.js - IMPROVED STATUS CODE HANDLING
 
 const { exec } = require('child_process');
 const { promisify } = require('util');
@@ -167,30 +167,40 @@ async function runEnhancedContentDiscovery(scan, target) {
     // Store results in database if Directory model is available
     if (Directory && allDiscoveredContent.length > 0) {
       try {
-        const contentRecords = allDiscoveredContent.map(item => ({
-          subdomain_id: item.subdomain_id, // Now guaranteed to be non-null
-          path: item.path,
-          url: item.url,
-          status_code: item.status_code || null,
-          content_length: item.content_length || null,
-          response_time: item.response_time || null,
-          title: item.title || null,
-          headers: item.headers ? JSON.stringify(item.headers) : null,
-          body_preview: item.body_preview || null,
-          method: item.method || 'GET',
-          source: item.source,
-          scan_job_id: scan.id,
-          content_type: item.content_type || 'endpoint',
-          risk_level: item.risk_level || 'low',
-          parameters: item.parameters ? item.parameters.join(',') : null,
-          notes: item.notes || null
-        }));
+        // IMPROVED: Better data preparation with validation
+        const contentRecords = allDiscoveredContent
+          .filter(item => item.subdomain_id && item.path && item.url) // Pre-filter invalid items
+          .map(item => ({
+            subdomain_id: item.subdomain_id,
+            path: item.path,
+            url: item.url,
+            status_code: item.status_code || null, // Allow null status codes
+            content_length: item.content_length || null,
+            response_time: item.response_time || null,
+            title: item.title || null,
+            headers: item.headers ? JSON.stringify(item.headers) : null,
+            body_preview: item.body_preview || null,
+            method: item.method || 'GET',
+            source: item.source || 'unknown',
+            scan_job_id: scan.id,
+            content_type: item.content_type || 'endpoint',
+            risk_level: item.risk_level || 'low',
+            parameters: item.parameters ? (Array.isArray(item.parameters) ? item.parameters.join(',') : String(item.parameters)) : null,
+            notes: item.notes || null
+          }));
 
-        console.log(`Storing ${contentRecords.length} content items in database`);
+        console.log(`Storing ${contentRecords.length} valid content items in database`);
+        
+        // Log a sample record for debugging
+        if (contentRecords.length > 0) {
+          console.log('Sample content record:', JSON.stringify(contentRecords[0], null, 2));
+        }
+        
         const createdRecords = await Directory.bulkCreate(contentRecords);
         console.log(`✅ Successfully stored ${createdRecords.length} content items`);
       } catch (dbError) {
         console.error('❌ Failed to store content items:', dbError.message);
+        console.error('Error details:', dbError);
       }
     }
 
@@ -214,10 +224,15 @@ async function runEnhancedContentDiscovery(scan, target) {
       ].filter(Boolean),
       scan_timestamp: new Date().toISOString(),
       target_domain: target.domain,
-      config: config
+      config: config,
+      status_summary: {
+        with_status_codes: allDiscoveredContent.filter(c => c.status_code).length,
+        pending_status_checks: allDiscoveredContent.filter(c => !c.status_code).length
+      }
     };
 
     console.log(`✅ Passive content discovery completed for ${target.domain}: found ${allDiscoveredContent.length} items using stealth methods`);
+    console.log(`📊 Status codes: ${results.status_summary.with_status_codes} checked, ${results.status_summary.pending_status_checks} pending`);
     
     await ScanJob.updateProgress(scan.id, 100);
     return results;
@@ -297,10 +312,11 @@ async function analyzeRobotsTxt(scanTarget) {
             content.push({
               path: path,
               url: `${scanTarget.base_url}${path}`,
-              source: 'robots.txt',
+              source: 'robots_txt',
               content_type: 'endpoint',
               risk_level: 'medium',
-              notes: 'Disallowed in robots.txt'
+              notes: 'Disallowed in robots.txt',
+              status_code: null // Will be checked later if needed
             });
           }
         }
@@ -311,24 +327,31 @@ async function analyzeRobotsTxt(scanTarget) {
             content.push({
               path: path,
               url: `${scanTarget.base_url}${path}`,
-              source: 'robots.txt',
+              source: 'robots_txt',
               content_type: 'endpoint',
               risk_level: 'low',
-              notes: 'Explicitly allowed in robots.txt'
+              notes: 'Explicitly allowed in robots.txt',
+              status_code: null
             });
           }
         }
         
         if (sitemapMatch) {
           const sitemapUrl = sitemapMatch[1].trim();
-          content.push({
-            path: new URL(sitemapUrl).pathname,
-            url: sitemapUrl,
-            source: 'robots.txt',
-            content_type: 'endpoint',
-            risk_level: 'low',
-            notes: 'Sitemap reference from robots.txt'
-          });
+          try {
+            const sitemapPath = new URL(sitemapUrl).pathname;
+            content.push({
+              path: sitemapPath,
+              url: sitemapUrl,
+              source: 'robots_txt',
+              content_type: 'endpoint',
+              risk_level: 'low',
+              notes: 'Sitemap reference from robots.txt',
+              status_code: null
+            });
+          } catch (urlError) {
+            console.warn(`Invalid sitemap URL in robots.txt: ${sitemapUrl}`);
+          }
         }
       });
       
@@ -336,7 +359,7 @@ async function analyzeRobotsTxt(scanTarget) {
       return content;
     }
   } catch (error) {
-    console.log(`robots.txt not found or accessible for ${scanTarget.hostname}`);
+    console.log(`robots.txt not found or accessible for ${scanTarget.hostname}: ${error.message}`);
   }
   
   return [];
@@ -379,14 +402,15 @@ async function analyzeSitemap(scanTarget) {
                   content.push({
                     path: urlObj.pathname + urlObj.search,
                     url: url,
-                    source: 'sitemap.xml',
+                    source: 'sitemap_xml',
                     content_type: 'endpoint',
                     risk_level: 'low',
-                    notes: 'Found in sitemap'
+                    notes: 'Found in sitemap',
+                    status_code: null // Status will be checked later if needed
                   });
                 }
               } catch (urlError) {
-                // Invalid URL, skip
+                console.warn(`Invalid URL in sitemap: ${url}`);
               }
             });
           }
@@ -401,7 +425,7 @@ async function analyzeSitemap(scanTarget) {
     console.log(`Found ${content.length} entries from sitemap`);
     return content;
   } catch (error) {
-    console.log(`Sitemap not found or accessible for ${scanTarget.hostname}`);
+    console.log(`Sitemap analysis failed for ${scanTarget.hostname}: ${error.message}`);
   }
   
   return [];
@@ -414,7 +438,7 @@ async function analyzeWaybackMachine(scanTarget) {
   try {
     console.log(`🕐 Analyzing Wayback Machine for ${scanTarget.hostname}`);
     
-    const waybackUrl = `http://web.archive.org/cdx/search/cdx?url=${scanTarget.hostname}/*&output=json&collapse=urlkey&limit=1000`;
+    const waybackUrl = `http://web.archive.org/cdx/search/cdx?url=${scanTarget.hostname}/*&output=json&collapse=urlkey&limit=500`;
     
     const response = await fetch(waybackUrl, {
       timeout: 15000,
@@ -427,8 +451,8 @@ async function analyzeWaybackMachine(scanTarget) {
       const data = await response.json();
       const content = [];
       
-      // Skip header row
-      data.slice(1).forEach(entry => {
+      // Skip header row and limit results to avoid overwhelming the system
+      data.slice(1).slice(0, 200).forEach(entry => {
         if (entry.length >= 3) {
           const originalUrl = entry[2];
           try {
@@ -440,7 +464,8 @@ async function analyzeWaybackMachine(scanTarget) {
                 source: 'wayback_machine',
                 content_type: 'endpoint',
                 risk_level: 'low',
-                notes: 'Historical endpoint from Wayback Machine'
+                notes: 'Historical endpoint from Wayback Machine',
+                status_code: null // Historical URLs, status will be checked later if needed
               });
             }
           } catch (urlError) {
@@ -495,8 +520,8 @@ async function analyzeJavaScript(scanTarget, parameterExtraction) {
       }
     });
     
-    // Analyze each JS file
-    for (const jsUrl of jsUrls.slice(0, 10)) { // Limit to 10 JS files
+    // Analyze each JS file (limit to avoid overwhelming the scan)
+    for (const jsUrl of jsUrls.slice(0, 5)) {
       try {
         const jsResponse = await fetch(jsUrl, {
           timeout: 10000,
@@ -522,15 +547,21 @@ async function analyzeJavaScript(scanTarget, parameterExtraction) {
               matches.forEach(match => {
                 const cleaned = match.replace(/['"`]/g, '').replace(/fetch\(/, '');
                 if (cleaned.startsWith('/') || cleaned.includes(scanTarget.hostname)) {
-                  const url = cleaned.startsWith('/') ? `${scanTarget.base_url}${cleaned}` : cleaned;
-                  content.push({
-                    path: new URL(url, scanTarget.base_url).pathname,
-                    url: url,
-                    source: 'javascript_analysis',
-                    content_type: 'ajax',
-                    risk_level: 'medium',
-                    notes: 'API endpoint found in JavaScript'
-                  });
+                  try {
+                    const url = cleaned.startsWith('/') ? `${scanTarget.base_url}${cleaned}` : cleaned;
+                    const urlObj = new URL(url, scanTarget.base_url);
+                    content.push({
+                      path: urlObj.pathname,
+                      url: url,
+                      source: 'javascript_analysis',
+                      content_type: 'ajax',
+                      risk_level: 'medium',
+                      notes: 'API endpoint found in JavaScript',
+                      status_code: null
+                    });
+                  } catch (urlError) {
+                    // Invalid URL, skip
+                  }
                 }
               });
             }
@@ -546,14 +577,20 @@ async function analyzeJavaScript(scanTarget, parameterExtraction) {
           
           xssSinks.forEach(pattern => {
             if (pattern.test(jsContent)) {
-              content.push({
-                path: new URL(jsUrl).pathname,
-                url: jsUrl,
-                source: 'javascript_analysis',
-                content_type: 'xss_sink',
-                risk_level: 'high',
-                notes: 'Potential XSS sink detected in JavaScript'
-              });
+              try {
+                const jsUrlObj = new URL(jsUrl);
+                content.push({
+                  path: jsUrlObj.pathname,
+                  url: jsUrl,
+                  source: 'javascript_analysis',
+                  content_type: 'xss_sink',
+                  risk_level: 'high',
+                  notes: 'Potential XSS sink detected in JavaScript',
+                  status_code: 200 // We know this JS file exists since we just fetched it
+                });
+              } catch (urlError) {
+                // Invalid URL, skip
+              }
             }
           });
         }
@@ -573,7 +610,6 @@ async function analyzeJavaScript(scanTarget, parameterExtraction) {
 
 /**
  * Analyze HTML content for forms, parameters, and AJAX calls
- * Optionally fetch HTTP status codes for discovered links
  */
 async function analyzeHTMLContent(scanTarget, parameterExtraction) {
   try {
@@ -599,26 +635,32 @@ async function analyzeHTMLContent(scanTarget, parameterExtraction) {
       const action = $form.attr('action') || '';
       const method = $form.attr('method') || 'GET';
       
-      const formUrl = action.startsWith('/') ? 
-        `${scanTarget.base_url}${action}` : 
-        new URL(action || '', scanTarget.base_url).href;
-      
-      const inputs = [];
-      $form.find('input, select, textarea').each((j, input) => {
-        const name = $(input).attr('name');
-        if (name) inputs.push(name);
-      });
-      
-      content.push({
-        path: new URL(formUrl).pathname,
-        url: formUrl,
-        source: 'form_analysis',
-        content_type: 'form',
-        method: method.toUpperCase(),
-        risk_level: inputs.some(inp => ['password', 'email', 'username'].includes(inp.toLowerCase())) ? 'medium' : 'low',
-        parameters: inputs,
-        notes: `Form with ${inputs.length} inputs`
-      });
+      try {
+        const formUrl = action.startsWith('/') ? 
+          `${scanTarget.base_url}${action}` : 
+          new URL(action || '', scanTarget.base_url).href;
+        
+        const inputs = [];
+        $form.find('input, select, textarea').each((j, input) => {
+          const name = $(input).attr('name');
+          if (name) inputs.push(name);
+        });
+        
+        const formUrlObj = new URL(formUrl);
+        content.push({
+          path: formUrlObj.pathname,
+          url: formUrl,
+          source: 'form_analysis',
+          content_type: 'form',
+          method: method.toUpperCase(),
+          risk_level: inputs.some(inp => ['password', 'email', 'username'].includes(inp.toLowerCase())) ? 'medium' : 'low',
+          parameters: inputs,
+          notes: `Form with ${inputs.length} inputs`,
+          status_code: null // Form action URLs will be checked later if needed
+        });
+      } catch (urlError) {
+        console.warn(`Invalid form action URL: ${action}`);
+      }
     });
     
     // Extract links (limit to reasonable number for passive discovery)
@@ -632,44 +674,22 @@ async function analyzeHTMLContent(scanTarget, parameterExtraction) {
           source: 'link_extraction',
           content_type: 'endpoint',
           risk_level: 'low',
-          notes: 'Link found in HTML'
+          notes: 'Link found in HTML',
+          status_code: null // Links will be checked later if needed
         });
       }
     });
     
-    // Limit the number of links to avoid overwhelming the scan
-    const limitedLinks = discoveredLinks.slice(0, 50);
+    // Limit and deduplicate links
+    const limitedLinks = discoveredLinks
+      .filter((link, index, self) => 
+        index === self.findIndex(l => l.path === link.path)
+      )
+      .slice(0, 50);
+    
     content.push(...limitedLinks);
     
-    // Optional: Quick HTTP check for a few important links (limit to avoid being too aggressive)
-    const importantLinks = limitedLinks.filter(link => 
-      link.path.includes('admin') || 
-      link.path.includes('api') || 
-      link.path.includes('login') ||
-      link.path.includes('config')
-    ).slice(0, 5); // Only check 5 important links
-    
-    for (const link of importantLinks) {
-      try {
-        const linkResponse = await fetch(link.url, {
-          method: 'HEAD', // Use HEAD request to avoid downloading full content
-          timeout: 5000,
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (compatible; SecurityScanner/1.0)'
-          }
-        });
-        
-        // Update the link with status code
-        link.status_code = linkResponse.status;
-        link.notes += ` (HTTP ${linkResponse.status})`;
-        
-      } catch (linkError) {
-        // Don't fail the scan if we can't check individual links
-        console.log(`Could not check status for ${link.url}: ${linkError.message}`);
-      }
-    }
-    
-    console.log(`Found ${content.length} items from HTML analysis (${importantLinks.length} with status codes)`);
+    console.log(`Found ${content.length} items from HTML analysis`);
     return content;
   } catch (error) {
     console.log(`HTML analysis failed for ${scanTarget.hostname}: ${error.message}`);

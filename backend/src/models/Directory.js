@@ -1,4 +1,4 @@
-// backend/src/models/Directory.js - FIXED VERSION
+// backend/src/models/Directory.js - ROBUST VERSION WITH COLUMN DETECTION
 const knex = require('../config/database');
 
 class Directory {
@@ -6,19 +6,70 @@ class Directory {
     return 'directories';
   }
 
+  // Cache for table schema to avoid repeated queries
+  static _tableSchema = null;
+
+  // Get table schema and cache it
+  static async getTableSchema() {
+    if (this._tableSchema) {
+      return this._tableSchema;
+    }
+
+    try {
+      const columns = await knex(this.tableName).columnInfo();
+      this._tableSchema = Object.keys(columns);
+      console.log(`📋 Directory table columns:`, this._tableSchema);
+      return this._tableSchema;
+    } catch (error) {
+      console.warn('Could not get table schema:', error.message);
+      // Return basic columns if we can't get schema
+      return ['id', 'subdomain_id', 'path', 'url', 'status_code', 'source', 'content_length', 'response_time', 'title', 'headers', 'body_preview', 'method', 'scan_job_id', 'created_at', 'updated_at'];
+    }
+  }
+
   static async findAll(organizationId, filters = {}) {
     try {
+      const columns = await this.getTableSchema();
+      const hasEnhancedColumns = columns.includes('content_type');
+      
       let query = knex(this.tableName)
         .join('subdomains', 'directories.subdomain_id', 'subdomains.id')
         .join('targets', 'subdomains.target_id', 'targets.id')
-        .where('targets.organization_id', organizationId)
-        .select(
-          'directories.*',
-          'subdomains.subdomain',
-          'subdomains.id as subdomain_id',
-          'targets.domain as target_domain',
-          'targets.id as target_id'
+        .where('targets.organization_id', organizationId);
+
+      // Select base columns that always exist
+      const selectColumns = [
+        'directories.id',
+        'directories.subdomain_id',
+        'directories.path',
+        'directories.url',
+        'directories.status_code',
+        'directories.source',
+        'directories.content_length',
+        'directories.response_time',
+        'directories.title',
+        'directories.headers',
+        'directories.body_preview',
+        'directories.method',
+        'directories.scan_job_id',
+        'directories.created_at',
+        'directories.updated_at',
+        'subdomains.subdomain',
+        'targets.domain as target_domain',
+        'targets.id as target_id'
+      ];
+
+      // Add enhanced columns if they exist
+      if (hasEnhancedColumns) {
+        selectColumns.push(
+          'directories.content_type',
+          'directories.risk_level',
+          'directories.parameters',
+          'directories.notes'
         );
+      }
+
+      query = query.select(selectColumns);
       
       if (filters.target_id) {
         query = query.where('targets.id', filters.target_id);
@@ -39,11 +90,17 @@ class Directory {
       if (filters.source) {
         query = query.where('directories.source', filters.source);
       }
+
+      // Only apply content_type filter if the column exists
+      if (filters.content_type && hasEnhancedColumns) {
+        query = query.where('directories.content_type', filters.content_type);
+      }
       
       if (filters.search) {
         query = query.where(function() {
           this.where('directories.path', 'ilike', `%${filters.search}%`)
-              .orWhere('directories.title', 'ilike', `%${filters.search}%`);
+              .orWhere('directories.title', 'ilike', `%${filters.search}%`)
+              .orWhere('directories.url', 'ilike', `%${filters.search}%`);
         });
       }
       
@@ -60,6 +117,17 @@ class Directory {
       }
       
       const results = await query;
+      
+      // Add default values for enhanced columns if they don't exist in DB
+      if (!hasEnhancedColumns) {
+        results.forEach(row => {
+          row.content_type = 'endpoint';
+          row.risk_level = 'low';
+          row.parameters = null;
+          row.notes = null;
+        });
+      }
+      
       console.log(`Found ${results.length} directories for organization ${organizationId}`);
       return results;
       
@@ -76,6 +144,9 @@ class Directory {
 
   static async count(organizationId, filters = {}) {
     try {
+      const columns = await this.getTableSchema();
+      const hasEnhancedColumns = columns.includes('content_type');
+
       let query = knex(this.tableName)
         .join('subdomains', 'directories.subdomain_id', 'subdomains.id')
         .join('targets', 'subdomains.target_id', 'targets.id')
@@ -95,6 +166,23 @@ class Directory {
         } else {
           query = query.where('directories.status_code', filters.status_code);
         }
+      }
+
+      if (filters.source) {
+        query = query.where('directories.source', filters.source);
+      }
+
+      // Only apply content_type filter if the column exists
+      if (filters.content_type && hasEnhancedColumns) {
+        query = query.where('directories.content_type', filters.content_type);
+      }
+
+      if (filters.search) {
+        query = query.where(function() {
+          this.where('directories.path', 'ilike', `%${filters.search}%`)
+              .orWhere('directories.title', 'ilike', `%${filters.search}%`)
+              .orWhere('directories.url', 'ilike', `%${filters.search}%`);
+        });
       }
       
       const result = await query.count('directories.id as count').first();
@@ -117,6 +205,12 @@ class Directory {
     try {
       console.log(`Attempting to bulk create ${directories.length} directories`);
       
+      // Get table schema to know which columns exist
+      const columns = await this.getTableSchema();
+      const hasEnhancedColumns = columns.includes('content_type');
+      
+      console.log(`Enhanced columns available: ${hasEnhancedColumns}`);
+      
       // Validate required fields and filter out records with null subdomain_id
       const validDirectories = directories.filter(dir => {
         if (!dir.subdomain_id) {
@@ -124,9 +218,10 @@ class Directory {
           return false;
         }
         
-        const isValid = dir.path && dir.url && dir.status_code;
+        // Only require path and url, status_code can be null for passive discovery
+        const isValid = dir.path && dir.url;
         if (!isValid) {
-          console.warn('Invalid directory record (missing required fields):', dir);
+          console.warn('Invalid directory record (missing path or url):', dir);
           return false;
         }
         
@@ -140,22 +235,36 @@ class Directory {
 
       console.log(`Validated ${validDirectories.length} out of ${directories.length} directory records`);
 
-      // Prepare directory records with proper timestamps
-      const directoryRecords = validDirectories.map(dir => ({
-        subdomain_id: parseInt(dir.subdomain_id), // Ensure it's an integer
-        path: dir.path,
-        url: dir.url,
-        status_code: parseInt(dir.status_code),
-        content_length: dir.content_length ? parseInt(dir.content_length) : null,
-        response_time: dir.response_time ? parseInt(dir.response_time) : null,
-        title: dir.title ? dir.title.substring(0, 255) : null, // Limit title length
-        headers: dir.headers || null,
-        body_preview: dir.body_preview ? dir.body_preview.substring(0, 1000) : null,
-        method: dir.method || 'GET',
-        scan_job_id: dir.scan_job_id || null,
-        created_at: new Date(),
-        updated_at: new Date()
-      }));
+      // Prepare directory records with only columns that exist in the table
+      const directoryRecords = validDirectories.map(dir => {
+        // Base record with columns that always exist
+        const record = {
+          subdomain_id: parseInt(dir.subdomain_id),
+          path: dir.path,
+          url: dir.url,
+          status_code: dir.status_code ? parseInt(dir.status_code) : null,
+          content_length: dir.content_length ? parseInt(dir.content_length) : null,
+          response_time: dir.response_time ? parseInt(dir.response_time) : null,
+          title: dir.title ? dir.title.substring(0, 255) : null,
+          headers: dir.headers || null,
+          body_preview: dir.body_preview ? dir.body_preview.substring(0, 1000) : null,
+          method: dir.method || 'GET',
+          source: dir.source || 'unknown',
+          scan_job_id: dir.scan_job_id || null,
+          created_at: new Date(),
+          updated_at: new Date()
+        };
+
+        // Add enhanced columns only if they exist in the table
+        if (hasEnhancedColumns) {
+          record.content_type = dir.content_type || 'endpoint';
+          record.risk_level = dir.risk_level || 'low';
+          record.parameters = dir.parameters ? (Array.isArray(dir.parameters) ? dir.parameters.join(',') : String(dir.parameters)) : null;
+          record.notes = dir.notes || null;
+        }
+
+        return record;
+      });
 
       // Verify subdomain_ids exist before inserting
       const subdomainIds = [...new Set(directoryRecords.map(d => d.subdomain_id))];
@@ -181,20 +290,27 @@ class Directory {
 
       console.log(`Final validation: ${validatedRecords.length} directories with valid subdomain references`);
 
-      // Use upsert to handle duplicates
+      // Use upsert to handle duplicates - only merge columns that exist
+      const mergeColumns = [
+        'status_code', 
+        'content_length', 
+        'response_time', 
+        'title', 
+        'headers',
+        'body_preview',
+        'scan_job_id',
+        'updated_at'
+      ];
+
+      // Add enhanced columns to merge list if they exist
+      if (hasEnhancedColumns) {
+        mergeColumns.push('content_type', 'risk_level', 'parameters', 'notes');
+      }
+
       const result = await knex(this.tableName)
         .insert(validatedRecords)
         .onConflict(['subdomain_id', 'path'])
-        .merge([
-          'status_code', 
-          'content_length', 
-          'response_time', 
-          'title', 
-          'headers',
-          'body_preview',
-          'scan_job_id',
-          'updated_at'
-        ])
+        .merge(mergeColumns)
         .returning('*');
 
       console.log(`✅ Successfully created/updated ${result.length} directory records`);
@@ -209,26 +325,30 @@ class Directory {
         return [];
       }
       
-      // Check for constraint violations
-      if (error.message.includes('violates') || error.message.includes('constraint')) {
-        console.error('Database constraint violation:', error.message);
-        
-        // If it's specifically about subdomain_id being null
-        if (error.message.includes('subdomain_id') && error.message.includes('not-null')) {
-          console.error('❌ NULL subdomain_id detected. This should not happen with the new validation.');
-          console.error('Directories with null subdomain_id have been filtered out in validation.');
-        }
-        
+      // Check for column not exists error
+      if (error.message.includes('column') && error.message.includes('does not exist')) {
+        console.error('❌ Some columns do not exist in directories table.');
+        console.error('💡 Try running: npm run migrate to apply all database migrations');
         return [];
       }
       
+      // Check for constraint violations
+      if (error.message.includes('violates') || error.message.includes('constraint')) {
+        console.error('Database constraint violation:', error.message);
+        return [];
+      }
+      
+      console.error('Full error details:', error);
       return [];
     }
   }
 
   static async getStatsByTarget(organizationId) {
     try {
-      const stats = await knex(this.tableName)
+      const columns = await this.getTableSchema();
+      const hasEnhancedColumns = columns.includes('content_type');
+
+      let stats = await knex(this.tableName)
         .join('subdomains', 'directories.subdomain_id', 'subdomains.id')
         .join('targets', 'subdomains.target_id', 'targets.id')
         .where('targets.organization_id', organizationId)
@@ -239,9 +359,32 @@ class Directory {
           knex.raw("COUNT(CASE WHEN directories.status_code BETWEEN 200 AND 299 THEN 1 END) as accessible_directories"),
           knex.raw("COUNT(CASE WHEN directories.status_code = 403 THEN 1 END) as forbidden_directories"),
           knex.raw("COUNT(CASE WHEN directories.status_code >= 500 THEN 1 END) as error_directories"),
-          knex.raw("COUNT(CASE WHEN directories.status_code BETWEEN 300 AND 399 THEN 1 END) as redirect_directories")
+          knex.raw("COUNT(CASE WHEN directories.status_code BETWEEN 300 AND 399 THEN 1 END) as redirect_directories"),
+          knex.raw("COUNT(CASE WHEN directories.status_code IS NULL THEN 1 END) as pending_directories")
         )
         .groupBy('targets.id', 'targets.domain');
+
+      // Add enhanced stats if columns exist
+      if (hasEnhancedColumns) {
+        stats = await knex(this.tableName)
+          .join('subdomains', 'directories.subdomain_id', 'subdomains.id')
+          .join('targets', 'subdomains.target_id', 'targets.id')
+          .where('targets.organization_id', organizationId)
+          .select(
+            'targets.id as target_id',
+            'targets.domain as target_domain',
+            knex.raw('COUNT(directories.id) as total_directories'),
+            knex.raw("COUNT(CASE WHEN directories.status_code BETWEEN 200 AND 299 THEN 1 END) as accessible_directories"),
+            knex.raw("COUNT(CASE WHEN directories.status_code = 403 THEN 1 END) as forbidden_directories"),
+            knex.raw("COUNT(CASE WHEN directories.status_code >= 500 THEN 1 END) as error_directories"),
+            knex.raw("COUNT(CASE WHEN directories.status_code BETWEEN 300 AND 399 THEN 1 END) as redirect_directories"),
+            knex.raw("COUNT(CASE WHEN directories.status_code IS NULL THEN 1 END) as pending_directories"),
+            knex.raw("COUNT(CASE WHEN directories.content_type = 'xss_sink' THEN 1 END) as xss_sinks"),
+            knex.raw("COUNT(CASE WHEN directories.content_type = 'form' THEN 1 END) as forms"),
+            knex.raw("COUNT(CASE WHEN directories.content_type = 'api' THEN 1 END) as api_endpoints")
+          )
+          .groupBy('targets.id', 'targets.domain');
+      }
       
       console.log(`Retrieved directory stats for ${stats.length} targets`);
       return stats;
@@ -273,67 +416,18 @@ class Directory {
     }
   }
 
-  // New method: Get recent discoveries
-  static async getRecentDiscoveries(organizationId, limit = 10) {
-    try {
-      const recent = await knex(this.tableName)
-        .join('subdomains', 'directories.subdomain_id', 'subdomains.id')
-        .join('targets', 'subdomains.target_id', 'targets.id')
-        .where('targets.organization_id', organizationId)
-        .select(
-          'directories.*',
-          'subdomains.subdomain',
-          'targets.domain as target_domain'
-        )
-        .orderBy('directories.created_at', 'desc')
-        .limit(limit);
-      
-      return recent;
-    } catch (error) {
-      console.error('Error in Directory.getRecentDiscoveries:', error.message);
-      return [];
-    }
+  // Helper method to check if enhanced columns exist
+  static async hasEnhancedColumns() {
+    const columns = await this.getTableSchema();
+    return columns.includes('content_type');
   }
 
-  // New method: Delete directories for a scan job
-  static async deleteByScanJob(scanJobId) {
-    try {
-      const deleted = await knex(this.tableName)
-        .where('scan_job_id', scanJobId)
-        .del();
-      
-      console.log(`Deleted ${deleted} directories for scan job ${scanJobId}`);
-      return deleted;
-    } catch (error) {
-      console.error('Error in Directory.deleteByScanJob:', error.message);
-      return 0;
-    }
+  // Clear schema cache (useful for testing or after migrations)
+  static clearSchemaCache() {
+    this._tableSchema = null;
   }
 
-  // New method: Get directories by status code range
-  static async findByStatusRange(organizationId, minStatus, maxStatus) {
-    try {
-      const directories = await knex(this.tableName)
-        .join('subdomains', 'directories.subdomain_id', 'subdomains.id')
-        .join('targets', 'subdomains.target_id', 'targets.id')
-        .where('targets.organization_id', organizationId)
-        .whereBetween('directories.status_code', [minStatus, maxStatus])
-        .select(
-          'directories.*',
-          'subdomains.subdomain',
-          'targets.domain as target_domain'
-        )
-        .orderBy('directories.status_code', 'asc')
-        .orderBy('directories.path', 'asc');
-      
-      return directories;
-    } catch (error) {
-      console.error('Error in Directory.findByStatusRange:', error.message);
-      return [];
-    }
-  }
-
-  // Helper method to validate a single directory record
+  // FIXED: Updated validation to allow null status codes for passive discovery
   static validateDirectoryRecord(dir) {
     const errors = [];
     
@@ -351,10 +445,11 @@ class Directory {
       errors.push('url is required');
     }
     
-    if (!dir.status_code) {
-      errors.push('status_code is required');
-    } else if (!Number.isInteger(parseInt(dir.status_code))) {
-      errors.push('status_code must be a valid integer');
+    // Allow null status codes - they can be fetched later for passive discovery
+    if (dir.status_code !== null && dir.status_code !== undefined) {
+      if (!Number.isInteger(parseInt(dir.status_code))) {
+        errors.push('status_code must be a valid integer when provided');
+      }
     }
     
     return {
@@ -391,6 +486,25 @@ class Directory {
     } catch (error) {
       console.error('Error ensuring subdomain exists:', error);
       throw error;
+    }
+  }
+
+  // Method to run enhanced columns migration check
+  static async checkAndSuggestMigration() {
+    try {
+      const hasEnhanced = await this.hasEnhancedColumns();
+      if (!hasEnhanced) {
+        console.log('');
+        console.log('⚠️  MIGRATION NEEDED ⚠️');
+        console.log('📋 The directories table is missing enhanced columns.');
+        console.log('🔧 Run: npm run migrate');
+        console.log('📝 This will add: content_type, risk_level, parameters, notes columns');
+        console.log('');
+      }
+      return hasEnhanced;
+    } catch (error) {
+      console.error('Error checking migration status:', error);
+      return false;
     }
   }
 }

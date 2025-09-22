@@ -1,4 +1,4 @@
-// frontend/assets/js/modules/content-discovery.js - REAL PASSIVE DISCOVERY
+// frontend/assets/js/modules/content-discovery.js - FIXED VERSION
 
 const ContentDiscovery = {
     refreshInterval: null,
@@ -16,22 +16,22 @@ const ContentDiscovery = {
         const content = document.getElementById('main-content');
         content.innerHTML = `
             <!-- Real-time status indicator -->
-            <div id="content-scan-status" style="display: none; background-color: #001100; border: 2px solid #00ff00; padding: 12px; margin-bottom: 15px;">
+            <div id="content-scan-status" style="display: none; background: linear-gradient(135deg, #1a0a2e, #2d1b69); border: 2px solid #7c3aed; padding: 12px; margin-bottom: 15px;">
                 <div style="display: flex; align-items: center; gap: 10px;">
                     <div class="spinner" style="margin: 0;"></div>
-                    <span id="content-scan-status-text" style="color: #00ff00; font-family: 'Courier New', monospace;">Passive content discovery in progress...</span>
+                    <span id="content-scan-status-text" style="color: #7c3aed; font-family: 'Courier New', monospace;">Passive content discovery in progress...</span>
                     <button onclick="ContentDiscovery.stopActiveScan()" class="btn btn-danger btn-small" style="margin-left: auto;">Stop Discovery</button>
                 </div>
                 <div id="content-scan-progress" style="margin-top: 8px;">
-                    <div style="background-color: #003300; border: 1px solid #00ff00; height: 8px; width: 100%;">
-                        <div id="content-scan-progress-bar" style="background-color: #00ff00; height: 100%; width: 0%; transition: width 0.3s ease;"></div>
+                    <div style="background-color: #2d1b69; border: 1px solid #7c3aed; height: 8px; width: 100%;">
+                        <div id="content-scan-progress-bar" style="background: linear-gradient(90deg, #7c3aed, #9a4dff); height: 100%; width: 0%; transition: width 0.3s ease;"></div>
                     </div>
-                    <div id="content-scan-progress-text" style="font-size: 12px; color: #00cc00; margin-top: 4px;"></div>
+                    <div id="content-scan-progress-text" style="font-size: 12px; color: #9a4dff; margin-top: 4px;"></div>
                 </div>
             </div>
 
             <div class="scan-info">
-                <h4>🕷️ Passive Content Discovery <span id="content-discovery-live-indicator" style="color: #00ff00; font-size: 12px;">[STEALTH MODE]</span></h4>
+                <h4>🕷️ Passive Content Discovery <span id="content-discovery-live-indicator" style="color: #7c3aed; font-size: 12px;">[STEALTH MODE]</span></h4>
                 <p>Discover hidden endpoints, parameters, and XSS sinks using passive techniques. WAF-friendly methods that won't trigger rate limits or blocks.</p>
             </div>
 
@@ -66,8 +66,8 @@ const ContentDiscovery = {
                     </div>
                     
                     <!-- Advanced Passive Options -->
-                    <div style="border: 1px solid #003300; padding: 15px; background-color: #001100; margin-bottom: 15px;">
-                        <h5 style="color: #00ff00; margin-bottom: 10px;">🛡️ Stealth Configuration</h5>
+                    <div style="border: 1px solid #2d1b69; padding: 15px; background: linear-gradient(135deg, #1a0a2e, #2d1b69); margin-bottom: 15px;">
+                        <h5 style="color: #7c3aed; margin-bottom: 10px;">🛡️ Stealth Configuration</h5>
                         <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px;">
                             <div class="form-group">
                                 <label>Max Crawl Depth</label>
@@ -125,9 +125,9 @@ const ContentDiscovery = {
                     </div>
                     
                     <!-- Discovery Methods Info -->
-                    <div style="border: 1px solid #003300; padding: 15px; background-color: #001100;">
-                        <h5 style="color: #00ff00; margin-bottom: 10px;">🔍 Passive Discovery Techniques</h5>
-                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 13px; color: #00cc00;">
+                    <div style="border: 1px solid #2d1b69; padding: 15px; background: linear-gradient(135deg, #1a0a2e, #2d1b69);">
+                        <h5 style="color: #7c3aed; margin-bottom: 10px;">🔍 Passive Discovery Techniques</h5>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 13px; color: #9a4dff;">
                             <div>🕷️ OWASP ZAP Ajax Spider</div>
                             <div>📄 JavaScript endpoint extraction</div>
                             <div>🕐 Wayback Machine historical data</div>
@@ -165,11 +165,10 @@ const ContentDiscovery = {
                     <label>Discovery Source</label>
                     <select id="directory-source-filter">
                         <option value="">All Sources</option>
-                        <option value="zap_spider">ZAP Spider</option>
-                        <option value="js_analysis">JavaScript Analysis</option>
-                        <option value="wayback_machine">Wayback Machine</option>
                         <option value="robots_txt">robots.txt</option>
                         <option value="sitemap_xml">sitemap.xml</option>
+                        <option value="wayback_machine">Wayback Machine</option>
+                        <option value="javascript_analysis">JavaScript Analysis</option>
                         <option value="link_extraction">Link Extraction</option>
                         <option value="form_analysis">Form Analysis</option>
                         <option value="ajax_discovery">AJAX Discovery</option>
@@ -201,26 +200,26 @@ const ContentDiscovery = {
                 </div>
                 
                 <!-- Content Stats -->
-                <div id="content-stats" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; margin-bottom: 20px; padding: 15px; border: 1px solid #003300; background-color: #001100;">
+                <div id="content-stats" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; margin-bottom: 20px; padding: 15px; border: 1px solid #2d1b69; background: linear-gradient(135deg, #1a0a2e, #2d1b69);">
                     <div style="text-align: center;">
-                        <div id="total-endpoints" style="font-size: 24px; font-weight: bold; color: #00ff00;">0</div>
-                        <div style="font-size: 12px; color: #006600;">Total Endpoints</div>
+                        <div id="total-endpoints" style="font-size: 24px; font-weight: bold; color: #7c3aed;">0</div>
+                        <div style="font-size: 12px; color: #6b46c1;">Total Endpoints</div>
                     </div>
                     <div style="text-align: center;">
-                        <div id="xss-sinks" style="font-size: 24px; font-weight: bold; color: #ff8800;">0</div>
-                        <div style="font-size: 12px; color: #006600;">XSS Sinks</div>
+                        <div id="xss-sinks" style="font-size: 24px; font-weight: bold; color: #ea580c;">0</div>
+                        <div style="font-size: 12px; color: #6b46c1;">XSS Sinks</div>
                     </div>
                     <div style="text-align: center;">
-                        <div id="parameters-found" style="font-size: 24px; font-weight: bold; color: #ffff00;">0</div>
-                        <div style="font-size: 12px; color: #006600;">Parameters</div>
+                        <div id="parameters-found" style="font-size: 24px; font-weight: bold; color: #eab308;">0</div>
+                        <div style="font-size: 12px; color: #6b46c1;">Parameters</div>
                     </div>
                     <div style="text-align: center;">
-                        <div id="forms-found" style="font-size: 24px; font-weight: bold; color: #00ccff;">0</div>
-                        <div style="font-size: 12px; color: #006600;">Forms</div>
+                        <div id="forms-found" style="font-size: 24px; font-weight: bold; color: #06b6d4;">0</div>
+                        <div style="font-size: 12px; color: #6b46c1;">Forms</div>
                     </div>
                     <div style="text-align: center;">
-                        <div id="ajax-endpoints" style="font-size: 24px; font-weight: bold; color: #cc00ff;">0</div>
-                        <div style="font-size: 12px; color: #006600;">AJAX/API</div>
+                        <div id="ajax-endpoints" style="font-size: 24px; font-weight: bold; color: #a855f7;">0</div>
+                        <div style="font-size: 12px; color: #6b46c1;">AJAX/API</div>
                     </div>
                 </div>
 
@@ -233,14 +232,14 @@ const ContentDiscovery = {
                                 <th>Source</th>
                                 <th>Risk Level</th>
                                 <th>Method</th>
-                                <th>Parameters</th>
+                                <th>Status</th>
                                 <th>Notes</th>
                                 <th>Actions</th>
                             </tr>
                         </thead>
                         <tbody id="content-list">
                             <tr>
-                                <td colspan="8" style="text-align: center; color: #006600;">Loading discovered content...</td>
+                                <td colspan="8" style="text-align: center; color: #6b46c1;">Loading discovered content...</td>
                             </tr>
                         </tbody>
                     </table>
@@ -303,8 +302,10 @@ const ContentDiscovery = {
                 await this.checkActiveScanJobs();
                 await this.load(AppState.currentPageData.content?.page || 1);
                 
-                document.getElementById('content-last-updated').textContent = 
-                    `Last updated: ${new Date().toLocaleTimeString()}`;
+                const lastUpdatedElement = document.getElementById('content-last-updated');
+                if (lastUpdatedElement) {
+                    lastUpdatedElement.textContent = `Last updated: ${new Date().toLocaleTimeString()}`;
+                }
                 
             } catch (error) {
                 console.error('Content discovery auto-refresh failed:', error);
@@ -575,29 +576,41 @@ const ContentDiscovery = {
                 if (data.pagination.pages > 1) {
                     Utils.updatePagination('content', data.pagination);
                 } else {
-                    document.getElementById('content-pagination').innerHTML = '';
+                    const paginationElement = document.getElementById('content-pagination');
+                    if (paginationElement) {
+                        paginationElement.innerHTML = '';
+                    }
                 }
             }
         } catch (error) {
             console.error('Failed to load discovered content:', error);
-            document.getElementById('content-list').innerHTML = 
-                '<tr><td colspan="8" style="text-align: center; color: #ff0000;">Failed to load content</td></tr>';
+            const contentList = document.getElementById('content-list');
+            if (contentList) {
+                contentList.innerHTML = '<tr><td colspan="8" style="text-align: center; color: #dc2626;">Failed to load content</td></tr>';
+            }
         }
     },
 
     renderContentList(content) {
         const contentList = document.getElementById('content-list');
         
+        if (!contentList) return;
+        
         if (content.length > 0) {
             contentList.innerHTML = content.map(item => `
                 <tr>
-                    <td style="font-family: 'Courier New', monospace; color: #00ff00; max-width: 300px; overflow: hidden; text-overflow: ellipsis;">${item.path || item.url}</td>
+                    <td style="font-family: 'Courier New', monospace; color: #7c3aed; max-width: 300px; overflow: hidden; text-overflow: ellipsis;" title="${item.url}">${item.path || item.url}</td>
                     <td><span class="status ${this.getContentTypeColor(item.content_type)}">${this.getContentTypeIcon(item.content_type)} ${item.content_type || 'Endpoint'}</span></td>
-                    <td><span class="status" style="padding: 2px 6px; border: 1px solid #006600; color: #00aa00; font-size: 11px;">${this.getSourceIcon(item.source)} ${item.source}</span></td>
+                    <td><span class="status" style="padding: 2px 6px; border: 1px solid #6b46c1; color: #9a4dff; font-size: 11px;">${this.getSourceIcon(item.source)} ${item.source}</span></td>
                     <td><span class="status ${this.getRiskLevelColor(item.risk_level)}">${item.risk_level || 'LOW'}</span></td>
                     <td>${item.method || 'GET'}</td>
-                    <td style="font-size: 12px; color: #00cc00;">${item.parameters ? item.parameters.split(',').length : 0} params</td>
-                    <td style="font-size: 12px; color: #666; max-width: 200px; overflow: hidden; text-overflow: ellipsis;">${item.notes || '-'}</td>
+                    <td>
+                        ${item.status_code ? 
+                            `<span class="status ${this.getStatusColor(item.status_code)}">${item.status_code}</span>` : 
+                            '<span style="color: #666; font-size: 12px;">Pending</span>'
+                        }
+                    </td>
+                    <td style="font-size: 12px; color: #666; max-width: 200px; overflow: hidden; text-overflow: ellipsis;" title="${item.notes || ''}">${item.notes || '-'}</td>
                     <td>
                         <button onclick="window.open('${item.url}', '_blank')" class="btn btn-secondary btn-small">Open</button>
                         ${item.content_type === 'xss_sink' ? 
@@ -608,7 +621,7 @@ const ContentDiscovery = {
                 </tr>
             `).join('');
         } else {
-            contentList.innerHTML = '<tr><td colspan="8" style="text-align: center; color: #006600;">No content discovered yet. Run passive content discovery to find endpoints, parameters, and XSS sinks!</td></tr>';
+            contentList.innerHTML = '<tr><td colspan="8" style="text-align: center; color: #6b46c1;">No content discovered yet. Run passive content discovery to find endpoints, parameters, and XSS sinks!</td></tr>';
         }
     },
 
@@ -619,11 +632,18 @@ const ContentDiscovery = {
         const formsFound = content.filter(c => c.content_type === 'form').length;
         const ajaxEndpoints = content.filter(c => c.content_type === 'ajax' || c.content_type === 'api').length;
 
-        document.getElementById('total-endpoints').textContent = totalEndpoints;
-        document.getElementById('xss-sinks').textContent = xssSinks;
-        document.getElementById('parameters-found').textContent = parametersFound;
-        document.getElementById('forms-found').textContent = formsFound;
-        document.getElementById('ajax-endpoints').textContent = ajaxEndpoints;
+        const elements = {
+            'total-endpoints': totalEndpoints,
+            'xss-sinks': xssSinks,
+            'parameters-found': parametersFound,
+            'forms-found': formsFound,
+            'ajax-endpoints': ajaxEndpoints
+        };
+
+        Object.entries(elements).forEach(([id, value]) => {
+            const element = document.getElementById(id);
+            if (element) element.textContent = value;
+        });
     },
 
     getContentTypeIcon(type) {
@@ -651,11 +671,10 @@ const ContentDiscovery = {
 
     getSourceIcon(source) {
         const icons = {
-            'zap_spider': '🕷️',
-            'js_analysis': '📄',
-            'wayback_machine': '🕐',
             'robots_txt': '📋',
             'sitemap_xml': '🗺️',
+            'wayback_machine': '🕐',
+            'javascript_analysis': '📄',
             'link_extraction': '🔗',
             'form_analysis': '📝',
             'ajax_discovery': '⚡'
@@ -670,6 +689,17 @@ const ContentDiscovery = {
             case 'low': return 'severity-low';
             default: return 'status-inactive';
         }
+    },
+
+    getStatusColor(statusCode) {
+        if (!statusCode) return 'status-inactive';
+        
+        const code = parseInt(statusCode);
+        if (code >= 200 && code < 300) return 'status-completed';
+        if (code >= 300 && code < 400) return 'status-running';
+        if (code >= 400 && code < 500) return 'severity-medium';
+        if (code >= 500) return 'severity-high';
+        return 'status-inactive';
     },
 
     // Start passive content discovery

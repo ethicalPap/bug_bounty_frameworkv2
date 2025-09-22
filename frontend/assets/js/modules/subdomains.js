@@ -1,105 +1,29 @@
-// frontend/assets/js/modules/subdomains.js - Enhanced with real-time updates
+// frontend/assets/js/modules/subdomains.js - ENHANCED WITH EXPORT FUNCTIONALITY
 
 const Subdomains = {
-    refreshInterval: null,
-    scanJobsRefreshInterval: null,
-    isAutoRefreshEnabled: true,
-    lastScanJobsUpdate: null,
-
     async init() {
         this.renderHTML();
         this.bindEvents();
-        await this.loadTargets();
         await this.load();
-        await this.loadScanJobs();
-        
-        // Start real-time updates
-        this.startRealTimeUpdates();
     },
 
     renderHTML() {
         const content = document.getElementById('main-content');
         content.innerHTML = `
-            <div class="scan-info">
-                <h4>🌐 Live Host Verification</h4>
-                <p>Verify which discovered subdomains are live and responsive. This checks DNS resolution, HTTP/HTTPS status, and extracts page titles for active subdomains.</p>
-            </div>
+            <style>
+                .export-menu {
+                    box-shadow: 0 4px 6px rgba(124, 58, 237, 0.4);
+                    border-radius: 2px;
+                    background: linear-gradient(135deg, #0f0f23, #1a0a2e);
+                    border: 2px solid #7c3aed;
+                }
+                .export-menu button:hover {
+                    background: linear-gradient(90deg, #1a0a2e, #2d1b69) !important;
+                    color: #a855f7 !important;
+                }
+            </style>
 
-            <!-- Scan Section -->
-            <div class="card">
-                <div class="card-title">Start Live Host Scan</div>
-                <div id="scan-messages"></div>
-                <form id="live-scan-form">
-                    <div style="display: grid; grid-template-columns: 1fr auto; gap: 20px; align-items: end;">
-                        <div class="form-group">
-                            <label for="live-scan-target">Target Domain</label>
-                            <select id="live-scan-target" required>
-                                <option value="">Select target...</option>
-                            </select>
-                        </div>
-                        <button type="submit" class="btn btn-success" id="start-live-scan-btn">🌐 Start Live Host Scan</button>
-                    </div>
-                </form>
-            </div>
-
-            <!-- Real-time Scan Jobs Section -->
-            <div class="card">
-                <div class="card-title">
-                    Live Host Scan Jobs
-                    <span id="auto-refresh-indicator" style="float: right; font-size: 12px; color: #00cc00;">
-                        🔄 Auto-updating
-                    </span>
-                </div>
-                
-                <!-- Controls -->
-                <div style="margin-bottom: 15px; display: flex; align-items: center; gap: 15px; flex-wrap: wrap;">
-                    <button onclick="Subdomains.loadScanJobs()" class="btn btn-secondary">🔄 Manual Refresh</button>
-                    <button onclick="Subdomains.toggleAutoRefresh()" class="btn btn-secondary" id="auto-refresh-toggle">
-                        ⏸️ Pause Auto-refresh
-                    </button>
-                    <span id="scan-jobs-status" style="color: #006600; font-size: 13px; font-family: 'Courier New', monospace;"></span>
-                    <span id="last-update-time" style="color: #666; font-size: 11px; margin-left: auto;"></span>
-                </div>
-
-                <!-- Real-time scan jobs table -->
-                <div style="max-height: 400px; overflow-y: auto; border: 2px solid #00ff00; background-color: #000000;">
-                    <table class="table">
-                        <thead>
-                            <tr>
-                                <th>ID</th>
-                                <th>Target</th>
-                                <th>Status</th>
-                                <th>Progress</th>
-                                <th>Hosts Found</th>
-                                <th>Created</th>
-                                <th>Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody id="live-scan-jobs-list">
-                            <tr>
-                                <td colspan="7" style="text-align: center; color: #006600;">No live host scans yet</td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
-                
-                <!-- Real-time progress indicator -->
-                <div id="realtime-progress" style="display: none; margin-top: 10px; padding: 10px; border: 1px solid #00ff00; background-color: #001100;">
-                    <div style="display: flex; align-items: center; gap: 10px;">
-                        <span class="spinner" style="width: 16px; height: 16px;"></span>
-                        <span id="progress-text" style="color: #00ff00; font-family: 'Courier New', monospace; font-size: 12px;"></span>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Filters Section -->
             <div class="filters">
-                <div class="filter-group">
-                    <label>Target</label>
-                    <select id="subdomain-target-filter">
-                        <option value="">All Targets</option>
-                    </select>
-                </div>
                 <div class="filter-group">
                     <label>Status</label>
                     <select id="subdomain-status-filter">
@@ -125,13 +49,39 @@ const Subdomains = {
                 </div>
             </div>
 
-            <!-- Results Section with real-time updates -->
             <div class="card">
                 <div class="card-title">
-                    Live Hosts Results
-                    <span id="results-last-update" style="float: right; font-size: 11px; color: #666;"></span>
+                    Discovered Subdomains
+                    <div style="float: right; position: relative; display: inline-block;">
+                        <button onclick="Subdomains.toggleExportMenu()" class="btn btn-success btn-small" id="export-subdomains-btn">
+                            📤 Export Live Hosts
+                        </button>
+                        <div id="export-subdomains-menu" class="export-menu" style="display: none; position: absolute; top: 100%; right: 0; min-width: 140px; z-index: 1000;">
+                            <button onclick="Subdomains.exportSubdomains('csv')" class="btn btn-secondary btn-small" style="width: 100%; border: none; border-bottom: 1px solid #2d1b69;">📊 CSV</button>
+                            <button onclick="Subdomains.exportSubdomains('json')" class="btn btn-secondary btn-small" style="width: 100%; border: none; border-bottom: 1px solid #2d1b69;">📋 JSON</button>
+                            <button onclick="Subdomains.exportSubdomains('xml')" class="btn btn-secondary btn-small" style="width: 100%; border: none;">📄 XML</button>
+                        </div>
+                    </div>
                 </div>
                 
+                <!-- Check All Live Button Section -->
+                <div style="margin-bottom: 15px; display: flex; align-items: center; gap: 15px;">
+                    <button onclick="Subdomains.checkAllLive()" class="btn btn-success btn-small" id="check-all-btn">
+                        🌐 Check All Live
+                    </button>
+                    <span id="check-all-status" style="color: #9a4dff; font-size: 13px; font-family: 'Courier New', monospace;"></span>
+                </div>
+                
+                <!-- Progress Bar for Bulk Checking -->
+                <div id="check-all-progress" style="display: none; margin-bottom: 15px; padding: 15px; border: 2px solid #7c3aed; background: linear-gradient(135deg, #1a0a2e, #2d1b69);">
+                    <div style="margin-bottom: 8px;">
+                        <div style="background-color: #2d1b69; border: 1px solid #7c3aed; height: 12px; width: 100%;">
+                            <div id="progress-bar" style="background: linear-gradient(90deg, #7c3aed, #9a4dff); height: 100%; width: 0%; transition: width 0.3s ease; border-radius: 2px;"></div>
+                        </div>
+                    </div>
+                    <div id="progress-text" style="font-size: 13px; color: #9a4dff; font-family: 'Courier New', monospace;"></div>
+                </div>
+
                 <div class="table-container">
                     <table class="table">
                         <thead>
@@ -148,65 +98,19 @@ const Subdomains = {
                         </thead>
                         <tbody id="subdomains-list">
                             <tr>
-                                <td colspan="8" style="text-align: center; color: #006600;">Loading subdomains...</td>
+                                <td colspan="8" style="text-align: center; color: #9a4dff;">Loading subdomains...</td>
                             </tr>
                         </tbody>
                     </table>
                 </div>
                 <div id="subdomains-pagination" class="pagination"></div>
             </div>
-
-            <style>
-                .spinner {
-                    border: 2px solid #003300;
-                    border-top: 2px solid #00ff00;
-                    border-radius: 50%;
-                    width: 16px;
-                    height: 16px;
-                    animation: spin 1s linear infinite;
-                    display: inline-block;
-                }
-                
-                @keyframes spin {
-                    0% { transform: rotate(0deg); }
-                    100% { transform: rotate(360deg); }
-                }
-                
-                .progress-row {
-                    background-color: #001100 !important;
-                    animation: pulse 2s infinite;
-                }
-                
-                @keyframes pulse {
-                    0% { background-color: #001100; }
-                    50% { background-color: #002200; }
-                    100% { background-color: #001100; }
-                }
-                
-                .status-updating {
-                    animation: blink 1s infinite;
-                }
-                
-                @keyframes blink {
-                    0%, 50% { opacity: 1; }
-                    51%, 100% { opacity: 0.5; }
-                }
-            </style>
         `;
     },
 
     bindEvents() {
-        // Live scan form submission
-        const liveScanForm = document.getElementById('live-scan-form');
-        if (liveScanForm) {
-            liveScanForm.addEventListener('submit', async (e) => {
-                e.preventDefault();
-                await this.startLiveHostScan();
-            });
-        }
-
-        // Filter events
-        ['subdomain-target-filter', 'subdomain-status-filter'].forEach(filterId => {
+        // Filter events - only bind change events for dropdowns
+        ['subdomain-status-filter'].forEach(filterId => {
             const element = document.getElementById(filterId);
             if (element) {
                 element.addEventListener('change', () => this.search());
@@ -224,202 +128,19 @@ const Subdomains = {
                 });
             }
         });
-    },
 
-    // Enhanced real-time updates
-    startRealTimeUpdates() {
-        console.log('🔄 Starting real-time updates for live host scans');
-        
-        // Clear any existing intervals
-        this.cleanup();
-        
-        // Start aggressive refresh for scan jobs (every 2 seconds)
-        this.scanJobsRefreshInterval = setInterval(async () => {
-            if (!this.isAutoRefreshEnabled) return;
-            
-            const activeTab = document.querySelector('.nav-item.active')?.dataset.tab;
-            if (activeTab === 'subdomains') {
-                try {
-                    await this.updateScanJobsRealTime();
-                } catch (error) {
-                    console.error('Real-time scan jobs update failed:', error);
+        // Close export menu when clicking outside
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('#export-subdomains-menu') && !e.target.closest('#export-subdomains-btn')) {
+                const menu = document.getElementById('export-subdomains-menu');
+                if (menu) {
+                    menu.style.display = 'none';
                 }
             }
-        }, 2000); // Update every 2 seconds
-        
-        // Start moderate refresh for subdomain results (every 10 seconds)
-        this.refreshInterval = setInterval(async () => {
-            if (!this.isAutoRefreshEnabled) return;
-            
-            const activeTab = document.querySelector('.nav-item.active')?.dataset.tab;
-            if (activeTab === 'subdomains') {
-                try {
-                    await this.updateSubdomainResultsQuietly();
-                } catch (error) {
-                    console.error('Real-time subdomain results update failed:', error);
-                }
-            }
-        }, 10000); // Update every 10 seconds
-        
-        this.updateAutoRefreshIndicator(true);
+        });
     },
 
-    // Real-time scan jobs update (lightweight)
-    async updateScanJobsRealTime() {
-        try {
-            const response = await API.scans.getJobs({ job_type: 'live_hosts_scan' });
-            if (!response || !response.ok) return;
-            
-            const data = await response.json();
-            const scans = data.success ? data.data : [];
-            
-            // Check if there are any running scans
-            const runningScans = scans.filter(scan => 
-                scan.status === 'running' || scan.status === 'pending'
-            );
-            
-            // Update scan jobs table
-            this.renderScanJobsList(scans);
-            
-            // Update status indicators
-            this.updateScanJobsStatus(scans, runningScans);
-            
-            // Update last update time
-            this.updateLastUpdateTime('scan-jobs');
-            
-            // Show/hide real-time progress
-            if (runningScans.length > 0) {
-                this.showRealTimeProgress(runningScans);
-            } else {
-                this.hideRealTimeProgress();
-            }
-            
-        } catch (error) {
-            console.error('Real-time scan jobs update failed:', error);
-        }
-    },
-
-    // Quiet subdomain results update (doesn't show loading messages)
-    async updateSubdomainResultsQuietly() {
-        try {
-            const targetId = document.getElementById('subdomain-target-filter')?.value;
-            const status = document.getElementById('subdomain-status-filter')?.value;
-            const httpStatus = document.getElementById('subdomain-http-status-filter')?.value;
-            const search = document.getElementById('subdomain-search')?.value;
-            
-            const params = {
-                page: AppState.currentPageData?.subdomains?.page || 1,
-                limit: CONFIG.DEFAULT_PAGE_SIZE
-            };
-            
-            if (targetId) params.target_id = targetId;
-            if (status) params.status = status;
-            if (httpStatus && httpStatus.trim()) params.http_status = httpStatus.trim();
-            if (search && search.trim()) params.search = search.trim();
-
-            const response = await API.subdomains.getAll(params);
-            if (!response || !response.ok) return;
-            
-            const data = await response.json();
-            
-            if (data.success) {
-                const subdomains = data.data;
-                this.renderSubdomainsList(subdomains);
-                this.updateLastUpdateTime('results');
-                
-                if (data.pagination.pages > 1) {
-                    Utils.updatePagination('subdomains', data.pagination);
-                }
-            }
-        } catch (error) {
-            console.error('Quiet subdomain results update failed:', error);
-        }
-    },
-
-    updateScanJobsStatus(scans, runningScans) {
-        const statusSpan = document.getElementById('scan-jobs-status');
-        if (!statusSpan) return;
-        
-        if (runningScans.length > 0) {
-            const totalProgress = runningScans.reduce((sum, scan) => sum + (scan.progress_percentage || 0), 0);
-            const avgProgress = Math.round(totalProgress / runningScans.length);
-            
-            statusSpan.innerHTML = `🔄 ${runningScans.length} scan${runningScans.length > 1 ? 's' : ''} running (${avgProgress}% avg)`;
-            statusSpan.style.color = '#ffff00';
-            statusSpan.classList.add('status-updating');
-        } else {
-            const completedScans = scans.filter(scan => scan.status === 'completed').length;
-            if (completedScans > 0) {
-                statusSpan.textContent = `✅ ${completedScans} scan${completedScans > 1 ? 's' : ''} completed`;
-                statusSpan.style.color = '#00ff00';
-            } else {
-                statusSpan.textContent = '💤 No active scans';
-                statusSpan.style.color = '#666';
-            }
-            statusSpan.classList.remove('status-updating');
-        }
-    },
-
-    showRealTimeProgress(runningScans) {
-        const progressDiv = document.getElementById('realtime-progress');
-        const progressText = document.getElementById('progress-text');
-        
-        if (progressDiv && progressText) {
-            const activeScan = runningScans[0]; // Show progress for first active scan
-            const progress = activeScan.progress_percentage || 0;
-            
-            progressText.textContent = `${activeScan.domain || 'Unknown'} - ${activeScan.status} (${progress}%)`;
-            progressDiv.style.display = 'block';
-        }
-    },
-
-    hideRealTimeProgress() {
-        const progressDiv = document.getElementById('realtime-progress');
-        if (progressDiv) {
-            progressDiv.style.display = 'none';
-        }
-    },
-
-    updateLastUpdateTime(type) {
-        const elementId = type === 'scan-jobs' ? 'last-update-time' : 'results-last-update';
-        const element = document.getElementById(elementId);
-        if (element) {
-            const now = new Date();
-            element.textContent = `Updated: ${now.toLocaleTimeString()}`;
-        }
-    },
-
-    updateAutoRefreshIndicator(isActive) {
-        const indicator = document.getElementById('auto-refresh-indicator');
-        if (indicator) {
-            if (isActive) {
-                indicator.innerHTML = '🔄 Auto-updating';
-                indicator.style.color = '#00cc00';
-            } else {
-                indicator.innerHTML = '⏸️ Paused';
-                indicator.style.color = '#ffff00';
-            }
-        }
-    },
-
-    toggleAutoRefresh() {
-        this.isAutoRefreshEnabled = !this.isAutoRefreshEnabled;
-        
-        const toggleBtn = document.getElementById('auto-refresh-toggle');
-        if (toggleBtn) {
-            if (this.isAutoRefreshEnabled) {
-                toggleBtn.innerHTML = '⏸️ Pause Auto-refresh';
-                this.startRealTimeUpdates();
-                Utils.showMessage('Auto-refresh enabled', 'success');
-            } else {
-                toggleBtn.innerHTML = '▶️ Resume Auto-refresh';
-                this.updateAutoRefreshIndicator(false);
-                Utils.showMessage('Auto-refresh paused', 'warning');
-            }
-        }
-    },
-
-    // Load targets for both dropdowns
+    // New method to load targets for the filter dropdown
     async loadTargets() {
         try {
             const response = await API.targets.getAll();
@@ -428,215 +149,36 @@ const Subdomains = {
             const data = await response.json();
             const targets = data.success ? data.data : [];
             
-            // Update both target selectors
-            ['live-scan-target', 'subdomain-target-filter'].forEach(selectId => {
-                const targetSelect = document.getElementById(selectId);
-                if (targetSelect) {
-                    const currentValue = targetSelect.value;
-                    const isLiveScanTarget = selectId === 'live-scan-target';
-                    
-                    targetSelect.innerHTML = isLiveScanTarget ? 
-                        '<option value="">Select target...</option>' : 
-                        '<option value="">All Targets</option>';
-                    
-                    targets.forEach(target => {
-                        const option = document.createElement('option');
-                        option.value = target.id;
-                        option.textContent = target.domain;
-                        targetSelect.appendChild(option);
-                    });
+            const targetSelect = document.getElementById('subdomain-target-filter');
+            if (targetSelect) {
+                // Keep the "All Targets" option and add target options
+                const currentValue = targetSelect.value;
+                targetSelect.innerHTML = '<option value="">All Targets</option>';
+                
+                targets.forEach(target => {
+                    const option = document.createElement('option');
+                    option.value = target.id;
+                    option.textContent = target.domain;
+                    targetSelect.appendChild(option);
+                });
 
-                    // Restore previous selection if it still exists
-                    if (currentValue && targets.find(t => t.id == currentValue)) {
-                        targetSelect.value = currentValue;
-                    }
+                // Restore previous selection if it still exists
+                if (currentValue && targets.find(t => t.id == currentValue)) {
+                    targetSelect.value = currentValue;
                 }
-            });
 
-            console.log(`Loaded ${targets.length} targets for live host scanning`);
-        } catch (error) {
-            console.error('Failed to load targets:', error);
-        }
-    },
-
-    // Start live host scan (creates a scan job)
-    async startLiveHostScan() {
-        const targetId = document.getElementById('live-scan-target').value;
-        
-        if (!targetId) {
-            Utils.showMessage('Please select a target', 'error', 'scan-messages');
-            return;
-        }
-        
-        try {
-            Utils.setButtonLoading('start-live-scan-btn', true);
-            
-            const response = await API.scans.start(targetId, ['live_hosts_scan'], 'medium');
-            
-            if (response && response.ok) {
-                Utils.showMessage('Live host scan started successfully!', 'success', 'scan-messages');
-                
-                // Reset the form
-                document.getElementById('live-scan-target').value = '';
-                
-                // Immediately refresh scan jobs and enable aggressive updates
-                await this.loadScanJobs();
-                this.startRealTimeUpdates();
-            } else {
-                const errorData = await response.json();
-                Utils.showMessage('Failed to start live host scan: ' + (errorData.error || errorData.message || 'Unknown error'), 'error', 'scan-messages');
+                console.log(`Loaded ${targets.length} targets for subdomain filter`);
             }
         } catch (error) {
-            Utils.showMessage('Failed to start live host scan: ' + error.message, 'error', 'scan-messages');
-        } finally {
-            Utils.setButtonLoading('start-live-scan-btn', false);
+            console.error('Failed to load targets for subdomain filter:', error);
         }
-    },
-
-    // Load scan jobs (filtered for live host scans only)
-    async loadScanJobs() {
-        try {
-            const response = await API.scans.getJobs({ job_type: 'live_hosts_scan' });
-            if (!response) return;
-            
-            const data = await response.json();
-            const scans = data.success ? data.data : [];
-            
-            this.renderScanJobsList(scans);
-            this.updateLastUpdateTime('scan-jobs');
-        } catch (error) {
-            console.error('Failed to load live host scan jobs:', error);
-            document.getElementById('live-scan-jobs-list').innerHTML = 
-                '<tr><td colspan="7" style="text-align: center; color: #ff0000;">Failed to load scan jobs</td></tr>';
-        }
-    },
-
-    renderScanJobsList(scans) {
-        const scansList = document.getElementById('live-scan-jobs-list');
-        
-        if (scans.length > 0) {
-            scansList.innerHTML = scans.map(scan => {
-                const targetName = scan.domain || scan.target_domain || 'Unknown Target';
-                const isRunning = scan.status === 'running' || scan.status === 'pending';
-                
-                // Extract hosts found from results
-                let hostsFound = '-';
-                if (scan.status === 'completed' && scan.results) {
-                    try {
-                        const results = typeof scan.results === 'string' ? JSON.parse(scan.results) : scan.results;
-                        hostsFound = results.live_hosts || 0;
-                    } catch (error) {
-                        console.warn('Failed to parse scan results:', error);
-                    }
-                } else if (isRunning) {
-                    hostsFound = '🔄 Scanning...';
-                }
-                
-                return `
-                    <tr class="${isRunning ? 'progress-row' : ''}">
-                        <td style="font-family: 'Courier New', monospace;">${scan.id}</td>
-                        <td style="color: #00ff00; font-weight: bold;">${targetName}</td>
-                        <td><span class="status status-${scan.status} ${isRunning ? 'status-updating' : ''}">${scan.status.toUpperCase()}</span></td>
-                        <td>
-                            <div style="background-color: #003300; border: 1px solid #00ff00; height: 8px; width: 100px;">
-                                <div style="background-color: #00ff00; height: 100%; width: ${scan.progress_percentage || 0}%; transition: width 0.3s ease;"></div>
-                            </div>
-                            <span style="font-size: 13px; color: #006600;">${scan.progress_percentage || 0}%</span>
-                        </td>
-                        <td style="font-weight: bold; color: ${scan.status === 'completed' ? '#00ff00' : '#666'};">
-                            ${hostsFound}
-                        </td>
-                        <td style="font-size: 12px; color: #666;">${new Date(scan.created_at).toLocaleDateString()}</td>
-                        <td>
-                            ${scan.status === 'completed' ? 
-                                `<button onclick="Subdomains.viewScanResults(${scan.id})" class="btn btn-secondary btn-small">📊 View Results</button>` :
-                                scan.status === 'running' ? 
-                                `<button onclick="Subdomains.stopScan(${scan.id})" class="btn btn-danger btn-small">Stop</button>` :
-                                '-'
-                            }
-                        </td>
-                    </tr>
-                `;
-            }).join('');
-        } else {
-            scansList.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #006600;">No live host scans yet. Start your first scan above!</td></tr>';
-        }
-    },
-
-    async viewScanResults(scanId) {
-        try {
-            const response = await API.scans.get(scanId);
-            if (!response) return;
-            
-            const data = await response.json();
-            
-            if (data.success && data.data && data.data.results) {
-                const results = data.data.results;
-                let message = `Live Host Scan Results:\n\n`;
-                message += `Target: ${data.data.domain || data.data.target_domain || 'Unknown'}\n`;
-                message += `Duration: ${results.scan_duration_seconds || 0}s\n\n`;
-                message += `Total Subdomains Checked: ${results.total_checked || 0}\n`;
-                message += `Live Hosts Found: ${results.live_hosts || 0}\n`;
-                message += `Success Rate: ${results.success_rate || 0}%\n`;
-                
-                if (results.newly_discovered && results.newly_discovered.length > 0) {
-                    message += `\nNewly Discovered Live Hosts: ${results.newly_discovered.length}\n`;
-                    message += `${results.newly_discovered.slice(0, 5).join(', ')}`;
-                    if (results.newly_discovered.length > 5) {
-                        message += ` (and ${results.newly_discovered.length - 5} more)`;
-                    }
-                }
-                
-                alert(message);
-                
-                // Refresh the subdomains list to show updated data
-                await this.updateSubdomainResultsQuietly();
-            } else {
-                Utils.showMessage('No results available for this scan.', 'warning');
-            }
-        } catch (error) {
-            Utils.showMessage('Failed to load scan results: ' + error.message, 'error');
-        }
-    },
-
-    async stopScan(scanId) {
-        if (confirm('Are you sure you want to stop this live host scan?')) {
-            try {
-                const response = await API.scans.stop(scanId);
-                if (response && response.ok) {
-                    await this.loadScanJobs();
-                    Utils.showMessage('Live host scan stopped successfully!', 'success');
-                } else {
-                    Utils.showMessage('Failed to stop scan', 'error');
-                }
-            } catch (error) {
-                Utils.showMessage('Failed to stop scan: ' + error.message, 'error');
-            }
-        }
-    },
-
-    // Cleanup method for tab switching
-    cleanup() {
-        console.log('🧹 Cleaning up live hosts module intervals');
-        
-        if (this.scanJobsRefreshInterval) {
-            clearInterval(this.scanJobsRefreshInterval);
-            this.scanJobsRefreshInterval = null;
-        }
-        
-        if (this.refreshInterval) {
-            clearInterval(this.refreshInterval);
-            this.refreshInterval = null;
-        }
-        
-        this.isAutoRefreshEnabled = false;
     },
 
     async load(page = 1) {
         try {
             // Show loading message
             document.getElementById('subdomains-list').innerHTML = 
-                '<tr><td colspan="8" style="text-align: center; color: #ffff00;">🔍 Searching subdomains...</td></tr>';
+                '<tr><td colspan="8" style="text-align: center; color: #a855f7;">🔍 Searching subdomains...</td></tr>';
             
             const targetId = document.getElementById('subdomain-target-filter')?.value;
             const status = document.getElementById('subdomain-status-filter')?.value;
@@ -653,28 +195,33 @@ const Subdomains = {
             if (httpStatus && httpStatus.trim()) params.http_status = httpStatus.trim();
             if (search && search.trim()) params.search = search.trim();
 
+            console.log('📡 API call params:', params);
+
             const response = await API.subdomains.getAll(params);
             if (!response) {
                 console.error('❌ No response from API');
                 return;
             }
             
+            console.log('📡 API response status:', response.status);
+            
             if (!response.ok) {
                 console.error('Failed to fetch subdomains:', response.status);
                 document.getElementById('subdomains-list').innerHTML = 
-                    '<tr><td colspan="8" style="text-align: center; color: #ff0000;">Failed to load subdomains - check if backend is running</td></tr>';
+                    '<tr><td colspan="8" style="text-align: center; color: #dc2626;">Failed to load subdomains - check if backend is running</td></tr>';
                 return;
             }
             
             const data = await response.json();
+            console.log('📦 API response data:', data);
             
             if (data.success) {
                 const subdomains = data.data;
+                console.log(`✅ Found ${subdomains.length} subdomains`);
                 
                 AppState.currentPageData.subdomains = { page, total: data.pagination.total };
                 
                 this.renderSubdomainsList(subdomains);
-                this.updateLastUpdateTime('results');
                 
                 // Show result count message
                 const resultMessage = httpStatus && httpStatus.trim() ? 
@@ -696,22 +243,38 @@ const Subdomains = {
             } else {
                 console.error('❌ API returned success: false', data);
                 document.getElementById('subdomains-list').innerHTML = 
-                    '<tr><td colspan="8" style="text-align: center; color: #ff0000;">API error: ' + (data.error || 'Unknown error') + '</td></tr>';
+                    '<tr><td colspan="8" style="text-align: center; color: #dc2626;">API error: ' + (data.error || 'Unknown error') + '</td></tr>';
             }
         } catch (error) {
             console.error('Failed to load subdomains:', error);
             document.getElementById('subdomains-list').innerHTML = 
-                '<tr><td colspan="8" style="text-align: center; color: #ff0000;">Error loading subdomains: ' + error.message + '</td></tr>';
+                '<tr><td colspan="8" style="text-align: center; color: #dc2626;">Error loading subdomains: ' + error.message + '</td></tr>';
         }
     },
 
-    // Search method that's called by the search button
+    // New search method that's called by the search button
     async search(page = 1) {
+        console.log('🔍 Search button clicked');
+        
+        // Get current filter values for debugging
+        const targetId = document.getElementById('subdomain-target-filter')?.value;
+        const status = document.getElementById('subdomain-status-filter')?.value;
+        const httpStatus = document.getElementById('subdomain-http-status-filter')?.value;
+        const search = document.getElementById('subdomain-search')?.value;
+        
+        console.log('Current filter values:', {
+            targetId,
+            status,
+            httpStatus,
+            search
+        });
+        
         await this.load(page);
     },
 
-    // Clear all filters
+    // New method to clear all filters
     clearFilters() {
+        // Clear all filter inputs and selects (excluding global target filter)
         const statusFilter = document.getElementById('subdomain-status-filter');
         const httpStatusFilter = document.getElementById('subdomain-http-status-filter');
         const searchFilter = document.getElementById('subdomain-search');
@@ -720,7 +283,9 @@ const Subdomains = {
         if (httpStatusFilter) httpStatusFilter.value = '';
         if (searchFilter) searchFilter.value = '';
         
+        // Reload with cleared filters
         this.load(1);
+        
         Utils.showMessage('Filters cleared', 'info');
     },
 
@@ -730,7 +295,7 @@ const Subdomains = {
         if (subdomains.length > 0) {
             subdomainsList.innerHTML = subdomains.map(subdomain => `
                 <tr>
-                    <td style="font-weight: 600; color: #00ff00;">${subdomain.subdomain}</td>
+                    <td style="font-weight: 600; color: #7c3aed;">${subdomain.subdomain}</td>
                     <td>${subdomain.target_domain}</td>
                     <td><span class="status status-${subdomain.status}">${subdomain.status}</span></td>
                     <td>
@@ -739,9 +304,9 @@ const Subdomains = {
                             '-'
                         }
                     </td>
-                    <td style="font-family: 'Courier New', monospace; color: #00cc00;">${subdomain.ip_address || '-'}</td>
+                    <td style="font-family: 'Courier New', monospace; color: #9a4dff;">${subdomain.ip_address || '-'}</td>
                     <td style="max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${subdomain.title || ''}">${subdomain.title || '-'}</td>
-                    <td style="font-size: 12px; color: #006600;">${subdomain.last_seen ? new Date(subdomain.last_seen).toLocaleDateString() : '-'}</td>
+                    <td style="font-size: 12px; color: #6b46c1;">${subdomain.last_seen ? new Date(subdomain.last_seen).toLocaleDateString() : '-'}</td>
                     <td>
                         <button onclick="Subdomains.checkLive(${subdomain.id})" class="btn btn-secondary btn-small">Check Live</button>
                         ${subdomain.http_status && (subdomain.http_status === 200 || subdomain.http_status === 301 || subdomain.http_status === 302) ? 
@@ -752,11 +317,11 @@ const Subdomains = {
                 </tr>
             `).join('');
         } else {
-            subdomainsList.innerHTML = '<tr><td colspan="8" style="text-align: center; color: #006600;">No subdomains found. Run a subdomain scan to discover subdomains!</td></tr>';
+            subdomainsList.innerHTML = '<tr><td colspan="8" style="text-align: center; color: #6b46c1;">No subdomains found. Run a subdomain scan to discover subdomains!</td></tr>';
         }
     },
 
-    // Get HTTP status color
+    // New method to get HTTP status color
     getHttpStatusColor(statusCode) {
         if (!statusCode) return 'status-inactive';
         
@@ -772,8 +337,7 @@ const Subdomains = {
         try {
             const response = await API.subdomains.checkLive(id);
             if (response && response.ok) {
-                // Immediately update the results
-                await this.updateSubdomainResultsQuietly();
+                await this.load(AppState.currentPageData.subdomains.page);
                 Utils.showMessage('Live status check completed!', 'success');
             } else {
                 Utils.showMessage('Failed to check live status', 'error');
@@ -781,6 +345,308 @@ const Subdomains = {
         } catch (error) {
             Utils.showMessage('Failed to check live status: ' + error.message, 'error');
         }
+    },
+
+    async checkAllLive() {
+        const checkAllBtn = document.getElementById('check-all-btn');
+        const statusSpan = document.getElementById('check-all-status');
+        const progressContainer = document.getElementById('check-all-progress');
+        const progressBar = document.getElementById('progress-bar');
+        const progressText = document.getElementById('progress-text');
+        
+        try {
+            // Disable button and show loading state
+            checkAllBtn.disabled = true;
+            checkAllBtn.innerHTML = '<span class="spinner"></span>Checking All Domains...';
+            statusSpan.textContent = 'Preparing bulk live check...';
+            statusSpan.style.color = '#a855f7';
+            progressContainer.style.display = 'block';
+            progressBar.style.width = '0%';
+            
+            // Get current filters to determine which subdomains to check
+            const targetId = document.getElementById('subdomain-target-filter')?.value;
+            const status = document.getElementById('subdomain-status-filter')?.value;
+            const httpStatus = document.getElementById('subdomain-http-status-filter')?.value;
+            const search = document.getElementById('subdomain-search')?.value;
+            
+            const params = {
+                page: 1,
+                limit: 1000 // Get more subdomains for bulk checking
+            };
+            
+            if (targetId) params.target_id = targetId;
+            if (status) params.status = status;
+            if (httpStatus) params.http_status = httpStatus.trim();
+            if (search) params.search = search;
+
+            // Get all subdomains that match current filters
+            const response = await API.subdomains.getAll(params);
+            if (!response || !response.ok) {
+                throw new Error('Failed to fetch subdomains');
+            }
+            
+            const data = await response.json();
+            const subdomains = data.success ? data.data : [];
+            
+            if (subdomains.length === 0) {
+                statusSpan.textContent = 'No subdomains found to check';
+                statusSpan.style.color = '#a855f7';
+                return;
+            }
+            
+            statusSpan.textContent = `Found ${subdomains.length} subdomains to check`;
+            statusSpan.style.color = '#7c3aed';
+            
+            // Check subdomains in batches to avoid overwhelming the server
+            let checkedCount = 0;
+            let successCount = 0;
+            let failedCount = 0;
+            const startTime = Date.now();
+            const BATCH_SIZE = CONFIG.BULK_CHECK_BATCH_SIZE || 5;
+            const BATCH_DELAY = CONFIG.BULK_CHECK_DELAY || 1000;
+            
+            for (let i = 0; i < subdomains.length; i += BATCH_SIZE) {
+                const batch = subdomains.slice(i, i + BATCH_SIZE);
+                
+                // Process batch in parallel
+                const batchPromises = batch.map(async (subdomain) => {
+                    try {
+                        const checkResponse = await API.subdomains.checkLive(subdomain.id);
+                        
+                        if (checkResponse && checkResponse.ok) {
+                            successCount++;
+                        } else {
+                            failedCount++;
+                        }
+                        checkedCount++;
+                        
+                        // Update progress
+                        const percentage = Math.round((checkedCount / subdomains.length) * 100);
+                        progressBar.style.width = `${percentage}%`;
+                        
+                        const elapsed = Math.round((Date.now() - startTime) / 1000);
+                        const eta = checkedCount > 0 ? Math.round((elapsed / checkedCount) * (subdomains.length - checkedCount)) : 0;
+                        
+                        statusSpan.textContent = `Checking subdomains... ${checkedCount}/${subdomains.length} (${percentage}%)`;
+                        progressText.textContent = `✅ ${successCount} success • ❌ ${failedCount} failed • ⏱️ ${eta}s remaining`;
+                        
+                    } catch (error) {
+                        console.error(`Failed to check subdomain ${subdomain.subdomain}:`, error);
+                        failedCount++;
+                        checkedCount++;
+                    }
+                });
+                
+                await Promise.all(batchPromises);
+                
+                // Small delay between batches to be respectful to the server
+                if (i + BATCH_SIZE < subdomains.length) {
+                    await new Promise(resolve => setTimeout(resolve, BATCH_DELAY));
+                }
+            }
+            
+            // Show completion status
+            const totalTime = Math.round((Date.now() - startTime) / 1000);
+            statusSpan.textContent = `✅ Bulk check completed in ${totalTime}s`;
+            statusSpan.style.color = '#7c3aed';
+            progressText.textContent = `Final: ✅ ${successCount} successful • ❌ ${failedCount} failed • 📊 ${subdomains.length} total`;
+            progressBar.style.width = '100%';
+            
+            // Refresh the subdomains list to show updated statuses
+            await this.load(AppState.currentPageData.subdomains.page);
+            
+            const message = `Bulk live check completed! ${successCount}/${subdomains.length} checks successful`;
+            Utils.showMessage(message, successCount > 0 ? 'success' : 'warning');
+            
+        } catch (error) {
+            console.error('Bulk live check failed:', error);
+            statusSpan.textContent = '❌ Bulk check failed';
+            statusSpan.style.color = '#dc2626';
+            progressText.textContent = 'Error occurred during bulk checking';
+            Utils.showMessage('Failed to perform bulk live check: ' + error.message, 'error');
+        } finally {
+            // Re-enable button
+            checkAllBtn.disabled = false;
+            checkAllBtn.innerHTML = '🌐 Check All Live';
+            
+            // Hide progress after delay
+            setTimeout(() => {
+                progressContainer.style.display = 'none';
+                statusSpan.textContent = '';
+                statusSpan.style.color = '#9a4dff';
+            }, 10000); // Keep visible for 10 seconds
+        }
+    },
+
+    // Export functionality methods
+    toggleExportMenu() {
+        const menu = document.getElementById('export-subdomains-menu');
+        if (menu) {
+            menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
+        }
+    },
+
+    async exportSubdomains(format) {
+        try {
+            // Hide the export menu
+            const menu = document.getElementById('export-subdomains-menu');
+            if (menu) menu.style.display = 'none';
+            
+            // Show loading message
+            Utils.showMessage(`📤 Exporting live hosts as ${format.toUpperCase()}...`, 'info');
+            
+            // Get current filter values to export filtered data
+            const targetId = document.getElementById('subdomain-target-filter')?.value;
+            const status = document.getElementById('subdomain-status-filter')?.value;
+            const httpStatus = document.getElementById('subdomain-http-status-filter')?.value;
+            const search = document.getElementById('subdomain-search')?.value;
+            
+            const params = {
+                page: 1,
+                limit: 10000 // Get all matching subdomains for export
+            };
+            
+            if (targetId) params.target_id = targetId;
+            if (status) params.status = status;
+            if (httpStatus && httpStatus.trim()) params.http_status = httpStatus.trim();
+            if (search && search.trim()) params.search = search.trim();
+
+            const response = await API.subdomains.getAll(params);
+            if (!response || !response.ok) {
+                throw new Error('Failed to fetch subdomains for export');
+            }
+            
+            const data = await response.json();
+            const subdomains = data.success ? data.data : [];
+            
+            if (subdomains.length === 0) {
+                Utils.showMessage('No subdomains to export with current filters', 'warning');
+                return;
+            }
+            
+            // Prepare export data
+            const exportData = {
+                export_timestamp: new Date().toISOString(),
+                total_subdomains: subdomains.length,
+                filters_applied: {
+                    target_id: targetId || 'all',
+                    status: status || 'all',
+                    http_status: httpStatus || 'all',
+                    search: search || 'none'
+                },
+                subdomains: subdomains
+            };
+            
+            // Generate and download file based on format
+            switch (format.toLowerCase()) {
+                case 'csv':
+                    this.downloadCSV(exportData);
+                    break;
+                case 'json':
+                    this.downloadJSON(exportData);
+                    break;
+                case 'xml':
+                    this.downloadXML(exportData);
+                    break;
+                default:
+                    throw new Error('Unsupported export format');
+            }
+            
+            Utils.showMessage(`✅ Successfully exported ${subdomains.length} live hosts as ${format.toUpperCase()}!`, 'success');
+            
+        } catch (error) {
+            Utils.showMessage('❌ Failed to export live hosts: ' + error.message, 'error');
+        }
+    },
+
+    downloadCSV(data) {
+        const timestamp = new Date().toISOString().split('T')[0];
+        let csvContent = 'Subdomain,Target Domain,Status,HTTP Status,IP Address,Title,Last Seen,Created Date\n';
+        
+        data.subdomains.forEach(subdomain => {
+            const row = [
+                `"${subdomain.subdomain || ''}"`,
+                `"${subdomain.target_domain || ''}"`,
+                `"${subdomain.status || ''}"`,
+                `"${subdomain.http_status || ''}"`,
+                `"${subdomain.ip_address || ''}"`,
+                `"${(subdomain.title || '').replace(/"/g, '""')}"`, // Escape quotes in title
+                `"${subdomain.last_seen || ''}"`,
+                `"${subdomain.created_at || ''}"`
+            ].join(',');
+            csvContent += row + '\n';
+        });
+        
+        // Add summary at the end
+        csvContent += '\n';
+        csvContent += `"Export Summary"\n`;
+        csvContent += `"Total Subdomains","${data.total_subdomains}"\n`;
+        csvContent += `"Export Date","${data.export_timestamp}"\n`;
+        csvContent += `"Filters Applied","Target: ${data.filters_applied.target_id}, Status: ${data.filters_applied.status}, HTTP: ${data.filters_applied.http_status}, Search: ${data.filters_applied.search}"\n`;
+        
+        this.downloadFile(csvContent, `live_hosts_${timestamp}.csv`, 'text/csv');
+    },
+
+    downloadJSON(data) {
+        const timestamp = new Date().toISOString().split('T')[0];
+        const jsonContent = JSON.stringify(data, null, 2);
+        this.downloadFile(jsonContent, `live_hosts_${timestamp}.json`, 'application/json');
+    },
+
+    downloadXML(data) {
+        const timestamp = new Date().toISOString().split('T')[0];
+        let xmlContent = '<?xml version="1.0" encoding="UTF-8"?>\n';
+        xmlContent += '<live_hosts_export>\n';
+        xmlContent += `  <export_info>\n`;
+        xmlContent += `    <timestamp>${this.escapeXml(data.export_timestamp)}</timestamp>\n`;
+        xmlContent += `    <total_subdomains>${data.total_subdomains}</total_subdomains>\n`;
+        xmlContent += `    <filters>\n`;
+        xmlContent += `      <target_id>${this.escapeXml(data.filters_applied.target_id)}</target_id>\n`;
+        xmlContent += `      <status>${this.escapeXml(data.filters_applied.status)}</status>\n`;
+        xmlContent += `      <http_status>${this.escapeXml(data.filters_applied.http_status)}</http_status>\n`;
+        xmlContent += `      <search>${this.escapeXml(data.filters_applied.search)}</search>\n`;
+        xmlContent += `    </filters>\n`;
+        xmlContent += `  </export_info>\n`;
+        xmlContent += '  <subdomains>\n';
+        
+        data.subdomains.forEach(subdomain => {
+            xmlContent += '    <subdomain>\n';
+            xmlContent += `      <name>${this.escapeXml(subdomain.subdomain || '')}</name>\n`;
+            xmlContent += `      <target_domain>${this.escapeXml(subdomain.target_domain || '')}</target_domain>\n`;
+            xmlContent += `      <status>${this.escapeXml(subdomain.status || '')}</status>\n`;
+            xmlContent += `      <http_status>${this.escapeXml(subdomain.http_status || '')}</http_status>\n`;
+            xmlContent += `      <ip_address>${this.escapeXml(subdomain.ip_address || '')}</ip_address>\n`;
+            xmlContent += `      <title>${this.escapeXml(subdomain.title || '')}</title>\n`;
+            xmlContent += `      <last_seen>${this.escapeXml(subdomain.last_seen || '')}</last_seen>\n`;
+            xmlContent += `      <created_at>${this.escapeXml(subdomain.created_at || '')}</created_at>\n`;
+            xmlContent += '    </subdomain>\n';
+        });
+        
+        xmlContent += '  </subdomains>\n';
+        xmlContent += '</live_hosts_export>';
+        
+        this.downloadFile(xmlContent, `live_hosts_${timestamp}.xml`, 'application/xml');
+    },
+
+    escapeXml(text) {
+        return String(text)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    },
+
+    downloadFile(content, filename, mimeType) {
+        const blob = new Blob([content], { type: mimeType });
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
     },
 
     // Method to refresh targets (useful when called from other modules)
