@@ -1,4 +1,4 @@
-// frontend/assets/js/navigation.js - Updated with proper cleanup for scan-specific auto-refresh
+// frontend/assets/js/navigation.js - Updated with proper cleanup and content discovery support
 
 const Navigation = {
     init() {
@@ -76,11 +76,12 @@ const Navigation = {
 
         // Stop module-specific auto-refresh intervals
         const modulesToCleanup = [
-            'Scans',         // Subdomain scans auto-refresh
-            'Subdomains',    // Live hosts auto-refresh  
-            'PortScanning',  // Port scanning auto-refresh
-            'Directories',   // Directory auto-refresh
-            'Vulnerabilities' // Vuln scanning auto-refresh
+            'Scans',           // Subdomain scans auto-refresh
+            'Subdomains',      // Live hosts auto-refresh  
+            'PortScanning',    // Port scanning auto-refresh
+            'Directories',     // Directory auto-refresh
+            'ContentDiscovery', // Content discovery auto-refresh - ADDED
+            'Vulnerabilities'  // Vuln scanning auto-refresh
         ];
 
         modulesToCleanup.forEach(moduleName => {
@@ -115,7 +116,7 @@ const Navigation = {
         if (!content) return;
         
         // Clear current content
-        content.innerHTML = '<div style="text-align: center; color: #006600; padding: 40px;">Loading...</div>';
+        content.innerHTML = '<div style="text-align: center; color: #9a4dff; padding: 40px;">Loading...</div>';
 
         try {
             switch(tab) {
@@ -167,6 +168,15 @@ const Navigation = {
                     }
                     break;
                     
+                case 'content-discovery':
+                    // FIXED: Load the actual ContentDiscovery module instead of placeholder
+                    if (window.ContentDiscovery && typeof window.ContentDiscovery.init === 'function') {
+                        await window.ContentDiscovery.init();
+                    } else {
+                        this.showModuleNotAvailable('ContentDiscovery');
+                    }
+                    break;
+                    
                 case 'vuln-scanning':
                     if (window.Vulnerabilities && typeof window.Vulnerabilities.init === 'function') {
                         await window.Vulnerabilities.init();
@@ -175,7 +185,6 @@ const Navigation = {
                     }
                     break;
                     
-                case 'content-discovery':
                 case 'js-analysis':
                 case 'api-discovery':
                     content.innerHTML = this.getPlaceholderContent(tab);
@@ -186,12 +195,12 @@ const Navigation = {
                     break;
                     
                 default:
-                    content.innerHTML = '<div style="text-align: center; color: #ff0000; padding: 40px;">Tab not implemented yet</div>';
+                    content.innerHTML = '<div style="text-align: center; color: #dc2626; padding: 40px;">Tab not implemented yet</div>';
             }
         } catch (error) {
             console.error('Error loading tab content:', error);
             content.innerHTML = `
-                <div style="text-align: center; color: #ff0000; padding: 40px;">
+                <div style="text-align: center; color: #dc2626; padding: 40px;">
                     <h3>Error Loading Content</h3>
                     <p>Failed to load ${this.getTabDisplayName(tab)} module</p>
                     <p style="font-size: 12px; margin-top: 10px;">Check console for details</p>
@@ -208,7 +217,7 @@ const Navigation = {
         if (!content) return;
         
         content.innerHTML = `
-            <div style="text-align: center; color: #ffff00; padding: 40px;">
+            <div style="text-align: center; color: #d97706; padding: 40px;">
                 <h3>⚠️ Module Not Available</h3>
                 <p>The ${moduleName} module is not loaded or not available.</p>
                 <p style="font-size: 14px; margin-top: 15px;">
@@ -219,10 +228,10 @@ const Navigation = {
                         🔄 Reload Page
                     </button>
                 </div>
-                <div style="margin-top: 15px; font-size: 12px; color: #666;">
+                <div style="margin-top: 15px; font-size: 12px; color: #6b46c1;">
                     <strong>Debug Info:</strong><br>
                     Available modules: ${Object.keys(window).filter(key => 
-                        ['Targets', 'Dashboard', 'Scans', 'Subdomains', 'Directories', 'PortScanning', 'Vulnerabilities'].includes(key)
+                        ['Targets', 'Dashboard', 'Scans', 'Subdomains', 'Directories', 'PortScanning', 'ContentDiscovery', 'Vulnerabilities'].includes(key)
                     ).join(', ') || 'None'}
                 </div>
             </div>
@@ -230,13 +239,13 @@ const Navigation = {
     },
 
     handleGlobalTargetFilter(selectedTargetId) {
-        // Update other target filters to match
+        // Update other target filters to match - UPDATED to include content discovery
         const filterIds = [
             'subdomain-target-filter', 
             'directory-target-filter', 
             'port-target-filter', 
             'vuln-scan-target',
-            'live-scan-target'  // Add the new live scan target filter
+            'content-discovery-target' // ADDED
         ];
         
         filterIds.forEach(filterId => {
@@ -246,7 +255,7 @@ const Navigation = {
             }
         });
         
-        // Reload current tab data if it's affected
+        // Reload current tab data if it's affected - UPDATED to include content discovery
         const activeTab = document.querySelector('.nav-item.active')?.dataset.tab;
         switch(activeTab) {
             case 'subdomains':
@@ -257,6 +266,15 @@ const Navigation = {
             case 'directories':
                 if (window.Directories && typeof window.Directories.load === 'function') {
                     window.Directories.load();
+                }
+                break;
+            case 'content-discovery':
+                // ADDED: Support for content discovery module
+                if (window.ContentDiscovery && typeof window.ContentDiscovery.loadTargets === 'function') {
+                    window.ContentDiscovery.loadTargets();
+                }
+                if (window.ContentDiscovery && typeof window.ContentDiscovery.load === 'function') {
+                    window.ContentDiscovery.load();
                 }
                 break;
             case 'port-scanning':
@@ -277,11 +295,6 @@ const Navigation = {
 
     getPlaceholderContent(tab) {
         const placeholders = {
-            'content-discovery': {
-                title: 'Content Discovery',
-                description: 'Discover hidden files, directories, and endpoints using ffuf and wordlists. Finds admin panels, backup files, and other interesting resources.',
-                content: 'Run content discovery to find hidden files and directories'
-            },
             'js-analysis': {
                 title: 'JavaScript Analysis',
                 description: 'Analyze JavaScript files to extract API endpoints, secrets, and sensitive information. Helps identify client-side vulnerabilities and information disclosure.',
@@ -299,7 +312,7 @@ const Navigation = {
             return `
                 <div class="card">
                     <div class="card-title">Coming Soon</div>
-                    <p style="color: #006600; text-align: center; padding: 40px;">
+                    <p style="color: #9a4dff; text-align: center; padding: 40px;">
                         This feature is under development
                     </p>
                 </div>
@@ -313,7 +326,7 @@ const Navigation = {
             </div>
             <div class="card">
                 <div class="card-title">Coming Soon</div>
-                <p style="color: #006600; text-align: center; padding: 40px;">${info.content}</p>
+                <p style="color: #9a4dff; text-align: center; padding: 40px;">${info.content}</p>
             </div>
         `;
     },
@@ -344,35 +357,37 @@ const Navigation = {
                 <div class="form-group">
                     <label>Theme</label>
                     <select>
-                        <option>Hacker Matrix (Current)</option>
+                        <option>Pyro Purple Cyberpunk (Current)</option>
                     </select>
                 </div>
                 <div class="form-group">
                     <label>Auto-refresh Status</label>
-                    <div style="font-family: 'Courier New', monospace; font-size: 12px; color: #006600; padding: 10px; border: 1px solid #003300; background-color: #001100;">
+                    <div style="font-family: 'Courier New', monospace; font-size: 12px; color: #9a4dff; padding: 10px; border: 1px solid #2d1b69; background: linear-gradient(135deg, #1a0a2e, #2d1b69);">
                         <div>General Auto-refresh: ${window.AppState?.refreshInterval ? '🟢 Active' : '🔴 Inactive'}</div>
                         <div>Subdomain Scans Module: ${getModuleStatus('Scans')}</div>
                         <div>Live Hosts Module: ${getModuleStatus('Subdomains')}</div>
                         <div>Port Scanning Module: ${getModuleStatus('PortScanning')}</div>
+                        <div>Content Discovery Module: ${getModuleStatus('ContentDiscovery')}</div>
                         <div>Directories Module: ${getModuleStatus('Directories')}</div>
                         <div>Vulnerabilities Module: ${getModuleStatus('Vulnerabilities')}</div>
                     </div>
                 </div>
                 <div class="form-group">
                     <label>Module Status</label>
-                    <div style="font-family: 'Courier New', monospace; font-size: 12px; color: #006600; padding: 10px; border: 1px solid #003300; background-color: #001100;">
+                    <div style="font-family: 'Courier New', monospace; font-size: 12px; color: #9a4dff; padding: 10px; border: 1px solid #2d1b69; background: linear-gradient(135deg, #1a0a2e, #2d1b69);">
                         <div>CONFIG: ${window.CONFIG ? '✅ Loaded' : '❌ Not Found'}</div>
                         <div>Utils: ${window.Utils ? '✅ Loaded' : '❌ Not Found'}</div>
                         <div>AppState: ${window.AppState ? '✅ Loaded' : '❌ Not Found'}</div>
                         <div>API: ${window.API ? '✅ Loaded' : '❌ Not Found'}</div>
                         <div>Auth: ${window.Auth ? '✅ Loaded' : '❌ Not Found'}</div>
                         <div>Navigation: ${window.Navigation ? '✅ Loaded' : '❌ Not Found'}</div>
-                        <hr style="border-color: #003300; margin: 8px 0;">
+                        <hr style="border-color: #2d1b69; margin: 8px 0;">
                         <div>Targets: ${getModuleStatus('Targets')}</div>
                         <div>Dashboard: ${getModuleStatus('Dashboard')}</div>
                         <div>Scans (Subdomain): ${getModuleStatus('Scans')}</div>
                         <div>Subdomains (Live Hosts): ${getModuleStatus('Subdomains')}</div>
                         <div>Directories: ${getModuleStatus('Directories')}</div>
+                        <div>Content Discovery: ${getModuleStatus('ContentDiscovery')}</div>
                         <div>PortScanning: ${getModuleStatus('PortScanning')}</div>
                         <div>Vulnerabilities: ${getModuleStatus('Vulnerabilities')}</div>
                     </div>
@@ -380,7 +395,7 @@ const Navigation = {
                 <div class="form-group">
                     <label>Actions</label>
                     <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-                        <button class="btn btn-primary" onclick="console.log('Available modules:', Object.keys(window).filter(k => ['CONFIG', 'Utils', 'API', 'Auth', 'Targets', 'Dashboard', 'Scans', 'Subdomains', 'Directories', 'PortScanning', 'Vulnerabilities'].includes(k)))">
+                        <button class="btn btn-primary" onclick="console.log('Available modules:', Object.keys(window).filter(k => ['CONFIG', 'Utils', 'API', 'Auth', 'Targets', 'Dashboard', 'Scans', 'Subdomains', 'Directories', 'ContentDiscovery', 'PortScanning', 'Vulnerabilities'].includes(k)))">
                             Debug Modules
                         </button>
                         <button class="btn btn-secondary" onclick="Navigation.cleanupPreviousTab(); console.log('✅ Cleaned up all auto-refresh intervals');">
@@ -410,7 +425,7 @@ const Navigation = {
         }
         
         // Reset module intervals
-        const modules = ['Scans', 'Subdomains', 'PortScanning', 'Directories', 'Vulnerabilities'];
+        const modules = ['Scans', 'Subdomains', 'PortScanning', 'ContentDiscovery', 'Directories', 'Vulnerabilities'];
         modules.forEach(moduleName => {
             const module = window[moduleName];
             if (module) {
