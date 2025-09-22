@@ -1,4 +1,4 @@
-// frontend/assets/js/navigation.js - Updated with proper cleanup and content discovery support
+// frontend/assets/js/navigation.js - Updated with Dynamic Endpoints
 
 const Navigation = {
     init() {
@@ -14,7 +14,7 @@ const Navigation = {
             }
         });
 
-        // Global target filter - add safety check
+        // Global target filter
         const globalFilter = document.getElementById('global-target-filter');
         if (globalFilter) {
             globalFilter.addEventListener('change', (e) => {
@@ -37,7 +37,7 @@ const Navigation = {
             activeNavItem.classList.add('active');
         }
 
-        // Update title - add safety check
+        // Update title
         const pageTitle = document.getElementById('page-title');
         if (pageTitle && window.CONFIG && CONFIG.TAB_TITLES) {
             pageTitle.textContent = CONFIG.TAB_TITLES[tab] || this.getTabDisplayName(tab);
@@ -57,6 +57,7 @@ const Navigation = {
             'directories': 'Directories',
             'port-scanning': 'Port Scanning',
             'content-discovery': 'Content Discovery',
+            'dynamic-endpoints': 'Dynamic Endpoints',  // NEW
             'js-analysis': 'JS Analysis',
             'api-discovery': 'API Discovery',
             'vuln-scanning': 'Vulnerability Scanning',
@@ -80,7 +81,8 @@ const Navigation = {
             'Subdomains',      // Live hosts auto-refresh  
             'PortScanning',    // Port scanning auto-refresh
             'Directories',     // Directory auto-refresh
-            'ContentDiscovery', // Content discovery auto-refresh - ADDED
+            'ContentDiscovery', // Content discovery auto-refresh
+            'DynamicEndpoints', // Dynamic endpoints auto-refresh - NEW
             'Vulnerabilities'  // Vuln scanning auto-refresh
         ];
 
@@ -102,7 +104,7 @@ const Navigation = {
                 console.log(`✅ Cleared ${moduleName} refreshInterval`);
             }
             
-            // Check for scanJobsRefreshInterval (for subdomains module)
+            // Check for scanJobsRefreshInterval
             if (module && module.scanJobsRefreshInterval) {
                 clearInterval(module.scanJobsRefreshInterval);
                 module.scanJobsRefreshInterval = null;
@@ -169,11 +171,18 @@ const Navigation = {
                     break;
                     
                 case 'content-discovery':
-                    // FIXED: Load the actual ContentDiscovery module instead of placeholder
                     if (window.ContentDiscovery && typeof window.ContentDiscovery.init === 'function') {
                         await window.ContentDiscovery.init();
                     } else {
                         this.showModuleNotAvailable('ContentDiscovery');
+                    }
+                    break;
+
+                case 'dynamic-endpoints':  // NEW CASE
+                    if (window.DynamicEndpoints && typeof window.DynamicEndpoints.init === 'function') {
+                        await window.DynamicEndpoints.init();
+                    } else {
+                        this.showModuleNotAvailable('DynamicEndpoints');
                     }
                     break;
                     
@@ -231,7 +240,7 @@ const Navigation = {
                 <div style="margin-top: 15px; font-size: 12px; color: #6b46c1;">
                     <strong>Debug Info:</strong><br>
                     Available modules: ${Object.keys(window).filter(key => 
-                        ['Targets', 'Dashboard', 'Scans', 'Subdomains', 'Directories', 'PortScanning', 'ContentDiscovery', 'Vulnerabilities'].includes(key)
+                        ['Targets', 'Dashboard', 'Scans', 'Subdomains', 'Directories', 'PortScanning', 'ContentDiscovery', 'DynamicEndpoints', 'Vulnerabilities'].includes(key)
                     ).join(', ') || 'None'}
                 </div>
             </div>
@@ -239,13 +248,14 @@ const Navigation = {
     },
 
     handleGlobalTargetFilter(selectedTargetId) {
-        // Update other target filters to match - UPDATED to include content discovery
+        // Update other target filters to match - UPDATED to include dynamic endpoints
         const filterIds = [
             'subdomain-target-filter', 
             'directory-target-filter', 
             'port-target-filter', 
             'vuln-scan-target',
-            'content-discovery-target' // ADDED
+            'content-discovery-target',
+            'dynamic-discovery-target'  // NEW
         ];
         
         filterIds.forEach(filterId => {
@@ -255,7 +265,7 @@ const Navigation = {
             }
         });
         
-        // Reload current tab data if it's affected - UPDATED to include content discovery
+        // Reload current tab data if it's affected - UPDATED to include dynamic endpoints
         const activeTab = document.querySelector('.nav-item.active')?.dataset.tab;
         switch(activeTab) {
             case 'subdomains':
@@ -269,12 +279,19 @@ const Navigation = {
                 }
                 break;
             case 'content-discovery':
-                // ADDED: Support for content discovery module
                 if (window.ContentDiscovery && typeof window.ContentDiscovery.loadTargets === 'function') {
                     window.ContentDiscovery.loadTargets();
                 }
                 if (window.ContentDiscovery && typeof window.ContentDiscovery.load === 'function') {
                     window.ContentDiscovery.load();
+                }
+                break;
+            case 'dynamic-endpoints':  // NEW CASE
+                if (window.DynamicEndpoints && typeof window.DynamicEndpoints.loadTargets === 'function') {
+                    window.DynamicEndpoints.loadTargets();
+                }
+                if (window.DynamicEndpoints && typeof window.DynamicEndpoints.load === 'function') {
+                    window.DynamicEndpoints.load();
                 }
                 break;
             case 'port-scanning':
@@ -368,6 +385,7 @@ const Navigation = {
                         <div>Live Hosts Module: ${getModuleStatus('Subdomains')}</div>
                         <div>Port Scanning Module: ${getModuleStatus('PortScanning')}</div>
                         <div>Content Discovery Module: ${getModuleStatus('ContentDiscovery')}</div>
+                        <div>Dynamic Endpoints Module: ${getModuleStatus('DynamicEndpoints')}</div>
                         <div>Directories Module: ${getModuleStatus('Directories')}</div>
                         <div>Vulnerabilities Module: ${getModuleStatus('Vulnerabilities')}</div>
                     </div>
@@ -388,6 +406,7 @@ const Navigation = {
                         <div>Subdomains (Live Hosts): ${getModuleStatus('Subdomains')}</div>
                         <div>Directories: ${getModuleStatus('Directories')}</div>
                         <div>Content Discovery: ${getModuleStatus('ContentDiscovery')}</div>
+                        <div>Dynamic Endpoints: ${getModuleStatus('DynamicEndpoints')}</div>
                         <div>PortScanning: ${getModuleStatus('PortScanning')}</div>
                         <div>Vulnerabilities: ${getModuleStatus('Vulnerabilities')}</div>
                     </div>
@@ -395,7 +414,7 @@ const Navigation = {
                 <div class="form-group">
                     <label>Actions</label>
                     <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-                        <button class="btn btn-primary" onclick="console.log('Available modules:', Object.keys(window).filter(k => ['CONFIG', 'Utils', 'API', 'Auth', 'Targets', 'Dashboard', 'Scans', 'Subdomains', 'Directories', 'ContentDiscovery', 'PortScanning', 'Vulnerabilities'].includes(k)))">
+                        <button class="btn btn-primary" onclick="console.log('Available modules:', Object.keys(window).filter(k => ['CONFIG', 'Utils', 'API', 'Auth', 'Targets', 'Dashboard', 'Scans', 'Subdomains', 'Directories', 'ContentDiscovery', 'DynamicEndpoints', 'PortScanning', 'Vulnerabilities'].includes(k)))">
                             Debug Modules
                         </button>
                         <button class="btn btn-secondary" onclick="Navigation.cleanupPreviousTab(); console.log('✅ Cleaned up all auto-refresh intervals');">
@@ -425,7 +444,7 @@ const Navigation = {
         }
         
         // Reset module intervals
-        const modules = ['Scans', 'Subdomains', 'PortScanning', 'ContentDiscovery', 'Directories', 'Vulnerabilities'];
+        const modules = ['Scans', 'Subdomains', 'PortScanning', 'ContentDiscovery', 'DynamicEndpoints', 'Directories', 'Vulnerabilities'];
         modules.forEach(moduleName => {
             const module = window[moduleName];
             if (module) {
