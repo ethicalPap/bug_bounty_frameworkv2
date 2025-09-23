@@ -1,4 +1,4 @@
-// frontend/assets/js/modules/subdomains.js - REDESIGNED TO MIMIC SCANS STYLE
+// frontend/assets/js/modules/subdomains.js - COMPLETE FIXED VERSION with Live Host Data
 
 const Subdomains = {
     refreshInterval: null,
@@ -315,6 +315,7 @@ const Subdomains = {
         }
     },
 
+    // FIXED: Update scan status with proper live host count extraction
     updateScanStatus(scans, runningScans) {
         const statusSpan = document.getElementById('live-host-status');
         if (!statusSpan) return;
@@ -333,7 +334,22 @@ const Subdomains = {
                 .reduce((total, scan) => {
                     try {
                         const results = typeof scan.results === 'string' ? JSON.parse(scan.results) : scan.results;
-                        return total + (results?.live_hosts_count || results?.total_live || 0);
+                        
+                        // FIXED: Check multiple possible formats for live host count
+                        if (typeof results.live_hosts === 'number') {
+                            return total + results.live_hosts;
+                        } else if (Array.isArray(results.live_host_details)) {
+                            return total + results.live_host_details.length;
+                        } else if (Array.isArray(results.live_hosts)) {
+                            return total + results.live_hosts.length;
+                        } else if (typeof results.total_live === 'number') {
+                            return total + results.total_live;
+                        } else if (typeof results.live_hosts_count === 'number') {
+                            return total + results.live_hosts_count;
+                        } else if (Array.isArray(results.live_host_list)) {
+                            return total + results.live_host_list.length;
+                        }
+                        return total;
                     } catch {
                         return total;
                     }
@@ -533,6 +549,7 @@ const Subdomains = {
         }
     },
 
+    // FIXED: Render scans list with proper live host count extraction
     renderScansList(scans) {
         const scansList = document.getElementById('live-host-scans-list');
         
@@ -544,14 +561,42 @@ const Subdomains = {
                 
                 console.log(`🎯 Live Host Scan ${scan.id}: target_domain="${scan.target_domain}", domain="${scan.domain}", target_id="${scan.target_id}", resolved="${targetName}"`); // Debug log
                 
-                // Extract live hosts count from results
+                // FIXED: Extract live hosts count from results
                 let liveHostsCount = '-';
                 if (scan.status === 'completed' && scan.results) {
                     try {
                         const results = typeof scan.results === 'string' ? JSON.parse(scan.results) : scan.results;
-                        liveHostsCount = results.live_hosts_count || results.total_live || results.live_hosts?.length || 0;
+                        
+                        // Backend returns different possible formats, check in order of preference:
+                        if (typeof results.live_hosts === 'number') {
+                            // scanService.js format: live_hosts is the count
+                            liveHostsCount = results.live_hosts;
+                        } else if (Array.isArray(results.live_host_details)) {
+                            // FIXED: New detailed format from backend
+                            liveHostsCount = results.live_host_details.length;
+                        } else if (Array.isArray(results.live_hosts)) {
+                            // liveHostsService.js format: live_hosts is the array
+                            liveHostsCount = results.live_hosts.length;
+                        } else if (typeof results.total_live === 'number') {
+                            // Alternative format: total_live is the count
+                            liveHostsCount = results.total_live;
+                        } else if (typeof results.live_hosts_count === 'number') {
+                            // Alternative format: live_hosts_count is the count
+                            liveHostsCount = results.live_hosts_count;
+                        } else if (Array.isArray(results.live_host_list)) {
+                            // scanService.js format: live_host_list is the array
+                            liveHostsCount = results.live_host_list.length;
+                        } else {
+                            // Fallback: try to find any count
+                            liveHostsCount = 0;
+                            console.warn('Could not determine live hosts count from results:', results);
+                        }
+                        
+                        console.log(`✅ Live hosts count for scan ${scan.id}: ${liveHostsCount}`, results);
+                        
                     } catch (error) {
                         console.warn('Failed to parse scan results:', error);
+                        liveHostsCount = 'Parse Error';
                     }
                 } else if (isRunning) {
                     liveHostsCount = '🔄 Checking...';
@@ -738,27 +783,67 @@ const Subdomains = {
         }
     },
 
+    // FIXED: CSV export with detailed host information
     downloadCSV(data, scanId) {
         let csvContent = 'Scan ID,Target,Scan Type,Status,Created,Completed,Live Hosts Count\n';
-        csvContent += `${data.scan_id},"${data.target}","${data.scan_type}","${data.status}","${data.created_at}","${data.completed_at || 'N/A'}","${data.results.live_hosts_count || data.results.total_live || 0}"\n\n`;
         
-        // Add live hosts if available
-        if (data.results.live_hosts && data.results.live_hosts.length > 0) {
+        // Get live hosts count from results - use multiple fallbacks
+        let liveHostsCount = 0;
+        if (data.results) {
+            if (typeof data.results.live_hosts === 'number') {
+                liveHostsCount = data.results.live_hosts;
+            } else if (Array.isArray(data.results.live_host_details)) {
+                liveHostsCount = data.results.live_host_details.length;
+            } else if (Array.isArray(data.results.live_host_list)) {
+                liveHostsCount = data.results.live_host_list.length;
+            } else if (Array.isArray(data.results.live_hosts)) {
+                liveHostsCount = data.results.live_hosts.length;
+            }
+        }
+        
+        csvContent += `${data.scan_id},"${data.target}","${data.scan_type}","${data.status}","${data.created_at}","${data.completed_at || 'N/A'}","${liveHostsCount}"\n\n`;
+        
+        // FIXED: Use detailed host information if available
+        const liveHostDetails = data.results.live_host_details || [];
+        const liveHostsList = data.results.live_host_list || data.results.live_hosts || [];
+        
+        if (liveHostDetails.length > 0) {
+            // Use detailed information
+            csvContent += 'Live Hosts Found (Detailed)\n';
+            csvContent += 'Subdomain,HTTP Status,IP Address,Title,Response Time (ms)\n';
+            liveHostDetails.forEach(host => {
+                csvContent += `"${host.subdomain}","${host.http_status}","${host.ip_address}","${(host.title || 'N/A').replace(/"/g, '""')}","${host.response_time}"\n`;
+            });
+        } else if (Array.isArray(liveHostsList) && liveHostsList.length > 0) {
+            // Fallback to simple list
             csvContent += 'Live Hosts Found\n';
-            csvContent += 'Subdomain,HTTP Status,IP Address,Title,Response Time\n';
-            data.results.live_hosts.forEach(host => {
-                csvContent += `"${host.subdomain || host.url}","${host.status_code || 'N/A'}","${host.ip_address || 'N/A'}","${host.title || 'N/A'}","${host.response_time || 'N/A'}"\n`;
+            csvContent += 'Subdomain\n';
+            liveHostsList.forEach(host => {
+                const hostname = typeof host === 'string' ? host : (host.subdomain || host.url || host);
+                csvContent += `"${hostname}"\n`;
             });
         }
         
         this.downloadFile(csvContent, `live_host_scan_${scanId}_results.csv`, 'text/csv');
     },
 
+    // FIXED: JSON export with detailed information
     downloadJSON(data, scanId) {
-        const jsonContent = JSON.stringify(data, null, 2);
+        // Enhanced JSON export with detailed information
+        const enhancedData = {
+            ...data,
+            export_info: {
+                exported_at: new Date().toISOString(),
+                export_format: 'JSON',
+                tool: 'Live Host Discovery Scanner'
+            }
+        };
+        
+        const jsonContent = JSON.stringify(enhancedData, null, 2);
         this.downloadFile(jsonContent, `live_host_scan_${scanId}_results.json`, 'application/json');
     },
 
+    // FIXED: XML export with detailed information
     downloadXML(data, scanId) {
         let xmlContent = '<?xml version="1.0" encoding="UTF-8"?>\n';
         xmlContent += '<live_host_scan_results>\n';
@@ -768,22 +853,61 @@ const Subdomains = {
         xmlContent += `  <status>${this.escapeXml(data.status)}</status>\n`;
         xmlContent += `  <created_at>${this.escapeXml(data.created_at)}</created_at>\n`;
         xmlContent += `  <completed_at>${this.escapeXml(data.completed_at || 'N/A')}</completed_at>\n`;
-        xmlContent += `  <live_hosts_count>${data.results.live_hosts_count || data.results.total_live || 0}</live_hosts_count>\n`;
+        xmlContent += `  <exported_at>${this.escapeXml(new Date().toISOString())}</exported_at>\n`;
+        
+        // Get live hosts count
+        let liveHostsCount = 0;
+        if (data.results) {
+            if (typeof data.results.live_hosts === 'number') {
+                liveHostsCount = data.results.live_hosts;
+            } else if (Array.isArray(data.results.live_host_details)) {
+                liveHostsCount = data.results.live_host_details.length;
+            } else if (Array.isArray(data.results.live_host_list)) {
+                liveHostsCount = data.results.live_host_list.length;
+            }
+        }
+        
+        xmlContent += `  <live_hosts_count>${liveHostsCount}</live_hosts_count>\n`;
         xmlContent += '  <results>\n';
         
-        // Add live hosts
-        if (data.results.live_hosts && data.results.live_hosts.length > 0) {
-            xmlContent += '    <live_hosts>\n';
-            data.results.live_hosts.forEach(host => {
+        // FIXED: Use detailed host information if available
+        const liveHostDetails = data.results.live_host_details || [];
+        const liveHostsList = data.results.live_host_list || data.results.live_hosts || [];
+        
+        if (liveHostDetails.length > 0) {
+            // Use detailed information
+            xmlContent += '    <live_hosts_detailed>\n';
+            liveHostDetails.forEach(host => {
                 xmlContent += `      <host>\n`;
-                xmlContent += `        <subdomain>${this.escapeXml(host.subdomain || host.url)}</subdomain>\n`;
-                xmlContent += `        <status_code>${this.escapeXml(host.status_code || 'N/A')}</status_code>\n`;
-                xmlContent += `        <ip_address>${this.escapeXml(host.ip_address || 'N/A')}</ip_address>\n`;
+                xmlContent += `        <subdomain>${this.escapeXml(host.subdomain)}</subdomain>\n`;
+                xmlContent += `        <ip_address>${this.escapeXml(host.ip_address)}</ip_address>\n`;
+                xmlContent += `        <http_status>${this.escapeXml(host.http_status)}</http_status>\n`;
                 xmlContent += `        <title>${this.escapeXml(host.title || 'N/A')}</title>\n`;
-                xmlContent += `        <response_time>${this.escapeXml(host.response_time || 'N/A')}</response_time>\n`;
+                xmlContent += `        <response_time_ms>${this.escapeXml(host.response_time || 'N/A')}</response_time_ms>\n`;
+                xmlContent += `        <is_live>${this.escapeXml(host.is_live || 'true')}</is_live>\n`;
+                xmlContent += `        <checked_at>${this.escapeXml(host.checked_at || 'N/A')}</checked_at>\n`;
                 xmlContent += `      </host>\n`;
             });
-            xmlContent += '    </live_hosts>\n';
+            xmlContent += '    </live_hosts_detailed>\n';
+        } else if (Array.isArray(liveHostsList) && liveHostsList.length > 0) {
+            // Fallback to simple list
+            xmlContent += '    <live_hosts_simple>\n';
+            liveHostsList.forEach(host => {
+                const hostname = typeof host === 'string' ? host : (host.subdomain || host.url || host);
+                xmlContent += `      <host>\n`;
+                xmlContent += `        <subdomain>${this.escapeXml(hostname)}</subdomain>\n`;
+                xmlContent += `      </host>\n`;
+            });
+            xmlContent += '    </live_hosts_simple>\n';
+        }
+        
+        // Add scan summary if available
+        if (data.results.summary) {
+            xmlContent += '    <scan_summary>\n';
+            Object.entries(data.results.summary).forEach(([key, value]) => {
+                xmlContent += `      <${key}>${this.escapeXml(value)}</${key}>\n`;
+            });
+            xmlContent += '    </scan_summary>\n';
         }
         
         xmlContent += '  </results>\n';

@@ -146,7 +146,7 @@ class ScanService {
   }
 
   /**
-   * Live hosts scanning - FIXED VERSION with better subdomain fetching and debugging
+   * Live hosts scanning - FIXED VERSION with detailed host information storage
    */
   async runLiveHostsScan(scan, target) {
     console.log(`🔍 Running live hosts scan for: ${target.domain}`);
@@ -168,44 +168,20 @@ class ScanService {
 
       console.log('Live hosts scan config:', config);
 
-      // FIXED: Better subdomain fetching with retries and debugging
+      // Get subdomains with improved debugging
       let subdomains = [];
       
       if (Subdomain) {
         try {
-          // First, let's debug what target.id we're using
           console.log(`🎯 Looking for subdomains with target_id: ${target.id} (type: ${typeof target.id})`);
           
-          // Try to get subdomains with better debugging
           const subdomainQuery = await knex('subdomains')
             .where('target_id', target.id)
             .select('*');
             
           console.log(`📊 Raw subdomain query result: ${subdomainQuery.length} records`);
           
-          // If no subdomains found, let's try some debugging queries
           if (subdomainQuery.length === 0) {
-            // Check if there are ANY subdomains in the database
-            const totalSubdomains = await knex('subdomains').count('id as count').first();
-            console.log(`📊 Total subdomains in database: ${totalSubdomains.count}`);
-            
-            // Check what target_ids exist in subdomains table
-            const existingTargetIds = await knex('subdomains')
-              .distinct('target_id')
-              .select('target_id');
-            console.log(`📊 Existing target_ids in subdomains table:`, existingTargetIds.map(row => `${row.target_id} (${typeof row.target_id})`));
-            
-            // Check if target exists in targets table
-            const targetCheck = await knex('targets').where('id', target.id).first();
-            console.log(`📊 Target exists in targets table:`, !!targetCheck, targetCheck ? `(domain: ${targetCheck.domain})` : '');
-            
-            // Try string conversion in case of type mismatch
-            const stringTargetId = String(target.id);
-            const subdomainsWithStringId = await knex('subdomains')
-              .where('target_id', stringTargetId)
-              .select('*');
-            console.log(`📊 Subdomains found with string target_id (${stringTargetId}): ${subdomainsWithStringId.length}`);
-            
             // Try integer conversion
             const intTargetId = parseInt(target.id);
             if (!isNaN(intTargetId)) {
@@ -224,35 +200,28 @@ class ScanService {
             console.log(`✅ Found ${subdomains.length} subdomains with direct target_id match`);
           }
           
-          // FALLBACK: If still no subdomains, try to find by domain name
+          // Create root domain entry if no subdomains exist
           if (subdomains.length === 0) {
-            console.log(`🔄 No subdomains found by target_id, trying domain-based search...`);
+            console.log(`⚠️ No subdomains found for target ${target.domain}. Creating root domain entry...`);
             
-            // Look for subdomains that contain the target domain
-            const domainBasedSubdomains = await knex('subdomains')
-              .whereRaw('subdomain LIKE ?', [`%${target.domain}%`])
-              .select('*');
+            try {
+              const [rootSubdomain] = await knex('subdomains')
+                .insert({
+                  target_id: target.id,
+                  subdomain: target.domain,
+                  status: 'unknown',
+                  first_discovered: new Date(),
+                  created_at: new Date(),
+                  updated_at: new Date()
+                })
+                .returning('*');
+                
+              subdomains = [rootSubdomain];
+              console.log(`✅ Created root domain entry: ${target.domain} (ID: ${rootSubdomain.id})`);
               
-            console.log(`📊 Domain-based search found: ${domainBasedSubdomains.length} subdomains`);
-            
-            if (domainBasedSubdomains.length > 0) {
-              subdomains = domainBasedSubdomains;
-              console.log(`✅ Using domain-based match: found ${subdomains.length} subdomains`);
-            }
-          }
-          
-          // FINAL FALLBACK: Wait a bit and retry (for race conditions)
-          if (subdomains.length === 0) {
-            console.log(`⏳ No subdomains found, waiting 3 seconds and retrying (possible race condition)...`);
-            await new Promise(resolve => setTimeout(resolve, 3000));
-            
-            const retrySubdomains = await knex('subdomains')
-              .where('target_id', target.id)
-              .select('*');
-              
-            if (retrySubdomains.length > 0) {
-              subdomains = retrySubdomains;
-              console.log(`✅ Retry successful: found ${subdomains.length} subdomains`);
+            } catch (insertError) {
+              console.error('Failed to create root domain entry:', insertError);
+              throw new Error(`No subdomains available for live host scanning on ${target.domain}. Please run a subdomain enumeration scan first.`);
             }
           }
           
@@ -264,43 +233,13 @@ class ScanService {
         throw new Error('Subdomain model not available for live host scanning');
       }
 
-      // IMPROVED: Create root domain entry if no subdomains exist
-      if (subdomains.length === 0) {
-        console.log(`⚠️ No subdomains found for target ${target.domain}. Creating root domain entry...`);
-        
-        try {
-          // Create a root domain subdomain entry
-          const [rootSubdomain] = await knex('subdomains')
-            .insert({
-              target_id: target.id,
-              subdomain: target.domain,
-              status: 'unknown',
-              first_discovered: new Date(),
-              created_at: new Date(),
-              updated_at: new Date()
-            })
-            .returning('*');
-            
-          subdomains = [rootSubdomain];
-          console.log(`✅ Created root domain entry: ${target.domain} (ID: ${rootSubdomain.id})`);
-          
-        } catch (insertError) {
-          console.error('Failed to create root domain entry:', insertError);
-          
-          // As a last resort, show what we can scan
-          console.log(`💡 SUGGESTION: Run a subdomain scan first to discover subdomains for ${target.domain}`);
-          console.log(`💡 Or check if the target_id (${target.id}) matches the target_id in your subdomains table`);
-          
-          throw new Error(`No subdomains available for live host scanning on ${target.domain}. Please run a subdomain enumeration scan first to discover subdomains.`);
-        }
-      }
-
       console.log(`📋 Final subdomain count for live check: ${subdomains.length}`);
 
       await ScanJob.updateProgress(scan.id, 15);
 
       let checkedSubdomains = 0;
-      let liveHosts = [];
+      let liveHostNames = [];  // Simple array for backwards compatibility
+      let liveHostDetails = []; // FIXED: Array to store detailed host information
       let newlyDiscoveredLive = [];
       let updatedSubdomains = [];
       const startTime = Date.now();
@@ -324,7 +263,7 @@ class ScanService {
         
         const batchResults = await Promise.allSettled(batchPromises);
         
-        // Process results
+        // Process results and store detailed information
         for (let j = 0; j < batchResults.length; j++) {
           const result = batchResults[j];
           const subdomain = batch[j];
@@ -353,7 +292,24 @@ class ScanService {
               });
 
               if (checkResult.isLive) {
-                liveHosts.push(subdomain.subdomain);
+                // FIXED: Store both simple name and detailed information
+                liveHostNames.push(subdomain.subdomain);
+                
+                // FIXED: Store detailed host information
+                liveHostDetails.push({
+                  subdomain: subdomain.subdomain,
+                  subdomain_id: subdomain.id,
+                  ip_address: checkResult.ipAddress || 'N/A',
+                  http_status: checkResult.httpStatus || 'N/A',
+                  title: checkResult.title || 'N/A',
+                  response_time: checkResult.responseTime || 'N/A',
+                  is_live: true,
+                  checked_at: new Date().toISOString(),
+                  protocols_checked: {
+                    http: include_http_check,
+                    https: include_https_check
+                  }
+                });
                 
                 // Check if this is newly discovered as live
                 if (subdomain.status !== 'active') {
@@ -375,7 +331,7 @@ class ScanService {
         const progressPercent = 15 + (checkedSubdomains / subdomains.length) * 75;
         await ScanJob.updateProgress(scan.id, Math.round(progressPercent));
         
-        // Small delay between batches to be respectful
+        // Small delay between batches
         if (i + batch_size < subdomains.length) {
           await new Promise(resolve => setTimeout(resolve, 1000));
         }
@@ -383,16 +339,18 @@ class ScanService {
 
       const endTime = Date.now();
       const totalTime = Math.round((endTime - startTime) / 1000);
-      const successRate = subdomains.length > 0 ? Math.round((liveHosts.length / subdomains.length) * 100) : 0;
+      const successRate = subdomains.length > 0 ? Math.round((liveHostNames.length / subdomains.length) * 100) : 0;
 
-      console.log(`Live hosts scan completed: ${liveHosts.length}/${subdomains.length} live (${successRate}%) in ${totalTime}s`);
+      console.log(`Live hosts scan completed: ${liveHostNames.length}/${subdomains.length} live (${successRate}%) in ${totalTime}s`);
 
       await ScanJob.updateProgress(scan.id, 95);
 
+      // FIXED: Return detailed results with both formats for compatibility
       const results = {
         total_checked: subdomains.length,
-        live_hosts: liveHosts.length,
-        live_host_list: liveHosts,
+        live_hosts: liveHostNames.length,  // Keep as number for backwards compatibility
+        live_host_list: liveHostNames,     // Simple array for backwards compatibility
+        live_host_details: liveHostDetails, // FIXED: Detailed host information
         newly_discovered: newlyDiscoveredLive,
         success_rate: successRate,
         scan_duration_seconds: totalTime,
@@ -404,6 +362,13 @@ class ScanService {
           batch_size: batch_size,
           total_batches: Math.ceil(subdomains.length / batch_size)
         },
+        // Add summary stats
+        summary: {
+          total_live_hosts: liveHostNames.length,
+          hosts_with_http_status: liveHostDetails.filter(h => h.http_status !== 'N/A').length,
+          hosts_with_ip_address: liveHostDetails.filter(h => h.ip_address !== 'N/A').length,
+          hosts_with_title: liveHostDetails.filter(h => h.title !== 'N/A').length
+        },
         debug_info: {
           target_id_used: target.id,
           target_id_type: typeof target.id,
@@ -412,7 +377,8 @@ class ScanService {
         }
       };
 
-      console.log(`✅ Live hosts scan completed for ${target.domain}: ${liveHosts.length} live hosts found`);
+      console.log(`✅ Live hosts scan completed for ${target.domain}: ${liveHostNames.length} live hosts found with detailed information`);
+      console.log(`📊 Detailed results: ${liveHostDetails.length} hosts with full details`);
       
       await ScanJob.updateProgress(scan.id, 100);
       return results;
@@ -424,7 +390,7 @@ class ScanService {
   }
 
   /**
-   * Check a single subdomain for live status - helper method
+   * Check a single subdomain for live status - ENHANCED VERSION with more details
    */
   async checkSingleSubdomainLive(subdomain, options = {}) {
     const {
@@ -438,6 +404,7 @@ class ScanService {
     let ipAddress = null;
     let httpStatus = null;
     let title = null;
+    let responseTime = null;
     let isLive = false;
     
     console.log(`Checking live status for: ${subdomain.subdomain}`);
@@ -452,11 +419,17 @@ class ScanService {
           console.log(`DNS resolved: ${subdomain.subdomain} -> ${ipAddress}`);
         } catch (dnsError) {
           console.log(`DNS lookup failed for ${subdomain.subdomain}: ${dnsError.message}`);
-          return { isLive: false, ipAddress: null, httpStatus: null, title: null };
+          return { 
+            isLive: false, 
+            ipAddress: null, 
+            httpStatus: null, 
+            title: null,
+            responseTime: null
+          };
         }
       }
       
-      // Step 2: HTTP/HTTPS checks (only if DNS resolved or if we're skipping DNS)
+      // Step 2: HTTP/HTTPS checks
       if (ipAddress || !dns_resolution) {
         const protocols = [];
         if (include_http_check) protocols.push('http');
@@ -465,6 +438,8 @@ class ScanService {
         for (const protocol of protocols) {
           try {
             console.log(`${protocol.toUpperCase()} check for: ${subdomain.subdomain}`);
+            const startTime = Date.now();
+            
             const response = await axios.get(`${protocol}://${subdomain.subdomain}`, {
               timeout: request_timeout,
               maxRedirects: 3,
@@ -475,18 +450,19 @@ class ScanService {
             });
             
             httpStatus = response.status;
-            isLive = response.status >= 200 && response.status < 500; // Consider 4xx as live but problematic
+            responseTime = Date.now() - startTime; // FIXED: Calculate response time
+            isLive = response.status >= 200 && response.status < 500;
             
             // Extract title from HTML if requested
             if (extract_titles && response.data && typeof response.data === 'string') {
               const titleMatch = response.data.match(/<title[^>]*>([^<]+)<\/title>/i);
               if (titleMatch) {
-                title = titleMatch[1].trim().substring(0, 200); // Limit title length
-                title = title.replace(/\s+/g, ' ').trim(); // Clean up whitespace
+                title = titleMatch[1].trim().substring(0, 200);
+                title = title.replace(/\s+/g, ' ').trim();
               }
             }
             
-            console.log(`${protocol.toUpperCase()} success: ${subdomain.subdomain} -> ${httpStatus} (${title || 'No title'})`);
+            console.log(`${protocol.toUpperCase()} success: ${subdomain.subdomain} -> ${httpStatus} (${responseTime}ms) - ${title || 'No title'}`);
             break; // Success, no need to try other protocol
             
           } catch (httpError) {
@@ -500,19 +476,25 @@ class ScanService {
         isLive: isLive,
         ipAddress: ipAddress,
         httpStatus: httpStatus,
-        title: title
+        title: title,
+        responseTime: responseTime // FIXED: Include response time
       };
       
     } catch (error) {
       console.error(`Error checking ${subdomain.subdomain}:`, error.message);
-      return { isLive: false, ipAddress: null, httpStatus: null, title: null };
+      return { 
+        isLive: false, 
+        ipAddress: null, 
+        httpStatus: null, 
+        title: null,
+        responseTime: null
+      };
     }
   }
 
   /**
    * Subdomain enumeration scan 
    */
-
   async runSubdomainScan(scan, target) {
     console.log(`🔍 GUARANTEED FIX: Subdomain scan for: ${target.domain}`);
     console.log(`🎯 Target ID: ${target.id}, Organization: ${target.organization_id}`);
@@ -942,8 +924,6 @@ class ScanService {
       throw new Error(`Full scan failed: ${error.message}`);
     }
   }
-
-// FIX: Update the updateTargetStats method in backend/src/services/scanService.js
 
   /**
    * Update target statistics based on scan results - FIXED VERSION
