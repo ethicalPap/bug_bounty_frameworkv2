@@ -399,14 +399,14 @@ const ContentDiscovery = {
                     <table class="table">
                         <thead>
                             <tr>
-                                <th style="width: 30%;">Endpoint Details</th>
-                                <th style="width: 15%;">Type & Category</th>
-                                <th style="width: 12%;">Source</th>
-                                <th style="width: 10%;">Risk Level</th>
-                                <th style="width: 8%;">Method</th>
-                                <th style="width: 8%;">Status</th>
-                                <th style="width: 20%;">Behavior & Notes</th>
-                                <th style="width: 12%;">Actions</th>
+                                <th style="width: 25%;">Endpoint Details</th>
+                                <th style="width: 20%;">Full URL</th>
+                                <th style="width: 12%;">Type & Category</th>
+                                <th style="width: 10%;">Source</th>
+                                <th style="width: 8%;">Risk Level</th>
+                                <th style="width: 6%;">Method</th>
+                                <th style="width: 6%;">Status</th>
+                                <th style="width: 13%;">Actions</th>
                             </tr>
                         </thead>
                         <tbody id="content-list">
@@ -417,31 +417,6 @@ const ContentDiscovery = {
                     </table>
                 </div>
                 <div id="content-pagination" class="pagination"></div>
-            </div>
-
-            <!-- Dynamic Endpoints Section -->
-            <div class="card">
-                <div class="card-title">Dynamic Endpoints & Behavioral Analysis</div>
-                <div class="table-container">
-                    <table class="table">
-                        <thead>
-                            <tr>
-                                <th>Endpoint</th>
-                                <th>Dynamic Type</th>
-                                <th>Reactive Parameters</th>
-                                <th>Behavior</th>
-                                <th>Impact</th>
-                                <th>Response Diff</th>
-                                <th>Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody id="dynamic-endpoints-list">
-                            <tr>
-                                <td colspan="7" style="text-align: center; color: #6b46c1;">No dynamic endpoints discovered yet. Run comprehensive content discovery to find interactive endpoints!</td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
             </div>
         `;
     },
@@ -508,14 +483,13 @@ const ContentDiscovery = {
         this.stopProgressMonitoring();
         
         this.progressCheckInterval = setInterval(async () => {
-            if (this.activeScanJobId) {
-                try {
-                    await this.updateScanProgress();
-                } catch (error) {
-                    console.error('Progress monitoring failed:', error);
-                }
-            } else {
+            try {
                 await this.checkForActiveScan();
+                if (this.activeScanJobId) {
+                    await this.updateScanProgress();
+                }
+            } catch (error) {
+                console.error('Progress monitoring failed:', error);
             }
         }, 1000); // Check every second for smooth progress updates
     },
@@ -540,8 +514,11 @@ const ContentDiscovery = {
                 const data = await response.json();
                 const activeScans = data.success ? data.data : [];
                 
+                console.log('Checking for active content discovery scans:', activeScans.length);
+                
                 if (activeScans.length > 0) {
                     const scan = activeScans[0];
+                    console.log('Found active scan:', scan.id, scan.status, scan.progress_percentage);
                     this.activeScanJobId = scan.id;
                     this.showAdvancedProgress(scan);
                 } else {
@@ -563,6 +540,8 @@ const ContentDiscovery = {
         const currentActivity = document.getElementById('current-activity');
         const elapsedTime = document.getElementById('elapsed-time');
         const etaEstimate = document.getElementById('eta-estimate');
+        
+        console.log('Showing progress for scan:', scan.id, scan.progress_percentage);
         
         if (statusDiv && statusText && progressBar) {
             statusDiv.style.display = 'block';
@@ -605,6 +584,8 @@ const ContentDiscovery = {
             
             // Update live stats
             this.updateLiveProgressStats(scan, progress);
+        } else {
+            console.warn('Progress elements not found');
         }
     },
 
@@ -875,7 +856,10 @@ const ContentDiscovery = {
                 // Start monitoring immediately
                 setTimeout(() => {
                     this.checkForActiveScan();
-                }, 1000);
+                }, 500);
+                
+                // Also start progress monitoring right away
+                this.startProgressMonitoring();
                 
             } else {
                 const errorData = await response.json();
@@ -948,7 +932,9 @@ const ContentDiscovery = {
                 AppState.currentPageData.content = { page, total: data.pagination.total };
                 
                 this.renderContentList(content);
-                this.updateContentStats(content);
+                
+                // Load ALL content for proper stats calculation (not just current page)
+                await this.loadAndUpdateAllStats(targetId, subdomainId, sourceFilter, search);
                 
                 if (data.pagination.pages > 1) {
                     Utils.updatePagination('content', data.pagination);
@@ -973,111 +959,39 @@ const ContentDiscovery = {
         }
     },
 
-    // Load dynamic endpoints from real API data
-    async loadDynamicEndpoints() {
-        const dynamicEndpointsList = document.getElementById('dynamic-endpoints-list');
-        if (!dynamicEndpointsList) return;
-        
+    // Load all content for accurate stats calculation
+    async loadAndUpdateAllStats(targetId, subdomainId, sourceFilter, search) {
         try {
-            // Get content with dynamic endpoint filters
-            const targetId = document.getElementById('directory-target-filter')?.value;
             const params = {
-                content_type: 'dynamic_endpoint',
-                limit: 50
+                page: 1,
+                limit: 10000 // Get more items for accurate stats
             };
             
             if (targetId) params.target_id = targetId;
-            
+            if (subdomainId) params.subdomain_id = subdomainId;
+            if (sourceFilter) params.source = sourceFilter;
+            if (search && search.trim()) params.search = search.trim();
+
             const response = await API.directories.getAll(params);
-            if (!response || !response.ok) {
-                dynamicEndpointsList.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #6b46c1;">No dynamic endpoints discovered yet.</td></tr>';
-                return;
-            }
-            
-            const data = await response.json();
-            const dynamicEndpoints = data.success ? data.data.filter(item => 
-                item.content_type === 'dynamic_endpoint' || 
-                item.source === 'dynamic_analysis' ||
-                (item.behavior && item.behavior.includes('dynamic'))
-            ) : [];
-            
-            if (dynamicEndpoints.length > 0) {
-                dynamicEndpointsList.innerHTML = dynamicEndpoints.map(endpoint => `
-                    <tr>
-                        <td style="font-family: 'Courier New', monospace; color: #7c3aed; max-width: 300px;">
-                            <span class="dynamic-endpoint-indicator">DYNAMIC</span> ${endpoint.url || endpoint.path}
-                        </td>
-                        <td><span class="status ${this.getDynamicTypeColor(endpoint.dynamic_type || 'reactive_param')}">${this.getDynamicTypeIcon(endpoint.dynamic_type || 'reactive_param')} ${this.getDynamicTypeLabel(endpoint.dynamic_type || 'reactive_param')}</span></td>
-                        <td style="font-size: 12px; color: #9a4dff;">${endpoint.parameters || 'Various'}</td>
-                        <td style="font-size: 12px; color: #6b46c1; max-width: 200px;">${endpoint.behavior || endpoint.notes || 'Interactive behavior detected'}</td>
-                        <td><span class="status ${this.getImpactColor(endpoint.risk_level || 'medium')}">${(endpoint.risk_level || 'medium').toUpperCase()}</span></td>
-                        <td style="font-size: 12px; color: #9a4dff;">${endpoint.response_diff || 'Content changes detected'}</td>
-                        <td>
-                            <button onclick="ContentDiscovery.testDynamicEndpoint('${endpoint.url || endpoint.path}')" class="btn btn-secondary btn-small">Test</button>
-                            <button onclick="ContentDiscovery.analyzeBehavior(${endpoint.id})" class="btn btn-success btn-small">Analyze</button>
-                        </td>
-                    </tr>
-                `).join('');
-            } else {
-                dynamicEndpointsList.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #6b46c1;">No dynamic endpoints discovered yet. Run comprehensive content discovery to find interactive endpoints!</td></tr>';
+            if (response && response.ok) {
+                const data = await response.json();
+                if (data.success) {
+                    console.log(`Loading stats from ${data.data.length} total content items`);
+                    this.updateContentStats(data.data);
+                }
             }
         } catch (error) {
-            console.error('Failed to load dynamic endpoints:', error);
-            dynamicEndpointsList.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #dc2626;">Failed to load dynamic endpoints</td></tr>';
+            console.error('Failed to load all content for stats:', error);
         }
     },
 
-    getDynamicTypeIcon(type) {
-        const icons = {
-            'reactive_param': '⚡',
-            'ajax_trigger': '📡',
-            'dom_mutator': '🔄',
-            'state_changer': '🎭',
-            'interactive_form': '📝'
-        };
-        return icons[type] || '🎯';
+    // Load dynamic endpoints from real API data
+    async loadDynamicEndpoints() {
+        // This method is now integrated into the main content table
+        console.log('Dynamic endpoints are now displayed in the main content table');
     },
 
-    getDynamicTypeLabel(type) {
-        const labels = {
-            'reactive_param': 'Reactive Parameter',
-            'ajax_trigger': 'AJAX Trigger',
-            'dom_mutator': 'DOM Mutator',
-            'state_changer': 'State Changer',
-            'interactive_form': 'Interactive Form'
-        };
-        return labels[type] || type;
-    },
-
-    getDynamicTypeColor(type) {
-        switch(type) {
-            case 'ajax_trigger': return 'severity-high';
-            case 'dom_mutator': return 'severity-medium';
-            case 'state_changer': return 'severity-low';
-            case 'reactive_param': return 'status-running';
-            default: return 'status-completed';
-        }
-    },
-
-    getImpactColor(level) {
-        switch(level?.toLowerCase()) {
-            case 'high': return 'severity-high';
-            case 'medium': return 'severity-medium';
-            case 'low': return 'severity-low';
-            default: return 'status-inactive';
-        }
-    },
-
-    testDynamicEndpoint(url) {
-        window.open(url, '_blank');
-        Utils.showMessage('Opened dynamic endpoint for testing', 'info', 'content-discovery-messages');
-    },
-
-    analyzeBehavior(endpointId) {
-        Utils.showMessage(`Analyzing behavior patterns for dynamic endpoint ${endpointId}`, 'info', 'content-discovery-messages');
-    },
-
-    // Enhanced render content list with proper XSS sink handling
+    // Enhanced render content list with proper XSS sink handling and separate URL column
     renderContentList(content) {
         const contentList = document.getElementById('content-list');
         
@@ -1088,12 +1002,33 @@ const ContentDiscovery = {
                 // Parse detailed parameter information
                 const paramDetails = this.parseParameterDetails(item);
                 const endpointDetails = this.parseEndpointDetails(item);
+                
+                // Enhanced dynamic endpoint detection
                 const isDynamic = item.content_type === 'dynamic_endpoint' || 
+                                 item.content_type === 'dynamic' ||
                                  item.source === 'dynamic_analysis' ||
-                                 (item.behavior && item.behavior.includes('dynamic'));
+                                 (item.behavior && item.behavior.toLowerCase().includes('dynamic')) ||
+                                 (item.notes && item.notes.toLowerCase().includes('dynamic')) ||
+                                 (item.type && item.type.toLowerCase().includes('dynamic')) ||
+                                 (item.category && item.category.toLowerCase().includes('dynamic')) ||
+                                 (item.path && item.path.includes('ajax')) ||
+                                 (item.path && item.path.includes('api')) ||
+                                 (item.url && item.url.includes('ajax')) ||
+                                 (item.url && item.url.includes('api'));
+                
+                // Enhanced XSS sink detection  
                 const isXssSink = item.content_type === 'xss_sink' || 
+                                 item.content_type === 'xss' ||
                                  (item.notes && item.notes.toLowerCase().includes('xss')) ||
-                                 (item.risk_level === 'high' && item.source === 'javascript_analysis');
+                                 (item.risk_level === 'high' && item.source === 'javascript_analysis') ||
+                                 (item.title && item.title.toLowerCase().includes('xss')) ||
+                                 (item.path && item.path.toLowerCase().includes('xss')) ||
+                                 (item.vulnerability_type && item.vulnerability_type.toLowerCase().includes('xss')) ||
+                                 (item.type && item.type.toLowerCase().includes('xss')) ||
+                                 (item.category && item.category.toLowerCase().includes('xss'));
+                
+                // Build full URL
+                const fullUrl = this.buildFullUrl(item);
                 
                 return `
                     <tr class="content-row" onclick="ContentDiscovery.showDetailedView(${JSON.stringify(item).replace(/"/g, '&quot;')})" style="cursor: pointer;">
@@ -1102,7 +1037,7 @@ const ContentDiscovery = {
                                 ${isDynamic ? '<span class="dynamic-endpoint-indicator" style="margin-right: 8px;">DYNAMIC</span>' : ''}
                                 ${isXssSink ? '<span style="background: #dc2626; color: white; padding: 2px 6px; border-radius: 3px; font-size: 10px; margin-right: 8px;">XSS SINK</span>' : ''}
                                 ${this.getContentTypeIcon(item.content_type)} 
-                                <span style="color: #9a4dff;">${item.path || item.url}</span>
+                                <span style="color: #9a4dff;">${item.path || item.url || '/'}</span>
                             </div>
                             ${paramDetails.length > 0 ? `
                                 <div style="font-size: 11px; color: #6b46c1; margin-bottom: 2px;">
@@ -1115,6 +1050,11 @@ const ContentDiscovery = {
                                     ${paramDetails.length > 3 ? `<span style="color: #6b46c1;">+${paramDetails.length - 3} more</span>` : ''}
                                 </div>
                             ` : ''}
+                        </td>
+                        <td style="font-family: 'Courier New', monospace; color: #7c3aed; max-width: 250px; word-break: break-all;">
+                            <a href="${fullUrl}" target="_blank" onclick="event.stopPropagation();" style="color: #7c3aed; text-decoration: none; font-size: 12px;" title="${fullUrl}">
+                                ${fullUrl.length > 40 ? fullUrl.substring(0, 40) + '...' : fullUrl}
+                            </a>
                         </td>
                         <td>
                             <span class="status ${this.getContentTypeColor(item.content_type)}">
@@ -1142,18 +1082,15 @@ const ContentDiscovery = {
                                 '<span style="color: #6b46c1; font-size: 12px;">Pending</span>'
                             }
                         </td>
-                        <td style="font-size: 11px; color: #6b46c1; max-width: 150px;">
-                            ${this.getSmartNotes(item, paramDetails, endpointDetails)}
-                        </td>
                         <td>
                             <div style="display: flex; gap: 4px; flex-wrap: wrap;">
-                                <button onclick="event.stopPropagation(); window.open('${item.url}', '_blank')" class="btn btn-secondary btn-small">Open</button>
+                                <button onclick="event.stopPropagation(); window.open('${fullUrl}', '_blank')" class="btn btn-secondary btn-small">Open</button>
                                 ${isXssSink ? 
-                                    `<button onclick="event.stopPropagation(); ContentDiscovery.testXSS('${item.url}')" class="btn btn-danger btn-small">XSS</button>` : 
+                                    `<button onclick="event.stopPropagation(); ContentDiscovery.testXSS('${fullUrl}')" class="btn btn-danger btn-small">XSS</button>` : 
                                     ''
                                 }
                                 ${isDynamic ? 
-                                    `<button onclick="event.stopPropagation(); ContentDiscovery.testDynamicEndpoint('${item.url}')" class="btn btn-success btn-small">Dynamic</button>` : 
+                                    `<button onclick="event.stopPropagation(); ContentDiscovery.testDynamicEndpoint('${fullUrl}')" class="btn btn-success btn-small">Dynamic</button>` : 
                                     ''
                                 }
                             </div>
@@ -1166,21 +1103,79 @@ const ContentDiscovery = {
         }
     },
 
+    // Build full URL from item data
+    buildFullUrl(item) {
+        // If item has a full URL, use it
+        if (item.url && (item.url.startsWith('http://') || item.url.startsWith('https://'))) {
+            return item.url;
+        }
+        
+        // Build URL from components
+        const protocol = item.protocol || 'https';
+        const subdomain = item.subdomain || item.host || item.hostname;
+        const path = item.path || item.url || '/';
+        
+        if (subdomain) {
+            return `${protocol}://${subdomain}${path.startsWith('/') ? path : '/' + path}`;
+        }
+        
+        // Fallback
+        return item.url || item.path || '/';
+    },
+
     // Update content stats including dynamic endpoints
     updateContentStats(content) {
         const totalEndpoints = content.length;
-        const dynamicEndpoints = content.filter(c => 
-            c.content_type === 'dynamic_endpoint' || 
-            c.source === 'dynamic_analysis' ||
-            (c.behavior && c.behavior.includes('dynamic'))
-        ).length;
-        const xssSinks = content.filter(c => c.content_type === 'xss_sink').length;
+        
+        // Enhanced dynamic endpoint detection - check multiple possible indicators
+        const dynamicEndpoints = content.filter(c => {
+            return c.content_type === 'dynamic_endpoint' || 
+                   c.content_type === 'dynamic' ||
+                   c.source === 'dynamic_analysis' ||
+                   (c.behavior && c.behavior.toLowerCase().includes('dynamic')) ||
+                   (c.notes && c.notes.toLowerCase().includes('dynamic')) ||
+                   (c.type && c.type.toLowerCase().includes('dynamic')) ||
+                   (c.category && c.category.toLowerCase().includes('dynamic')) ||
+                   (c.path && c.path.includes('ajax')) ||
+                   (c.path && c.path.includes('api')) ||
+                   (c.url && c.url.includes('ajax')) ||
+                   (c.url && c.url.includes('api'));
+        }).length;
+        
+        // Enhanced XSS sink detection
+        const xssSinks = content.filter(c => {
+            return c.content_type === 'xss_sink' || 
+                   c.content_type === 'xss' ||
+                   (c.notes && c.notes.toLowerCase().includes('xss')) ||
+                   (c.risk_level === 'high' && c.source === 'javascript_analysis') ||
+                   (c.title && c.title.toLowerCase().includes('xss')) ||
+                   (c.path && c.path.toLowerCase().includes('xss')) ||
+                   (c.vulnerability_type && c.vulnerability_type.toLowerCase().includes('xss')) ||
+                   (c.type && c.type.toLowerCase().includes('xss')) ||
+                   (c.category && c.category.toLowerCase().includes('xss'));
+        }).length;
+        
         const parametersFound = content.reduce((total, c) => {
             const params = this.parseParameterDetails(c);
             return total + params.length;
         }, 0);
-        const formsFound = content.filter(c => c.content_type === 'form').length;
-        const ajaxEndpoints = content.filter(c => c.content_type === 'ajax' || c.content_type === 'api').length;
+        
+        // Enhanced form detection
+        const formsFound = content.filter(c => {
+            return c.content_type === 'form' ||
+                   (c.path && c.path.toLowerCase().includes('form')) ||
+                   (c.url && c.url.toLowerCase().includes('form')) ||
+                   (c.notes && c.notes.toLowerCase().includes('form'));
+        }).length;
+        
+        // Enhanced AJAX/API endpoint detection
+        const ajaxEndpoints = content.filter(c => {
+            return c.content_type === 'ajax' || 
+                   c.content_type === 'api' ||
+                   (c.path && (c.path.includes('/api/') || c.path.includes('ajax'))) ||
+                   (c.url && (c.url.includes('/api/') || c.url.includes('ajax'))) ||
+                   (c.notes && (c.notes.toLowerCase().includes('ajax') || c.notes.toLowerCase().includes('api')));
+        }).length;
 
         const elements = {
             'total-endpoints': totalEndpoints,
@@ -1191,9 +1186,34 @@ const ContentDiscovery = {
             'ajax-endpoints': ajaxEndpoints
         };
 
+        console.log('Content stats update:', {
+            totalEndpoints,
+            dynamicEndpoints, 
+            xssSinks,
+            parametersFound,
+            formsFound,
+            ajaxEndpoints,
+            contentTypes: [...new Set(content.map(c => c.content_type))],
+            sources: [...new Set(content.map(c => c.source))],
+            sampleDynamicItems: content.filter(c => 
+                c.content_type === 'dynamic_endpoint' || 
+                c.source === 'dynamic_analysis' ||
+                (c.path && c.path.includes('api'))
+            ).slice(0, 3),
+            sampleXssSinkItems: content.filter(c => 
+                c.content_type === 'xss_sink' || 
+                (c.notes && c.notes.toLowerCase().includes('xss'))
+            ).slice(0, 3)
+        });
+
         Object.entries(elements).forEach(([id, value]) => {
             const element = document.getElementById(id);
-            if (element) element.textContent = value;
+            if (element) {
+                element.textContent = value;
+                console.log(`Updated ${id} to ${value}`);
+            } else {
+                console.warn(`Element ${id} not found`);
+            }
         });
     },
 
@@ -1322,6 +1342,11 @@ const ContentDiscovery = {
         Utils.showMessage('Opened URL with XSS test payload. Check if alert fires!', 'info');
     },
 
+    testDynamicEndpoint(url) {
+        window.open(url, '_blank');
+        Utils.showMessage('Opened dynamic endpoint for testing', 'info', 'content-discovery-messages');
+    },
+
     // Load targets and other helper methods
     async loadTargets() {
         try {
@@ -1357,7 +1382,15 @@ const ContentDiscovery = {
             });
 
             console.log(`Loaded ${targets.length} targets for content discovery`);
+            
+            // Load subdomains after targets are loaded
             await this.loadSubdomains();
+            
+            // Only load content discovery subdomains if a target is already selected
+            const selectedTarget = document.getElementById('content-discovery-target')?.value;
+            if (selectedTarget) {
+                await this.loadContentDiscoverySubdomains();
+            }
             
         } catch (error) {
             console.error('Failed to load targets for content discovery:', error);
@@ -1365,11 +1398,102 @@ const ContentDiscovery = {
     },
 
     async loadSubdomains() {
-        // Implementation for loading subdomains
+        try {
+            const targetId = document.getElementById('directory-target-filter')?.value;
+            const subdomainSelect = document.getElementById('directory-subdomain-filter');
+            
+            if (!subdomainSelect) return;
+
+            const currentValue = subdomainSelect.value;
+            subdomainSelect.innerHTML = '<option value="">All Subdomains</option>';
+            
+            if (!targetId) {
+                const response = await API.subdomains.getAll({ limit: 1000 });
+                if (response && response.ok) {
+                    const data = await response.json();
+                    const subdomains = data.success ? data.data : [];
+                    
+                    subdomains.forEach(subdomain => {
+                        const option = document.createElement('option');
+                        option.value = subdomain.id;
+                        option.textContent = `${subdomain.subdomain} (${subdomain.target_domain})`;
+                        subdomainSelect.appendChild(option);
+                    });
+                }
+            } else {
+                const response = await API.subdomains.getAll({ 
+                    target_id: targetId,
+                    limit: 1000
+                });
+                
+                if (response && response.ok) {
+                    const data = await response.json();
+                    const subdomains = data.success ? data.data : [];
+                    
+                    subdomains.forEach(subdomain => {
+                        const option = document.createElement('option');
+                        option.value = subdomain.id;
+                        option.textContent = subdomain.subdomain;
+                        subdomainSelect.appendChild(option);
+                    });
+                }
+            }
+            
+            if (currentValue) {
+                const optionExists = Array.from(subdomainSelect.options).some(option => option.value === currentValue);
+                if (optionExists) {
+                    subdomainSelect.value = currentValue;
+                }
+            }
+            
+            console.log(`Loaded subdomains for content discovery filter`);
+            
+        } catch (error) {
+            console.error('Failed to load subdomains for content discovery filter:', error);
+        }
     },
 
     async loadContentDiscoverySubdomains() {
-        // Implementation for loading content discovery subdomains
+        try {
+            const targetId = document.getElementById('content-discovery-target')?.value;
+            const subdomainSelect = document.getElementById('content-discovery-subdomain');
+            
+            if (!subdomainSelect) return;
+
+            const currentValue = subdomainSelect.value;
+            subdomainSelect.innerHTML = '<option value="">All subdomains</option>';
+            
+            if (!targetId) return;
+
+            const response = await API.subdomains.getAll({ 
+                target_id: targetId,
+                limit: 1000
+            });
+            
+            if (response && response.ok) {
+                const data = await response.json();
+                const subdomains = data.success ? data.data : [];
+                
+                subdomains.forEach(subdomain => {
+                    const option = document.createElement('option');
+                    option.value = subdomain.id;
+                    option.textContent = subdomain.subdomain;
+                    subdomainSelect.appendChild(option);
+                });
+                
+                console.log(`Loaded ${subdomains.length} subdomains for content discovery form`);
+            }
+            
+            if (currentValue) {
+                const optionExists = Array.from(subdomainSelect.options).some(option => option.value === currentValue);
+                if (optionExists) {
+                    subdomainSelect.value = currentValue;
+                }
+            }
+            
+        } catch (error) {
+            console.error('Failed to load subdomains for content discovery form:', error);
+        }
     },
 
     // Export functionality
@@ -1393,6 +1517,112 @@ const ContentDiscovery = {
         }
     },
 
+    // Debug method to test XSS sink detection
+    async debugXssSinks() {
+        try {
+            const response = await API.directories.getAll({ limit: 1000 });
+            if (response && response.ok) {
+                const data = await response.json();
+                const content = data.success ? data.data : [];
+                
+                console.log('=== XSS Sink Debug Info ===');
+                console.log(`Total content items: ${content.length}`);
+                
+                // Check all possible XSS sink indicators
+                const xssSinksByType = content.filter(c => c.content_type === 'xss_sink');
+                const xssSinksByNotes = content.filter(c => c.notes && c.notes.toLowerCase().includes('xss'));
+                const xssSinksByRisk = content.filter(c => c.risk_level === 'high' && c.source === 'javascript_analysis');
+                const xssSinksByTitle = content.filter(c => c.title && c.title.toLowerCase().includes('xss'));
+                const xssSinksByPath = content.filter(c => c.path && c.path.toLowerCase().includes('xss'));
+                const xssSinksByVulnType = content.filter(c => c.vulnerability_type && c.vulnerability_type.toLowerCase().includes('xss'));
+                
+                console.log(`XSS sinks by content_type: ${xssSinksByType.length}`);
+                console.log(`XSS sinks by notes: ${xssSinksByNotes.length}`);
+                console.log(`XSS sinks by risk_level: ${xssSinksByRisk.length}`);
+                console.log(`XSS sinks by title: ${xssSinksByTitle.length}`);
+                console.log(`XSS sinks by path: ${xssSinksByPath.length}`);
+                console.log(`XSS sinks by vulnerability_type: ${xssSinksByVulnType.length}`);
+                
+                // Show sample data
+                if (content.length > 0) {
+                    console.log('Sample content item:', content[0]);
+                    console.log('All content types found:', [...new Set(content.map(c => c.content_type))]);
+                }
+                
+                console.log('=== End XSS Sink Debug ===');
+                
+                return {
+                    total: content.length,
+                    xssSinksByType: xssSinksByType.length,
+                    xssSinksByNotes: xssSinksByNotes.length,
+                    sample: content[0]
+                };
+            }
+        } catch (error) {
+            console.error('Debug XSS sinks failed:', error);
+        }
+    },
+
+    // Debug method to test dynamic endpoint detection
+    async debugDynamicEndpoints() {
+        try {
+            const response = await API.directories.getAll({ limit: 1000 });
+            if (response && response.ok) {
+                const data = await response.json();
+                const content = data.success ? data.data : [];
+                
+                console.log('=== Dynamic Endpoints Debug Info ===');
+                console.log(`Total content items: ${content.length}`);
+                
+                // Check all possible dynamic endpoint indicators
+                const dynamicByType = content.filter(c => c.content_type === 'dynamic_endpoint');
+                const dynamicByType2 = content.filter(c => c.content_type === 'dynamic');
+                const dynamicBySource = content.filter(c => c.source === 'dynamic_analysis');
+                const dynamicByBehavior = content.filter(c => c.behavior && c.behavior.toLowerCase().includes('dynamic'));
+                const dynamicByNotes = content.filter(c => c.notes && c.notes.toLowerCase().includes('dynamic'));
+                const dynamicByPath = content.filter(c => (c.path && c.path.includes('ajax')) || (c.path && c.path.includes('api')));
+                const dynamicByUrl = content.filter(c => (c.url && c.url.includes('ajax')) || (c.url && c.url.includes('api')));
+                
+                console.log(`Dynamic by content_type='dynamic_endpoint': ${dynamicByType.length}`);
+                console.log(`Dynamic by content_type='dynamic': ${dynamicByType2.length}`);
+                console.log(`Dynamic by source='dynamic_analysis': ${dynamicBySource.length}`);
+                console.log(`Dynamic by behavior containing 'dynamic': ${dynamicByBehavior.length}`);
+                console.log(`Dynamic by notes containing 'dynamic': ${dynamicByNotes.length}`);
+                console.log(`Dynamic by path containing 'ajax' or 'api': ${dynamicByPath.length}`);
+                console.log(`Dynamic by url containing 'ajax' or 'api': ${dynamicByUrl.length}`);
+                
+                // Show sample data
+                console.log('All content types found:', [...new Set(content.map(c => c.content_type))]);
+                console.log('All sources found:', [...new Set(content.map(c => c.source))]);
+                
+                // Show sample items that might be dynamic
+                const potentialDynamic = content.filter(c => 
+                    c.path?.includes('api') || 
+                    c.url?.includes('api') || 
+                    c.path?.includes('ajax') || 
+                    c.url?.includes('ajax')
+                );
+                console.log(`Potential dynamic endpoints (containing 'api' or 'ajax'): ${potentialDynamic.length}`);
+                if (potentialDynamic.length > 0) {
+                    console.log('Sample potential dynamic items:', potentialDynamic.slice(0, 3));
+                }
+                
+                console.log('=== End Dynamic Endpoints Debug ===');
+                
+                return {
+                    total: content.length,
+                    dynamicByType: dynamicByType.length,
+                    dynamicBySource: dynamicBySource.length,
+                    potentialDynamic: potentialDynamic.length,
+                    contentTypes: [...new Set(content.map(c => c.content_type))],
+                    sources: [...new Set(content.map(c => c.source))]
+                };
+            }
+        } catch (error) {
+            console.error('Debug dynamic endpoints failed:', error);
+        }
+    },
+
     // Cleanup method
     cleanup() {
         this.stopAutoRefresh();
@@ -1403,3 +1633,7 @@ const ContentDiscovery = {
 };
 
 window.ContentDiscovery = ContentDiscovery;
+
+// Add debug methods to window for easy access
+window.debugXssSinks = () => ContentDiscovery.debugXssSinks();
+window.debugDynamicEndpoints = () => ContentDiscovery.debugDynamicEndpoints();
