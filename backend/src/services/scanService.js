@@ -798,78 +798,549 @@ class ScanService {
    * Vulnerability scan
    */
   async runVulnerabilityScan(scan, target) {
-    console.log(`Running vulnerability scan for: ${target.domain}`);
-    
-    await ScanJob.updateProgress(scan.id, 20);
-
-    try {
-      // Basic vulnerability checks - in production you'd use nuclei or similar
-      const vulnerabilities = [];
-      let riskScore = 0;
+      console.log(`⚠️ Running vulnerability scan for: ${target.domain}`);
       
-      // Check for common security headers
+      await ScanJob.updateProgress(scan.id, 5);
+
       try {
-        const { stdout } = await execAsync(`curl -s -I http://${target.domain}`, {
-          timeout: 15000
-        });
-        
-        const headers = stdout.toLowerCase();
-        
-        if (!headers.includes('x-frame-options')) {
-          vulnerabilities.push({
-            type: 'Missing Security Header',
-            severity: 'Medium',
-            title: 'Missing X-Frame-Options Header',
-            description: 'The X-Frame-Options header is not set, which may allow clickjacking attacks.'
-          });
-          riskScore += 5;
-        }
-        
-        if (!headers.includes('x-content-type-options')) {
-          vulnerabilities.push({
-            type: 'Missing Security Header',
-            severity: 'Low',
-            title: 'Missing X-Content-Type-Options Header',
-            description: 'The X-Content-Type-Options header is not set.'
-          });
-          riskScore += 2;
-        }
-        
-        if (!headers.includes('strict-transport-security')) {
-          vulnerabilities.push({
-            type: 'Missing Security Header',
-            severity: 'Medium',
-            title: 'Missing HSTS Header',
-            description: 'HTTP Strict Transport Security header is not configured.'
-          });
-          riskScore += 4;
-        }
-        
-      } catch {
-        // Could not check headers
+          // Parse scan config
+          const config = Utils.safeJsonParse(scan.config, {});
+          const {
+              profile = 'basic',
+              subdomain_id = null,
+              scan_scope = 'all_subdomains',
+              include_headers_check = true,
+              include_ssl_check = true,
+              include_xss_check = false,
+              include_sqli_check = false,
+              include_directory_traversal = false
+          } = config;
+
+          console.log('Vulnerability scan config:', config);
+
+          let subdomainsToScan = [];
+          let vulnerabilities = [];
+          let scanResults = {
+              profile: profile,
+              scan_scope: scan_scope,
+              total_subdomains_scanned: 0,
+              total_vulnerabilities: 0,
+              vulnerabilities: [],
+              scan_summary: {},
+              scan_timestamp: new Date().toISOString()
+          };
+
+          // Step 1: Determine what to scan
+          if (subdomain_id && scan_scope === 'single_subdomain') {
+              // Scan specific subdomain
+              console.log(`🎯 Scanning specific subdomain ID: ${subdomain_id}`);
+              
+              if (Subdomain) {
+                  const subdomain = await knex('subdomains')
+                      .where('id', subdomain_id)
+                      .where('target_id', target.id)
+                      .first();
+                  
+                  if (subdomain) {
+                      subdomainsToScan = [subdomain];
+                      console.log(`✅ Found specific subdomain: ${subdomain.subdomain}`);
+                  } else {
+                      throw new Error(`Subdomain with ID ${subdomain_id} not found`);
+                  }
+              } else {
+                  throw new Error('Subdomain model not available');
+              }
+          } else {
+              // Scan all subdomains
+              console.log(`🌐 Scanning all subdomains for target: ${target.domain}`);
+              
+              if (Subdomain) {
+                  subdomainsToScan = await knex('subdomains')
+                      .where('target_id', target.id)
+                      .where('status', 'active') // Only scan active subdomains
+                      .select('*');
+                  
+                  console.log(`✅ Found ${subdomainsToScan.length} active subdomains to scan`);
+                  
+                  // If no subdomains found, create and scan root domain
+                  if (subdomainsToScan.length === 0) {
+                      console.log(`⚠️ No active subdomains found, scanning root domain: ${target.domain}`);
+                      subdomainsToScan = [{
+                          id: null,
+                          subdomain: target.domain,
+                          target_id: target.id,
+                          status: 'active'
+                      }];
+                  }
+              } else {
+                  // Fallback to root domain only
+                  console.log(`⚠️ Subdomain model not available, scanning root domain only`);
+                  subdomainsToScan = [{
+                      id: null,
+                      subdomain: target.domain,
+                      target_id: target.id,
+                      status: 'active'
+                  }];
+              }
+          }
+
+          await ScanJob.updateProgress(scan.id, 15);
+
+          // Step 2: Scan each subdomain
+          console.log(`🔍 Starting vulnerability scan on ${subdomainsToScan.length} subdomain(s)`);
+          
+          for (let i = 0; i < subdomainsToScan.length; i++) {
+              const subdomain = subdomainsToScan[i];
+              
+              console.log(`🔄 Scanning subdomain ${i + 1}/${subdomainsToScan.length}: ${subdomain.subdomain}`);
+              
+              try {
+                  // Run vulnerability checks for this subdomain
+                  const subdomainVulns = await this.scanSubdomainForVulnerabilities(
+                      subdomain, 
+                      target, 
+                      config
+                  );
+                  
+                  // Add subdomain context to vulnerabilities
+                  subdomainVulns.forEach(vuln => {
+                      vuln.subdomain_id = subdomain.id;
+                      vuln.subdomain = subdomain.subdomain;
+                      vuln.target_id = target.id;
+                      vuln.scan_job_id = scan.id;
+                  });
+                  
+                  vulnerabilities.push(...subdomainVulns);
+                  
+                  console.log(`✅ Found ${subdomainVulns.length} vulnerabilities on ${subdomain.subdomain}`);
+                  
+              } catch (subdomainError) {
+                  console.error(`❌ Failed to scan ${subdomain.subdomain}:`, subdomainError.message);
+                  
+                  // Add scan error as info-level vulnerability
+                  vulnerabilities.push({
+                      title: `Scan Error on ${subdomain.subdomain}`,
+                      description: `Failed to complete vulnerability scan: ${subdomainError.message}`,
+                      severity: 'info',
+                      status: 'open',
+                      url: `https://${subdomain.subdomain}`,
+                      method: 'GET',
+                      subdomain_id: subdomain.id,
+                      subdomain: subdomain.subdomain,
+                      target_id: target.id,
+                      scan_job_id: scan.id
+                  });
+              }
+              
+              // Update progress
+              const progressPercent = 15 + ((i + 1) / subdomainsToScan.length) * 70;
+              await ScanJob.updateProgress(scan.id, Math.round(progressPercent));
+              
+              // Small delay between subdomain scans
+              if (i < subdomainsToScan.length - 1) {
+                  await new Promise(resolve => setTimeout(resolve, 500));
+              }
+          }
+
+          await ScanJob.updateProgress(scan.id, 90);
+
+          // Step 3: Store vulnerabilities in database
+          if (vulnerabilities.length > 0 && Vulnerability) {
+              try {
+                  console.log(`💾 Storing ${vulnerabilities.length} vulnerabilities in database`);
+                  await Vulnerability.bulkCreate(vulnerabilities);
+                  console.log(`✅ Successfully stored vulnerabilities`);
+              } catch (storeError) {
+                  console.error('Failed to store vulnerabilities in database:', storeError);
+                  // Don't fail the scan, just log the error
+              }
+          }
+
+          // Step 4: Generate scan summary
+          const severityCounts = {
+              critical: vulnerabilities.filter(v => v.severity === 'critical').length,
+              high: vulnerabilities.filter(v => v.severity === 'high').length,
+              medium: vulnerabilities.filter(v => v.severity === 'medium').length,
+              low: vulnerabilities.filter(v => v.severity === 'low').length,
+              info: vulnerabilities.filter(v => v.severity === 'info').length
+          };
+
+          scanResults = {
+              profile: profile,
+              scan_scope: scan_scope,
+              total_subdomains_scanned: subdomainsToScan.length,
+              total_vulnerabilities: vulnerabilities.length,
+              severity_breakdown: severityCounts,
+              vulnerabilities: vulnerabilities,
+              subdomains_scanned: subdomainsToScan.map(s => s.subdomain),
+              scan_config: config,
+              scan_timestamp: new Date().toISOString(),
+              target_domain: target.domain,
+              scan_duration_seconds: Math.round((Date.now() - Date.parse(scan.created_at)) / 1000)
+          };
+
+          console.log(`🎉 Vulnerability scan completed for ${target.domain}:`);
+          console.log(`   📊 Subdomains scanned: ${subdomainsToScan.length}`);
+          console.log(`   ⚠️ Total vulnerabilities: ${vulnerabilities.length}`);
+          console.log(`   🔴 Critical: ${severityCounts.critical}`);
+          console.log(`   🟠 High: ${severityCounts.high}`);
+          console.log(`   🟡 Medium: ${severityCounts.medium}`);
+          console.log(`   🟢 Low: ${severityCounts.low}`);
+          console.log(`   🔵 Info: ${severityCounts.info}`);
+
+          await ScanJob.updateProgress(scan.id, 100);
+          return scanResults;
+
+      } catch (error) {
+          console.error(`❌ Vulnerability scan failed for ${target.domain}:`, error);
+          throw new Error(`Vulnerability scan failed: ${error.message}`);
+      }
+  }
+
+  async scanSubdomainForVulnerabilities(subdomain, target, config) {
+      const vulnerabilities = [];
+      const subdomainUrl = subdomain.subdomain;
+      
+      console.log(`🔍 Scanning ${subdomainUrl} for vulnerabilities...`);
+
+      // Test both HTTP and HTTPS
+      const protocols = ['https', 'http'];
+      
+      for (const protocol of protocols) {
+          const baseUrl = `${protocol}://${subdomainUrl}`;
+          
+          try {
+              // Basic connectivity test
+              const { stdout: statusCheck } = await execAsync(
+                  `curl -s -o /dev/null -w "%{http_code}" -m 10 --connect-timeout 5 "${baseUrl}"`, 
+                  { timeout: 15000 }
+              );
+              
+              const statusCode = parseInt(statusCheck.trim());
+              
+              if (!statusCode || statusCode === 0) {
+                  console.log(`⚠️ ${baseUrl} is not responding, skipping vulnerability checks`);
+                  continue;
+              }
+              
+              console.log(`✅ ${baseUrl} responded with status ${statusCode}`);
+
+              // Security Headers Check
+              if (config.include_headers_check) {
+                  const headerVulns = await this.checkSecurityHeaders(baseUrl, subdomain);
+                  vulnerabilities.push(...headerVulns);
+              }
+
+              // SSL/TLS Check
+              if (config.include_ssl_check && protocol === 'https') {
+                  const sslVulns = await this.checkSSLConfiguration(baseUrl, subdomain);
+                  vulnerabilities.push(...sslVulns);
+              }
+
+              // XSS Check
+              if (config.include_xss_check) {
+                  const xssVulns = await this.checkXSSVulnerabilities(baseUrl, subdomain);
+                  vulnerabilities.push(...xssVulns);
+              }
+
+              // SQL Injection Check
+              if (config.include_sqli_check) {
+                  const sqliVulns = await this.checkSQLInjection(baseUrl, subdomain);
+                  vulnerabilities.push(...sqliVulns);
+              }
+
+              // Directory Traversal Check
+              if (config.include_directory_traversal) {
+                  const dirTraversalVulns = await this.checkDirectoryTraversal(baseUrl, subdomain);
+                  vulnerabilities.push(...dirTraversalVulns);
+              }
+
+              // Only test one protocol if we get a successful response
+              break;
+              
+          } catch (protocolError) {
+              console.log(`⚠️ Failed to test ${baseUrl}: ${protocolError.message}`);
+              continue;
+          }
       }
 
-      await ScanJob.updateProgress(scan.id, 80);
-
-      const results = {
-        vulnerabilities: vulnerabilities,
-        total_vulnerabilities: vulnerabilities.length,
-        risk_score: riskScore,
-        max_severity: vulnerabilities.length > 0 ? 
-          vulnerabilities.reduce((max, vuln) => 
-            vuln.severity === 'High' ? 'High' : 
-            vuln.severity === 'Medium' && max !== 'High' ? 'Medium' : max, 'Low') : 'None',
-        scan_timestamp: new Date().toISOString(),
-        note: 'Basic vulnerability scan - install nuclei for comprehensive testing'
-      };
-
-      await ScanJob.updateProgress(scan.id, 100);
-      return results;
-      
-    } catch (error) {
-      throw new Error(`Vulnerability scan failed: ${error.message}`);
-    }
+      return vulnerabilities;
   }
+
+  /**
+   * Check for missing security headers
+   */
+  async checkSecurityHeaders(baseUrl, subdomain) {
+      const vulnerabilities = [];
+      
+      try {
+          const { stdout } = await execAsync(`curl -s -I "${baseUrl}"`, { timeout: 10000 });
+          const headers = stdout.toLowerCase();
+          
+          // Check for missing security headers
+          const securityHeaders = [
+              {
+                  header: 'x-frame-options',
+                  name: 'Missing X-Frame-Options Header',
+                  severity: 'medium',
+                  description: 'The X-Frame-Options header is not set, which may allow clickjacking attacks.'
+              },
+              {
+                  header: 'x-content-type-options',
+                  name: 'Missing X-Content-Type-Options Header', 
+                  severity: 'low',
+                  description: 'The X-Content-Type-Options header is not set, which may allow MIME type sniffing.'
+              },
+              {
+                  header: 'strict-transport-security',
+                  name: 'Missing HSTS Header',
+                  severity: 'medium',
+                  description: 'HTTP Strict Transport Security header is not configured.'
+              },
+              {
+                  header: 'x-xss-protection',
+                  name: 'Missing X-XSS-Protection Header',
+                  severity: 'low',
+                  description: 'The X-XSS-Protection header is not set.'
+              },
+              {
+                  header: 'content-security-policy',
+                  name: 'Missing Content Security Policy',
+                  severity: 'medium',
+                  description: 'Content Security Policy header is not configured.'
+              }
+          ];
+          
+          securityHeaders.forEach(check => {
+              if (!headers.includes(check.header)) {
+                  vulnerabilities.push({
+                      title: check.name,
+                      description: check.description,
+                      severity: check.severity,
+                      status: 'open',
+                      url: baseUrl,
+                      method: 'GET',
+                      proof_of_concept: `curl -I "${baseUrl}" | grep -i "${check.header}"`,
+                      references: JSON.stringify([
+                          'https://owasp.org/www-project-secure-headers/',
+                          'https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers'
+                      ])
+                  });
+              }
+          });
+          
+      } catch (error) {
+          console.error(`Failed to check security headers for ${baseUrl}:`, error.message);
+      }
+      
+      return vulnerabilities;
+  }
+
+  /**
+   * Check SSL/TLS configuration
+   */
+  async checkSSLConfiguration(baseUrl, subdomain) {
+      const vulnerabilities = [];
+      
+      try {
+          // Check for SSL issues using openssl
+          const hostname = subdomain.subdomain;
+          
+          // Test SSL connection
+          const { stdout, stderr } = await execAsync(
+              `echo | timeout 10 openssl s_client -connect ${hostname}:443 -servername ${hostname} 2>&1`, 
+              { timeout: 15000 }
+          );
+          
+          const output = stdout + stderr;
+          
+          // Check for weak cipher suites
+          if (output.includes('RC4') || output.includes('DES') || output.includes('MD5')) {
+              vulnerabilities.push({
+                  title: 'Weak SSL Cipher Suite',
+                  description: 'The server supports weak cryptographic cipher suites.',
+                  severity: 'medium',
+                  status: 'open',
+                  url: baseUrl,
+                  method: 'SSL',
+                  proof_of_concept: `openssl s_client -connect ${hostname}:443 -cipher 'RC4:DES:MD5'`
+              });
+          }
+          
+          // Check for expired certificate
+          if (output.includes('certificate has expired') || output.includes('certificate is not yet valid')) {
+              vulnerabilities.push({
+                  title: 'SSL Certificate Expired or Invalid',
+                  description: 'The SSL certificate is expired or not yet valid.',
+                  severity: 'high',
+                  status: 'open',
+                  url: baseUrl,
+                  method: 'SSL',
+                  proof_of_concept: `openssl s_client -connect ${hostname}:443 -servername ${hostname}`
+              });
+          }
+          
+          // Check for self-signed certificate
+          if (output.includes('self signed certificate')) {
+              vulnerabilities.push({
+                  title: 'Self-Signed SSL Certificate',
+                  description: 'The server uses a self-signed SSL certificate.',
+                  severity: 'medium',
+                  status: 'open',
+                  url: baseUrl,
+                  method: 'SSL',
+                  proof_of_concept: `openssl s_client -connect ${hostname}:443`
+              });
+          }
+          
+      } catch (error) {
+          console.error(`Failed to check SSL configuration for ${baseUrl}:`, error.message);
+      }
+      
+      return vulnerabilities;
+  }
+
+  /**
+   * Basic XSS vulnerability check
+   */
+  async checkXSSVulnerabilities(baseUrl, subdomain) {
+      const vulnerabilities = [];
+      
+      try {
+          // Test basic XSS payload
+          const xssPayload = encodeURIComponent('<script>alert(1)</script>');
+          const testUrl = `${baseUrl}/?q=${xssPayload}`;
+          
+          const { stdout } = await execAsync(`curl -s "${testUrl}"`, { timeout: 10000 });
+          
+          // Check if payload is reflected without encoding
+          if (stdout.includes('<script>alert(1)</script>')) {
+              vulnerabilities.push({
+                  title: 'Reflected Cross-Site Scripting (XSS)',
+                  description: 'The application reflects user input without proper encoding, allowing XSS attacks.',
+                  severity: 'high',
+                  status: 'open',
+                  url: testUrl,
+                  method: 'GET',
+                  proof_of_concept: `curl "${testUrl}"`,
+                  references: JSON.stringify([
+                      'https://owasp.org/www-community/attacks/xss/',
+                      'https://cheatsheetseries.owasp.org/cheatsheets/Cross_Site_Scripting_Prevention_Cheat_Sheet.html'
+                  ])
+              });
+          }
+          
+      } catch (error) {
+          console.error(`Failed to check XSS vulnerabilities for ${baseUrl}:`, error.message);
+      }
+      
+      return vulnerabilities;
+  }
+
+  /**
+   * Basic SQL injection check
+   */
+  async checkSQLInjection(baseUrl, subdomain) {
+      const vulnerabilities = [];
+      
+      try {
+          // Test basic SQL injection payload
+          const sqlPayload = encodeURIComponent("' OR '1'='1");
+          const testUrl = `${baseUrl}/?id=${sqlPayload}`;
+          
+          const { stdout } = await execAsync(`curl -s "${testUrl}"`, { timeout: 10000 });
+          
+          // Look for database error patterns
+          const errorPatterns = [
+              'mysql_fetch_array',
+              'ORA-01756',
+              'Microsoft OLE DB Provider for ODBC Drivers',
+              'Microsoft JET Database Engine',
+              'SQLite/JDBCDriver',
+              'PostgreSQL query failed',
+              'Warning: pg_'
+          ];
+          
+          const foundError = errorPatterns.some(pattern => 
+              stdout.toLowerCase().includes(pattern.toLowerCase())
+          );
+          
+          if (foundError) {
+              vulnerabilities.push({
+                  title: 'SQL Injection Vulnerability',
+                  description: 'The application appears to be vulnerable to SQL injection attacks.',
+                  severity: 'critical',
+                  status: 'open',
+                  url: testUrl,
+                  method: 'GET',
+                  proof_of_concept: `curl "${testUrl}"`,
+                  references: JSON.stringify([
+                      'https://owasp.org/www-community/attacks/SQL_Injection',
+                      'https://cheatsheetseries.owasp.org/cheatsheets/SQL_Injection_Prevention_Cheat_Sheet.html'
+                  ])
+              });
+          }
+          
+      } catch (error) {
+          console.error(`Failed to check SQL injection for ${baseUrl}:`, error.message);
+      }
+      
+      return vulnerabilities;
+  }
+
+  /**
+   * Basic directory traversal check
+   */
+  async checkDirectoryTraversal(baseUrl, subdomain) {
+      const vulnerabilities = [];
+      
+      try {
+          // Test directory traversal payloads
+          const traversalPayloads = [
+              '../../../etc/passwd',
+              '..\\..\\..\\windows\\system32\\drivers\\etc\\hosts',
+              '....//....//....//etc/passwd'
+          ];
+          
+          for (const payload of traversalPayloads) {
+              const encodedPayload = encodeURIComponent(payload);
+              const testUrl = `${baseUrl}/?file=${encodedPayload}`;
+              
+              try {
+                  const { stdout } = await execAsync(`curl -s "${testUrl}"`, { timeout: 8000 });
+                  
+                  // Check for signs of successful directory traversal
+                  if (stdout.includes('root:x:0:0:') || stdout.includes('# localhost name resolution')) {
+                      vulnerabilities.push({
+                          title: 'Directory Traversal Vulnerability',
+                          description: 'The application is vulnerable to directory traversal attacks.',
+                          severity: 'high',
+                          status: 'open',
+                          url: testUrl,
+                          method: 'GET',
+                          proof_of_concept: `curl "${testUrl}"`,
+                          references: JSON.stringify([
+                              'https://owasp.org/www-community/attacks/Path_Traversal',
+                              'https://portswigger.net/web-security/file-path-traversal'
+                          ])
+                      });
+                      break; // Found one, no need to test more
+                  }
+              } catch (payloadError) {
+                  // Continue with next payload
+                  continue;
+              }
+          }
+          
+      } catch (error) {
+          console.error(`Failed to check directory traversal for ${baseUrl}:`, error.message);
+      }
+      
+      return vulnerabilities;
+  }
+
+
+
 
   /**
    * Full comprehensive scan

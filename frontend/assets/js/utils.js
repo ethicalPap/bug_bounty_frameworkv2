@@ -1,4 +1,4 @@
-// frontend/assets/js/utils.js
+// frontend/assets/js/utils.js - Updated with vulnerability scan support
 
 // State management
 const AppState = {
@@ -47,7 +47,11 @@ const Utils = {
             const originalTexts = {
                 'auth-submit-btn': AppState.isRegistering ? 'Register' : 'Login',
                 'add-target-btn': 'Add Target',
-                'start-scan-btn': '🚀 Start Scan'
+                'start-scan-btn': '🚀 Start Subdomain Scan',
+                'start-vuln-scan-btn': '⚠️ Start Vuln Scan',
+                'start-content-scan-btn': '🕷️ Start Content Scan',
+                'start-port-scan-btn': '🔌 Start Port Scan',
+                'start-js-analysis-btn': '📄 Start JS Analysis'
             };
             button.innerHTML = originalTexts[buttonId] || 'Submit';
         }
@@ -118,6 +122,8 @@ const Utils = {
                 case 'ports': return 'PortScanning';
                 case 'jsfiles': return 'JSAnalysis';
                 case 'js-files': return 'JSAnalysis';
+                case 'vulnerabilities': return 'Vulnerabilities';
+                case 'content-discovery': return 'ContentDiscovery';
                 default: return Utils.capitalizeFirst(type);
             }
         };

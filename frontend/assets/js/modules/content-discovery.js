@@ -344,23 +344,27 @@ const ContentDiscovery = {
             try {
                 const results = typeof scan.results === 'string' ? JSON.parse(scan.results) : scan.results;
                 
-                // Try multiple possible field names based on backend implementation
+                // FIXED: Prioritize actual count fields over arrays
                 contentCount = 
-                    results.total_count ||           // Generic total
+                    results.total_items ||           // ✅ Backend returns this as the main count
+                    results.total_count ||           // Generic total fallback
+                    results.endpoints ||             // Count of endpoint-type items
                     results.endpoints_found ||       // Legacy field name  
-                    results.discovered_content ||    // From target stats
-                    results.content_discovered ||    // Alternative naming
-                    results.endpoints ||             // Direct endpoints count
-                    results.directories?.length ||   // Directory-based results
-                    results.files?.length ||         // Files discovered
-                    results.paths?.length ||         // Paths discovered
                     results.content_count ||         // Alternative count field
+                    results.content_discovered ||    // Alternative naming
+                    // FIXED: Only use array lengths as last resort, not the arrays themselves
+                    results.discovered_content?.length ||  // ✅ Get LENGTH of array, not array itself
+                    results.directories?.length ||   // Directory-based results length
+                    results.files?.length ||         // Files discovered length
+                    results.paths?.length ||         // Paths discovered length
                     (results.endpoints_discovered ? results.endpoints_discovered.length : 0) ||
                     (results.content_items ? results.content_items.length : 0) ||
                     0;
                     
                 console.log(`📊 Content count extraction for scan ${scan.id}:`, {
-                    results: results,
+                    total_items: results.total_items,
+                    discovered_content_length: results.discovered_content?.length,
+                    endpoints: results.endpoints,
                     extracted_count: contentCount,
                     available_fields: Object.keys(results)
                 });
@@ -989,57 +993,70 @@ const ContentDiscovery = {
     downloadCSV(data, scanId) {
         let csvContent = 'Scan ID,Target,Scan Type,Status,Created,Completed,Total Endpoints\n';
         
-        // FIXED: Get endpoint count with multiple fallbacks
+        // FIXED: Get endpoint count correctly - use total_items directly
         const getEndpointCount = (results) => {
-            return results.total_count || 
-                   results.endpoints_found || 
-                   results.discovered_content || 
-                   results.content_discovered ||
-                   results.endpoints || 
-                   results.directories?.length || 
-                   results.files?.length ||
-                   results.paths?.length ||
-                   results.content_count ||
-                   (results.endpoints_discovered ? results.endpoints_discovered.length : 0) ||
-                   (results.content_items ? results.content_items.length : 0) ||
-                   0;
+            // Use the actual count fields, not arrays
+            return results.total_items ||           // Primary count field from backend
+                results.total_count || 
+                results.endpoints ||
+                results.content_count ||
+                // Only as last resort, check array lengths
+                (Array.isArray(results.discovered_content) ? results.discovered_content.length : 0) ||
+                (Array.isArray(results.directories) ? results.directories.length : 0) ||
+                (Array.isArray(results.endpoints_discovered) ? results.endpoints_discovered.length : 0) ||
+                0;
         };
         
         const endpointCount = getEndpointCount(data.results);
         
         csvContent += `${data.scan_id},"${data.target}","${data.scan_type}","${data.status}","${data.created_at}","${data.completed_at || 'N/A'}","${endpointCount}"\n\n`;
         
-        // FIXED: Add endpoints with multiple possible data sources
-        const endpoints = data.results.endpoints || 
-                         data.results.endpoints_discovered ||
-                         data.results.content_items ||
-                         data.results.discovered_content ||
-                         data.results.directories || 
-                         [];
-                         
-        if (Array.isArray(endpoints) && endpoints.length > 0) {
+        // FIXED: Handle endpoint details properly
+        let endpoints = [];
+        
+        // Try to get actual endpoint data from multiple possible sources
+        if (Array.isArray(data.results.discovered_content)) {
+            endpoints = data.results.discovered_content;
+        } else if (Array.isArray(data.results.endpoints_discovered)) {
+            endpoints = data.results.endpoints_discovered;
+        } else if (Array.isArray(data.results.directories)) {
+            endpoints = data.results.directories;
+        } else if (Array.isArray(data.results.content_items)) {
+            endpoints = data.results.content_items;
+        }
+        
+        if (endpoints.length > 0) {
             csvContent += 'Discovered Endpoints\n';
             csvContent += 'Endpoint,Status Code,Title,Type\n';
+            
             endpoints.forEach(endpoint => {
-                // Handle different endpoint object structures
-                const path = endpoint.path || endpoint.url || endpoint.endpoint || endpoint;
+                // Handle different endpoint object structures safely
+                const path = endpoint.path || endpoint.url || endpoint.endpoint || String(endpoint);
                 const statusCode = endpoint.status_code || endpoint.status || 'N/A';
-                const title = endpoint.title || endpoint.name || 'N/A';
+                const title = (endpoint.title || endpoint.name || 'N/A').replace(/"/g, '""'); // Escape quotes
                 const type = endpoint.type || endpoint.content_type || 'N/A';
                 
                 csvContent += `"${path}","${statusCode}","${title}","${type}"\n`;
             });
+        } else {
+            csvContent += 'No detailed endpoint data available\n';
         }
         
-        // Add XSS sinks if available
-        const xssSinks = data.results.xss_sinks || data.results.sinks || [];
-        if (Array.isArray(xssSinks) && xssSinks.length > 0) {
+        // FIXED: Handle XSS sinks data properly
+        let xssSinks = [];
+        if (Array.isArray(data.results.xss_sinks)) {
+            xssSinks = data.results.xss_sinks;
+        } else if (Array.isArray(data.results.sinks)) {
+            xssSinks = data.results.sinks;
+        }
+        
+        if (xssSinks.length > 0) {
             csvContent += '\nXSS Sinks Found\n';
             csvContent += 'Sink,Type,Risk Level\n';
             xssSinks.forEach(sink => {
-                const sinkPath = sink.path || sink.url || sink;
-                const sinkType = sink.type || 'XSS Sink';
-                const riskLevel = sink.risk_level || sink.severity || 'Medium';
+                const sinkPath = (sink.path || sink.url || String(sink)).replace(/"/g, '""');
+                const sinkType = (sink.type || 'XSS Sink').replace(/"/g, '""');
+                const riskLevel = (sink.risk_level || sink.severity || 'Medium').replace(/"/g, '""');
                 csvContent += `"${sinkPath}","${sinkType}","${riskLevel}"\n`;
             });
         }
@@ -1047,11 +1064,7 @@ const ContentDiscovery = {
         this.downloadFile(csvContent, `content_discovery_scan_${scanId}_results.csv`, 'text/csv');
     },
 
-    downloadJSON(data, scanId) {
-        const jsonContent = JSON.stringify(data, null, 2);
-        this.downloadFile(jsonContent, `content_discovery_scan_${scanId}_results.json`, 'application/json');
-    },
-
+    // FIXED: Download XML with correct count extraction  
     downloadXML(data, scanId) {
         let xmlContent = '<?xml version="1.0" encoding="UTF-8"?>\n';
         xmlContent += '<content_discovery_scan_results>\n';
@@ -1062,39 +1075,36 @@ const ContentDiscovery = {
         xmlContent += `  <created_at>${this.escapeXml(data.created_at)}</created_at>\n`;
         xmlContent += `  <completed_at>${this.escapeXml(data.completed_at || 'N/A')}</completed_at>\n`;
         
-        // FIXED: Get endpoint count with multiple fallbacks
+        // FIXED: Get endpoint count correctly
         const getEndpointCount = (results) => {
-            return results.total_count || 
-                   results.endpoints_found || 
-                   results.discovered_content || 
-                   results.content_discovered ||
-                   results.endpoints || 
-                   results.directories?.length || 
-                   results.files?.length ||
-                   results.paths?.length ||
-                   results.content_count ||
-                   (results.endpoints_discovered ? results.endpoints_discovered.length : 0) ||
-                   (results.content_items ? results.content_items.length : 0) ||
-                   0;
+            return results.total_items ||
+                results.total_count || 
+                results.endpoints ||
+                results.content_count ||
+                (Array.isArray(results.discovered_content) ? results.discovered_content.length : 0) ||
+                (Array.isArray(results.directories) ? results.directories.length : 0) ||
+                0;
         };
         
         const endpointCount = getEndpointCount(data.results);
         xmlContent += `  <total_endpoints>${endpointCount}</total_endpoints>\n`;
         xmlContent += '  <results>\n';
         
-        // FIXED: Add endpoints with multiple possible data sources
-        const endpoints = data.results.endpoints || 
-                         data.results.endpoints_discovered ||
-                         data.results.content_items ||
-                         data.results.discovered_content ||
-                         data.results.directories || 
-                         [];
-                         
-        if (Array.isArray(endpoints) && endpoints.length > 0) {
+        // FIXED: Handle endpoint details properly
+        let endpoints = [];
+        if (Array.isArray(data.results.discovered_content)) {
+            endpoints = data.results.discovered_content;
+        } else if (Array.isArray(data.results.endpoints_discovered)) {
+            endpoints = data.results.endpoints_discovered;
+        } else if (Array.isArray(data.results.directories)) {
+            endpoints = data.results.directories;
+        }
+        
+        if (endpoints.length > 0) {
             xmlContent += '    <endpoints>\n';
             endpoints.forEach(endpoint => {
                 xmlContent += `      <endpoint>\n`;
-                const path = endpoint.path || endpoint.url || endpoint.endpoint || endpoint;
+                const path = endpoint.path || endpoint.url || endpoint.endpoint || String(endpoint);
                 const statusCode = endpoint.status_code || endpoint.status || 'N/A';
                 const title = endpoint.title || endpoint.name || 'N/A';
                 const type = endpoint.type || endpoint.content_type || 'N/A';
@@ -1108,13 +1118,19 @@ const ContentDiscovery = {
             xmlContent += '    </endpoints>\n';
         }
         
-        // Add XSS sinks if available
-        const xssSinks = data.results.xss_sinks || data.results.sinks || [];
-        if (Array.isArray(xssSinks) && xssSinks.length > 0) {
+        // Handle XSS sinks
+        let xssSinks = [];
+        if (Array.isArray(data.results.xss_sinks)) {
+            xssSinks = data.results.xss_sinks;
+        } else if (Array.isArray(data.results.sinks)) {
+            xssSinks = data.results.sinks;
+        }
+        
+        if (xssSinks.length > 0) {
             xmlContent += '    <xss_sinks>\n';
             xssSinks.forEach(sink => {
                 xmlContent += `      <sink>\n`;
-                const sinkPath = sink.path || sink.url || sink;
+                const sinkPath = sink.path || sink.url || String(sink);
                 const sinkType = sink.type || 'XSS Sink';
                 const riskLevel = sink.risk_level || sink.severity || 'Medium';
                 

@@ -1,4 +1,4 @@
-// frontend/assets/js/modules/directories.js - FIXED COMPLETE VERSION
+// frontend/assets/js/modules/directories.js - FIXED RESULT PARSING
 
 const Directories = {
     refreshInterval: null,
@@ -324,45 +324,6 @@ const Directories = {
         }
     },
 
-    // FIXED: Extract content discovery count from results - handles multiple backend formats
-    extractContentCount(scan) {
-        let endpointCount = '-';
-        if (scan.status === 'completed' && scan.results) {
-            try {
-                const results = typeof scan.results === 'string' ? JSON.parse(scan.results) : scan.results;
-                
-                // Try multiple possible field names based on backend implementation
-                endpointCount = 
-                    results.total_count ||           // Generic total
-                    results.endpoints_found ||       // Legacy field name  
-                    results.discovered_content ||    // From target stats
-                    results.content_discovered ||    // Alternative naming
-                    results.endpoints ||             // Direct endpoints count
-                    results.directories?.length ||   // Directory-based results
-                    results.files?.length ||         // Files discovered
-                    results.paths?.length ||         // Paths discovered
-                    results.content_count ||         // Alternative count field
-                    (results.endpoints_discovered ? results.endpoints_discovered.length : 0) ||
-                    (results.content_items ? results.content_items.length : 0) ||
-                    0;
-                    
-                console.log(`📊 Content count extraction for scan ${scan.id}:`, {
-                    results: results,
-                    extracted_count: endpointCount,
-                    available_fields: Object.keys(results)
-                });
-                    
-            } catch (error) {
-                console.warn('Failed to parse scan results:', error);
-                endpointCount = 'Parse Error';
-            }
-        } else if (scan.status === 'running' || scan.status === 'pending') {
-            endpointCount = '🔄 Scanning...';
-        }
-        return endpointCount;
-    },
-
-    // FIXED: Update scan status with proper content count extraction  
     updateScanStatus(scans, runningScans) {
         const statusSpan = document.getElementById('scan-status');
         if (!statusSpan) return;
@@ -377,13 +338,27 @@ const Directories = {
         } else {
             const completedScans = scans.filter(scan => scan.status === 'completed').length;
             
-            // FIXED: Use the new extraction logic for total endpoints
+            // FIXED: Use correct property names to calculate total endpoints
             const totalEndpoints = scans
                 .filter(scan => scan.status === 'completed')
                 .reduce((total, scan) => {
-                    const count = this.extractContentCount(scan);
-                    const numericCount = typeof count === 'number' ? count : parseInt(count) || 0;
-                    return total + numericCount;
+                    try {
+                        const results = typeof scan.results === 'string' ? JSON.parse(scan.results) : scan.results;
+                        
+                        // FIXED: Look for the correct property names from the backend
+                        return total + (
+                            results?.total_items ||     // Primary field from backend
+                            results?.endpoints ||       // Secondary field from backend  
+                            results?.discovered_content?.length ||  // Array length
+                            results?.directories?.length ||     // Legacy field
+                            results?.total_count ||     // Legacy field
+                            results?.endpoints_found || // Legacy field
+                            0
+                        );
+                    } catch (error) {
+                        console.warn('Failed to parse scan results:', error);
+                        return total;
+                    }
                 }, 0);
             
             if (completedScans > 0) {
@@ -692,7 +667,6 @@ const Directories = {
         }
     },
 
-    // FIXED: Render scans list with proper content count extraction
     renderScansList(scans) {
         const scansList = document.getElementById('scans-list');
         
@@ -703,10 +677,34 @@ const Directories = {
                 const subdomainName = this.getSubdomainName(scan);
                 const isRunning = scan.status === 'running' || scan.status === 'pending';
                 
-                console.log(`🎯 Content Discovery Scan ${scan.id}: target_domain="${scan.target_domain}", domain="${scan.domain}", target_id="${scan.target_id}", subdomain="${subdomainName}", resolved="${targetName}"`);
+                console.log(`🎯 Content Discovery Scan ${scan.id}: target_domain="${scan.target_domain}", domain="${scan.domain}", target_id="${scan.target_id}", subdomain="${subdomainName}", resolved="${targetName}"`); // Debug log
                 
-                // FIXED: Use the new extraction function
-                const endpointCount = this.extractContentCount(scan);
+                // FIXED: Extract endpoint count from results using correct property names
+                let endpointCount = '-';
+                if (scan.status === 'completed' && scan.results) {
+                    try {
+                        const results = typeof scan.results === 'string' ? JSON.parse(scan.results) : scan.results;
+                        
+                        // FIXED: Look for the actual property names the backend returns
+                        endpointCount = (
+                            results.total_items ||       // Primary field from enhanced content discovery
+                            results.endpoints ||         // Secondary field for just endpoints count
+                            results.discovered_content?.length ||  // If it's an array
+                            results.directories?.length ||     // Legacy field
+                            results.total_count ||       // Legacy field
+                            results.endpoints_found ||   // Legacy field
+                            0
+                        );
+                        
+                        console.log(`📊 Scan ${scan.id} endpoint count: ${endpointCount}`, results); // Debug log
+                        
+                    } catch (error) {
+                        console.warn('Failed to parse scan results for scan', scan.id, ':', error);
+                        endpointCount = 'Parse Error';
+                    }
+                } else if (isRunning) {
+                    endpointCount = '🔄 Scanning...';
+                }
                 
                 return `
                     <tr class="${isRunning ? 'progress-row' : ''}">
@@ -876,46 +874,28 @@ const Directories = {
         }
     },
 
-    // FIXED: Download CSV with proper content count extraction
     downloadCSV(data, scanId) {
         let csvContent = 'Scan ID,Target,Subdomain,Scan Type,Status,Created,Completed,Total Endpoints\n';
         
-        // FIXED: Get endpoint count with multiple fallbacks
-        const getEndpointCount = (results) => {
-            return results.total_count || 
-                   results.endpoints_found || 
-                   results.discovered_content || 
-                   results.content_discovered ||
-                   results.endpoints || 
-                   results.directories?.length || 
-                   results.files?.length ||
-                   results.paths?.length ||
-                   results.content_count ||
-                   (results.endpoints_discovered ? results.endpoints_discovered.length : 0) ||
-                   (results.content_items ? results.content_items.length : 0) ||
-                   0;
-        };
-        
-        const endpointCount = getEndpointCount(data.results);
-        
+        // FIXED: Use correct property names for CSV export
+        const endpointCount = data.results.total_items || data.results.endpoints || data.results.discovered_content?.length || 0;
         csvContent += `${data.scan_id},"${data.target}","${data.subdomain}","${data.scan_type}","${data.status}","${data.created_at}","${data.completed_at || 'N/A'}","${endpointCount}"\n\n`;
         
-        // FIXED: Add endpoints with multiple possible data sources
-        const endpoints = data.results.endpoints || 
-                         data.results.endpoints_discovered ||
-                         data.results.content_items ||
-                         data.results.discovered_content ||
-                         data.results.directories || 
-                         [];
-                         
-        if (Array.isArray(endpoints) && endpoints.length > 0) {
-            csvContent += 'Discovered Endpoints\n';
+        // Add discovered content if available
+        if (data.results.discovered_content && data.results.discovered_content.length > 0) {
+            csvContent += 'Discovered Content\n';
+            csvContent += 'Path,URL,Source,Content Type,Risk Level,Status Code,Title\n';
+            data.results.discovered_content.forEach(item => {
+                csvContent += `"${item.path || 'N/A'}","${item.url || 'N/A'}","${item.source || 'N/A'}","${item.content_type || 'N/A'}","${item.risk_level || 'N/A'}","${item.status_code || 'N/A'}","${item.title || 'N/A'}"\n`;
+            });
+        }
+        
+        // Add legacy endpoints if available  
+        if (data.results.endpoints && data.results.endpoints.length > 0) {
+            csvContent += '\nDiscovered Endpoints\n';
             csvContent += 'Endpoint,Status Code,Title\n';
-            endpoints.forEach(endpoint => {
-                const path = endpoint.path || endpoint.url || endpoint;
-                const statusCode = endpoint.status_code || 'N/A';
-                const title = endpoint.title || 'N/A';
-                csvContent += `"${path}","${statusCode}","${title}"\n`;
+            data.results.endpoints.forEach(endpoint => {
+                csvContent += `"${endpoint.path || endpoint.url}","${endpoint.status_code || 'N/A'}","${endpoint.title || 'N/A'}"\n`;
             });
         }
         
@@ -947,44 +927,36 @@ const Directories = {
         xmlContent += `  <created_at>${this.escapeXml(data.created_at)}</created_at>\n`;
         xmlContent += `  <completed_at>${this.escapeXml(data.completed_at || 'N/A')}</completed_at>\n`;
         
-        // FIXED: Get endpoint count with multiple fallbacks
-        const getEndpointCount = (results) => {
-            return results.total_count || 
-                   results.endpoints_found || 
-                   results.discovered_content || 
-                   results.content_discovered ||
-                   results.endpoints || 
-                   results.directories?.length || 
-                   results.files?.length ||
-                   results.paths?.length ||
-                   results.content_count ||
-                   (results.endpoints_discovered ? results.endpoints_discovered.length : 0) ||
-                   (results.content_items ? results.content_items.length : 0) ||
-                   0;
-        };
-        
-        const endpointCount = getEndpointCount(data.results);
+        // FIXED: Use correct property names for XML export
+        const endpointCount = data.results.total_items || data.results.endpoints || data.results.discovered_content?.length || 0;
         xmlContent += `  <total_endpoints>${endpointCount}</total_endpoints>\n`;
         xmlContent += '  <results>\n';
         
-        // FIXED: Add endpoints with multiple possible data sources
-        const endpoints = data.results.endpoints || 
-                         data.results.endpoints_discovered ||
-                         data.results.content_items ||
-                         data.results.discovered_content ||
-                         data.results.directories || 
-                         [];
-                         
-        if (Array.isArray(endpoints) && endpoints.length > 0) {
+        // Add discovered content
+        if (data.results.discovered_content && data.results.discovered_content.length > 0) {
+            xmlContent += '    <discovered_content>\n';
+            data.results.discovered_content.forEach(item => {
+                xmlContent += `      <item>\n`;
+                xmlContent += `        <path>${this.escapeXml(item.path || 'N/A')}</path>\n`;
+                xmlContent += `        <url>${this.escapeXml(item.url || 'N/A')}</url>\n`;
+                xmlContent += `        <source>${this.escapeXml(item.source || 'N/A')}</source>\n`;
+                xmlContent += `        <content_type>${this.escapeXml(item.content_type || 'N/A')}</content_type>\n`;
+                xmlContent += `        <risk_level>${this.escapeXml(item.risk_level || 'N/A')}</risk_level>\n`;
+                xmlContent += `        <status_code>${this.escapeXml(item.status_code || 'N/A')}</status_code>\n`;
+                xmlContent += `        <title>${this.escapeXml(item.title || 'N/A')}</title>\n`;
+                xmlContent += `      </item>\n`;
+            });
+            xmlContent += '    </discovered_content>\n';
+        }
+        
+        // Add legacy endpoints
+        if (data.results.endpoints && data.results.endpoints.length > 0) {
             xmlContent += '    <endpoints>\n';
-            endpoints.forEach(endpoint => {
+            data.results.endpoints.forEach(endpoint => {
                 xmlContent += `      <endpoint>\n`;
-                const path = endpoint.path || endpoint.url || endpoint;
-                const statusCode = endpoint.status_code || 'N/A';
-                const title = endpoint.title || 'N/A';
-                xmlContent += `        <path>${this.escapeXml(path)}</path>\n`;
-                xmlContent += `        <status_code>${this.escapeXml(statusCode)}</status_code>\n`;
-                xmlContent += `        <title>${this.escapeXml(title)}</title>\n`;
+                xmlContent += `        <path>${this.escapeXml(endpoint.path || endpoint.url)}</path>\n`;
+                xmlContent += `        <status_code>${this.escapeXml(endpoint.status_code || 'N/A')}</status_code>\n`;
+                xmlContent += `        <title>${this.escapeXml(endpoint.title || 'N/A')}</title>\n`;
                 xmlContent += `      </endpoint>\n`;
             });
             xmlContent += '    </endpoints>\n';
