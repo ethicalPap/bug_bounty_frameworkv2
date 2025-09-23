@@ -1,4 +1,4 @@
-// frontend/assets/js/navigation.js - Updated without Dynamic Endpoints tab
+// frontend/assets/js/navigation.js - Updated WITH JS Analysis support
 
 const Navigation = {
     init() {
@@ -81,6 +81,7 @@ const Navigation = {
             'PortScanning',    // Port scanning auto-refresh
             'Directories',     // Directory auto-refresh
             'ContentDiscovery', // Content discovery auto-refresh (now includes dynamic endpoints)
+            'JSAnalysis',      // JS Analysis auto-refresh
             'Vulnerabilities'  // Vuln scanning auto-refresh
         ];
 
@@ -183,17 +184,24 @@ const Navigation = {
                     }
                     break;
                     
+                case 'js-analysis':
+                    if (window.JSAnalysis && typeof window.JSAnalysis.init === 'function') {
+                        await window.JSAnalysis.init();
+                    } else {
+                        this.showModuleNotAvailable('JSAnalysis');
+                    }
+                    break;
+                    
+                case 'api-discovery':
+                    content.innerHTML = this.getPlaceholderContent(tab);
+                    break;
+                    
                 case 'vuln-scanning':
                     if (window.Vulnerabilities && typeof window.Vulnerabilities.init === 'function') {
                         await window.Vulnerabilities.init();
                     } else {
                         this.showModuleNotAvailable('Vulnerabilities');
                     }
-                    break;
-                    
-                case 'js-analysis':
-                case 'api-discovery':
-                    content.innerHTML = this.getPlaceholderContent(tab);
                     break;
                     
                 case 'settings':
@@ -237,7 +245,7 @@ const Navigation = {
                 <div style="margin-top: 15px; font-size: 12px; color: #6b46c1;">
                     <strong>Debug Info:</strong><br>
                     Available modules: ${Object.keys(window).filter(key => 
-                        ['Targets', 'Dashboard', 'Scans', 'Subdomains', 'Directories', 'PortScanning', 'ContentDiscovery', 'Vulnerabilities'].includes(key)
+                        ['Targets', 'Dashboard', 'Scans', 'Subdomains', 'Directories', 'PortScanning', 'ContentDiscovery', 'JSAnalysis', 'Vulnerabilities'].includes(key)
                     ).join(', ') || 'None'}
                 </div>
             </div>
@@ -251,7 +259,8 @@ const Navigation = {
             'directory-target-filter', 
             'port-target-filter', 
             'vuln-scan-target',
-            'content-discovery-target'
+            'content-discovery-target',
+            'js-analysis-target'
         ];
         
         filterIds.forEach(filterId => {
@@ -290,6 +299,14 @@ const Navigation = {
                     window.PortScanning.load();
                 }
                 break;
+            case 'js-analysis':
+                if (window.JSAnalysis && typeof window.JSAnalysis.loadTargets === 'function') {
+                    window.JSAnalysis.loadTargets();
+                }
+                if (window.JSAnalysis && typeof window.JSAnalysis.load === 'function') {
+                    window.JSAnalysis.load();
+                }
+                break;
             case 'vuln-scanning':
                 if (window.Vulnerabilities && typeof window.Vulnerabilities.load === 'function') {
                     window.Vulnerabilities.load();
@@ -300,11 +317,6 @@ const Navigation = {
 
     getPlaceholderContent(tab) {
         const placeholders = {
-            'js-analysis': {
-                title: 'JavaScript Analysis',
-                description: 'Analyze JavaScript files to extract API endpoints, secrets, and sensitive information. Helps identify client-side vulnerabilities and information disclosure.',
-                content: 'Run JS analysis to discover JavaScript files and extract secrets'
-            },
             'api-discovery': {
                 title: 'API Discovery',
                 description: 'Discover REST APIs, GraphQL endpoints, and API documentation. Identifies API endpoints that may be vulnerable to attacks like IDOR, injection, etc.',
@@ -374,6 +386,7 @@ const Navigation = {
                         <div>Live Hosts Module: ${getModuleStatus('Subdomains')}</div>
                         <div>Port Scanning Module: ${getModuleStatus('PortScanning')}</div>
                         <div>Content Discovery Module: ${getModuleStatus('ContentDiscovery')}</div>
+                        <div>JS Analysis Module: ${getModuleStatus('JSAnalysis')}</div>
                         <div>Directories Module: ${getModuleStatus('Directories')}</div>
                         <div>Vulnerabilities Module: ${getModuleStatus('Vulnerabilities')}</div>
                     </div>
@@ -394,6 +407,7 @@ const Navigation = {
                         <div>Subdomains (Live Hosts): ${getModuleStatus('Subdomains')}</div>
                         <div>Directories: ${getModuleStatus('Directories')}</div>
                         <div>Content Discovery (Enhanced): ${getModuleStatus('ContentDiscovery')}</div>
+                        <div>JS Analysis: ${getModuleStatus('JSAnalysis')}</div>
                         <div>PortScanning: ${getModuleStatus('PortScanning')}</div>
                         <div>Vulnerabilities: ${getModuleStatus('Vulnerabilities')}</div>
                     </div>
@@ -401,7 +415,7 @@ const Navigation = {
                 <div class="form-group">
                     <label>Actions</label>
                     <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-                        <button class="btn btn-primary" onclick="console.log('Available modules:', Object.keys(window).filter(k => ['CONFIG', 'Utils', 'API', 'Auth', 'Targets', 'Dashboard', 'Scans', 'Subdomains', 'Directories', 'ContentDiscovery', 'PortScanning', 'Vulnerabilities'].includes(k)))">
+                        <button class="btn btn-primary" onclick="console.log('Available modules:', Object.keys(window).filter(k => ['CONFIG', 'Utils', 'API', 'Auth', 'Targets', 'Dashboard', 'Scans', 'Subdomains', 'Directories', 'ContentDiscovery', 'JSAnalysis', 'PortScanning', 'Vulnerabilities'].includes(k)))">
                             Debug Modules
                         </button>
                         <button class="btn btn-secondary" onclick="Navigation.cleanupPreviousTab(); console.log('✅ Cleaned up all auto-refresh intervals');">
@@ -431,7 +445,7 @@ const Navigation = {
         }
         
         // Reset module intervals
-        const modules = ['Scans', 'Subdomains', 'PortScanning', 'ContentDiscovery', 'Directories', 'Vulnerabilities'];
+        const modules = ['Scans', 'Subdomains', 'PortScanning', 'ContentDiscovery', 'JSAnalysis', 'Directories', 'Vulnerabilities'];
         modules.forEach(moduleName => {
             const module = window[moduleName];
             if (module) {
