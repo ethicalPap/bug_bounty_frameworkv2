@@ -1,4 +1,4 @@
-// frontend/assets/js/modules/port-scanning.js - REDESIGNED TO MIMIC SCANS STYLE
+// frontend/assets/js/modules/port-scanning.js - FIXED RESULT PARSING
 
 const PortScanning = {
     refreshInterval: null,
@@ -422,13 +422,25 @@ const PortScanning = {
             statusSpan.classList.add('status-updating');
         } else {
             const completedScans = scans.filter(scan => scan.status === 'completed').length;
+            
+            // FIXED: Use correct property names to calculate total open ports
             const totalPorts = scans
                 .filter(scan => scan.status === 'completed')
                 .reduce((total, scan) => {
                     try {
                         const results = typeof scan.results === 'string' ? JSON.parse(scan.results) : scan.results;
-                        return total + (results?.open_ports_count || results?.ports_found || 0);
-                    } catch {
+                        
+                        // FIXED: Look for the correct property names from the backend
+                        return total + (
+                            results?.open_ports ||          // Primary field from backend (number)
+                            results?.total_ports ||         // Secondary field
+                            results?.open_ports_count ||    // Legacy field  
+                            results?.ports_found ||         // Legacy field
+                            results?.open_ports?.length ||  // If it's an array
+                            0
+                        );
+                    } catch (error) {
+                        console.warn('Failed to parse port scan results:', error);
                         return total;
                     }
                 }, 0);
@@ -640,14 +652,27 @@ const PortScanning = {
                 
                 console.log(`🎯 Port Scan ${scan.id}: target_domain="${scan.target_domain}", domain="${scan.domain}", target_id="${scan.target_id}", resolved="${targetName}"`); // Debug log
                 
-                // Extract ports count from results
+                // FIXED: Extract ports count from results using correct property names
                 let portsCount = '-';
                 if (scan.status === 'completed' && scan.results) {
                     try {
                         const results = typeof scan.results === 'string' ? JSON.parse(scan.results) : scan.results;
-                        portsCount = results.open_ports_count || results.ports_found || results.open_ports?.length || 0;
+                        
+                        // FIXED: Look for the actual property names the backend returns
+                        portsCount = (
+                            results.open_ports ||          // Primary field from backend (number)
+                            results.total_ports ||         // Secondary field
+                            results.open_ports_count ||    // Legacy field  
+                            results.ports_found ||         // Legacy field
+                            results.open_ports?.length ||  // If it's an array
+                            0
+                        );
+                        
+                        console.log(`📊 Scan ${scan.id} ports count: ${portsCount}`, results); // Debug log
+                        
                     } catch (error) {
-                        console.warn('Failed to parse scan results:', error);
+                        console.warn('Failed to parse scan results for scan', scan.id, ':', error);
+                        portsCount = 'Parse Error';
                     }
                 } else if (isRunning) {
                     portsCount = '🔄 Scanning...';
@@ -883,6 +908,8 @@ const PortScanning = {
         }
     },
 
+    // Fixed Port Scanning Export Functions - Replace these methods in port-scanning.js
+
     async exportResults(scanId, format) {
         try {
             // Hide the export menu
@@ -901,6 +928,12 @@ const PortScanning = {
                 const scanData = data.data;
                 const results = scanData.results || {};
                 
+                // DEBUG: Log the actual results structure to see what we have
+                console.log('🔍 Port Scan Export Debug:');
+                console.log('Results object:', results);
+                console.log('Results keys:', Object.keys(results));
+                console.log('Full results JSON:', JSON.stringify(results, null, 2));
+                
                 // Get target name for export
                 const targetName = this.getTargetName(scanData);
                 
@@ -918,13 +951,13 @@ const PortScanning = {
                 // Generate and download file based on format
                 switch (format.toLowerCase()) {
                     case 'csv':
-                        this.downloadCSV(exportData, scanId);
+                        this.downloadPortScanCSV(exportData, scanId);
                         break;
                     case 'json':
-                        this.downloadJSON(exportData, scanId);
+                        this.downloadPortScanJSON(exportData, scanId);
                         break;
                     case 'xml':
-                        this.downloadXML(exportData, scanId);
+                        this.downloadPortScanXML(exportData, scanId);
                         break;
                     default:
                         throw new Error('Unsupported export format');
@@ -940,28 +973,121 @@ const PortScanning = {
         }
     },
 
-    downloadCSV(data, scanId) {
-        let csvContent = 'Scan ID,Target,Scan Type,Status,Created,Completed,Open Ports Count\n';
-        csvContent += `${data.scan_id},"${data.target}","${data.scan_type}","${data.status}","${data.created_at}","${data.completed_at || 'N/A'}","${data.results.open_ports_count || data.results.ports_found || 0}"\n\n`;
+    // ENHANCED: Look for all possible port data structures
+    findPortData(results) {
+        // Try multiple possible locations for port data
+        const possiblePortSources = [
+            results.open_ports_data,     // Detailed port info
+            results.port_details,        // Detailed port info
+            results.ports_found,         // Array of port objects
+            results.discovered_ports,    // Array of port objects
+            results.ports,              // Array of port objects
+            results.nmap_results,       // nmap specific results
+            results.scan_results,       // Generic scan results
+            results.host_results,       // Host-based results
+            results.port_scan_results   // Port scan specific results
+        ];
         
-        // Add open ports if available
-        if (data.results.open_ports && data.results.open_ports.length > 0) {
-            csvContent += 'Open Ports Found\n';
-            csvContent += 'Port,Protocol,Service,Version,State,Hostname\n';
-            data.results.open_ports.forEach(port => {
-                csvContent += `"${port.port || 'N/A'}","${port.protocol || 'TCP'}","${port.service || 'N/A'}","${port.version || 'N/A'}","${port.state || 'open'}","${port.hostname || 'N/A'}"\n`;
+        for (const source of possiblePortSources) {
+            if (Array.isArray(source) && source.length > 0) {
+                console.log('✅ Found port data in:', source);
+                return source;
+            }
+        }
+        
+        // If no array found, check if we have individual port data scattered in results
+        if (results.open_ports && typeof results.open_ports === 'number' && results.open_ports > 0) {
+            // We have a count but no details - create summary entries
+            console.log('⚠️ Only port count found, no detailed port data');
+            return this.createPortSummaryData(results);
+        }
+        
+        console.log('❌ No port data found in any expected location');
+        return [];
+    },
+
+    // Create summary data when only counts are available
+    createPortSummaryData(results) {
+        const portCount = results.open_ports || results.total_ports || 0;
+        const summaryData = [];
+        
+        if (portCount > 0) {
+            // Create a summary entry since we don't have detailed port info
+            summaryData.push({
+                summary: true,
+                port_count: portCount,
+                note: 'Detailed port information not available in scan results',
+                scan_summary: `${portCount} open ports detected`,
+                target_info: results.target_summary || 'Target information not available'
+            });
+        }
+        
+        return summaryData;
+    },
+
+    downloadPortScanCSV(data, scanId) {
+        let csvContent = 'Scan ID,Target,Scan Type,Status,Created,Completed,Open Ports Count\n';
+        
+        // Get the actual port count
+        const portsCount = data.results.open_ports || data.results.total_ports || data.results.open_ports_count || data.results.ports_found || 0;
+        csvContent += `${data.scan_id},"${data.target}","${data.scan_type}","${data.status}","${data.created_at}","${data.completed_at || 'N/A'}","${portsCount}"\n\n`;
+        
+        // Try to find actual port data
+        const portData = this.findPortData(data.results);
+        
+        if (portData.length > 0) {
+            if (portData[0].summary) {
+                // Summary data only
+                csvContent += 'SCAN SUMMARY\n';
+                csvContent += 'Total Open Ports,Note\n';
+                portData.forEach(item => {
+                    csvContent += `"${item.port_count}","${item.note}"\n`;
+                });
+            } else {
+                // Detailed port data
+                csvContent += 'DETAILED PORT INFORMATION\n';
+                csvContent += 'Port,Protocol,Service,Version,State,Banner,Host\n';
+                portData.forEach(port => {
+                    csvContent += `"${port.port || port.port_number || 'N/A'}","${port.protocol || 'TCP'}","${port.service || port.service_name || 'N/A'}","${port.version || port.service_version || 'N/A'}","${port.state || 'open'}","${port.banner || port.service_banner || 'N/A'}","${port.host || port.hostname || port.ip || 'N/A'}"\n`;
+                });
+            }
+        } else {
+            // No data found at all
+            csvContent += 'SCAN RESULTS\n';
+            csvContent += 'Status,Message\n';
+            csvContent += `"No detailed port data","Port scan completed but detailed results not available in export. Total ports found: ${portsCount}"\n`;
+            
+            // Add all available result properties for debugging
+            csvContent += '\nAVAILABLE RESULT PROPERTIES\n';
+            csvContent += 'Property,Value\n';
+            Object.entries(data.results).forEach(([key, value]) => {
+                const valueStr = typeof value === 'object' ? JSON.stringify(value).substring(0, 200) : String(value);
+                csvContent += `"${key}","${valueStr.replace(/"/g, '""')}"\n`;
             });
         }
         
         this.downloadFile(csvContent, `port_scan_${scanId}_results.csv`, 'text/csv');
     },
 
-    downloadJSON(data, scanId) {
-        const jsonContent = JSON.stringify(data, null, 2);
+    downloadPortScanJSON(data, scanId) {
+        // Add port data analysis to JSON export
+        const portData = this.findPortData(data.results);
+        
+        const enhancedData = {
+            ...data,
+            port_analysis: {
+                ports_found: portData,
+                port_count: data.results.open_ports || data.results.total_ports || 0,
+                has_detailed_data: portData.length > 0 && !portData[0]?.summary,
+                export_note: portData.length === 0 ? 'No detailed port data found in scan results' : 'Port data included'
+            }
+        };
+        
+        const jsonContent = JSON.stringify(enhancedData, null, 2);
         this.downloadFile(jsonContent, `port_scan_${scanId}_results.json`, 'application/json');
     },
 
-    downloadXML(data, scanId) {
+    downloadPortScanXML(data, scanId) {
         let xmlContent = '<?xml version="1.0" encoding="UTF-8"?>\n';
         xmlContent += '<port_scan_results>\n';
         xmlContent += `  <scan_id>${data.scan_id}</scan_id>\n`;
@@ -970,23 +1096,56 @@ const PortScanning = {
         xmlContent += `  <status>${this.escapeXml(data.status)}</status>\n`;
         xmlContent += `  <created_at>${this.escapeXml(data.created_at)}</created_at>\n`;
         xmlContent += `  <completed_at>${this.escapeXml(data.completed_at || 'N/A')}</completed_at>\n`;
-        xmlContent += `  <open_ports_count>${data.results.open_ports_count || data.results.ports_found || 0}</open_ports_count>\n`;
+        
+        const portsCount = data.results.open_ports || data.results.total_ports || data.results.open_ports_count || data.results.ports_found || 0;
+        xmlContent += `  <open_ports_count>${portsCount}</open_ports_count>\n`;
+        
         xmlContent += '  <results>\n';
         
-        // Add open ports
-        if (data.results.open_ports && data.results.open_ports.length > 0) {
-            xmlContent += '    <open_ports>\n';
-            data.results.open_ports.forEach(port => {
-                xmlContent += `      <port>\n`;
-                xmlContent += `        <port_number>${this.escapeXml(port.port || 'N/A')}</port_number>\n`;
-                xmlContent += `        <protocol>${this.escapeXml(port.protocol || 'TCP')}</protocol>\n`;
-                xmlContent += `        <service>${this.escapeXml(port.service || 'N/A')}</service>\n`;
-                xmlContent += `        <version>${this.escapeXml(port.version || 'N/A')}</version>\n`;
-                xmlContent += `        <state>${this.escapeXml(port.state || 'open')}</state>\n`;
-                xmlContent += `        <hostname>${this.escapeXml(port.hostname || 'N/A')}</hostname>\n`;
-                xmlContent += `      </port>\n`;
+        // Try to find actual port data
+        const portData = this.findPortData(data.results);
+        
+        if (portData.length > 0) {
+            if (portData[0].summary) {
+                // Summary data only
+                xmlContent += '    <scan_summary>\n';
+                portData.forEach(item => {
+                    xmlContent += `      <summary>\n`;
+                    xmlContent += `        <port_count>${item.port_count}</port_count>\n`;
+                    xmlContent += `        <note>${this.escapeXml(item.note)}</note>\n`;
+                    xmlContent += `      </summary>\n`;
+                });
+                xmlContent += '    </scan_summary>\n';
+            } else {
+                // Detailed port data
+                xmlContent += '    <open_ports>\n';
+                portData.forEach(port => {
+                    xmlContent += `      <port>\n`;
+                    xmlContent += `        <port_number>${this.escapeXml(port.port || port.port_number || 'N/A')}</port_number>\n`;
+                    xmlContent += `        <protocol>${this.escapeXml(port.protocol || 'TCP')}</protocol>\n`;
+                    xmlContent += `        <service>${this.escapeXml(port.service || port.service_name || 'N/A')}</service>\n`;
+                    xmlContent += `        <version>${this.escapeXml(port.version || port.service_version || 'N/A')}</version>\n`;
+                    xmlContent += `        <state>${this.escapeXml(port.state || 'open')}</state>\n`;
+                    xmlContent += `        <banner>${this.escapeXml(port.banner || port.service_banner || 'N/A')}</banner>\n`;
+                    xmlContent += `        <host>${this.escapeXml(port.host || port.hostname || port.ip || 'N/A')}</host>\n`;
+                    xmlContent += `      </port>\n`;
+                });
+                xmlContent += '    </open_ports>\n';
+            }
+        } else {
+            // No detailed data available
+            xmlContent += '    <scan_info>\n';
+            xmlContent += `      <message>Port scan completed but detailed results not available in export</message>\n`;
+            xmlContent += `      <total_ports_found>${portsCount}</total_ports_found>\n`;
+            xmlContent += '    </scan_info>\n';
+            
+            // Add available properties for debugging
+            xmlContent += '    <available_properties>\n';
+            Object.entries(data.results).forEach(([key, value]) => {
+                const valueStr = typeof value === 'object' ? JSON.stringify(value).substring(0, 200) : String(value);
+                xmlContent += `      <property name="${this.escapeXml(key)}">${this.escapeXml(valueStr)}</property>\n`;
             });
-            xmlContent += '    </open_ports>\n';
+            xmlContent += '    </available_properties>\n';
         }
         
         xmlContent += '  </results>\n';

@@ -1,4 +1,4 @@
-// backend/src/services/contentDiscoveryService.js - IMPROVED STATUS CODE HANDLING
+// backend/src/services/contentDiscoveryService.js - IMPROVED WITH DEDUPLICATION
 
 const { exec } = require('child_process');
 const { promisify } = require('util');
@@ -162,13 +162,17 @@ async function runEnhancedContentDiscovery(scan, target) {
       }
     }
 
-    console.log(`🎯 Found ${allDiscoveredContent.length} total content items`);
+    console.log(`🎯 Found ${allDiscoveredContent.length} total content items before deduplication`);
+
+    // FIXED: Deduplicate discovered content before storing
+    const deduplicatedContent = deduplicateDiscoveredContent(allDiscoveredContent);
+    console.log(`🎯 After deduplication: ${deduplicatedContent.length} unique content items (removed ${allDiscoveredContent.length - deduplicatedContent.length} duplicates)`);
 
     // Store results in database if Directory model is available
-    if (Directory && allDiscoveredContent.length > 0) {
+    if (Directory && deduplicatedContent.length > 0) {
       try {
         // IMPROVED: Better data preparation with validation
-        const contentRecords = allDiscoveredContent
+        const contentRecords = deduplicatedContent
           .filter(item => item.subdomain_id && item.path && item.url) // Pre-filter invalid items
           .map(item => ({
             subdomain_id: item.subdomain_id,
@@ -207,13 +211,13 @@ async function runEnhancedContentDiscovery(scan, target) {
     await ScanJob.updateProgress(scan.id, 95);
 
     const results = {
-      discovered_content: allDiscoveredContent,
-      total_items: allDiscoveredContent.length,
-      endpoints: allDiscoveredContent.filter(c => c.content_type === 'endpoint').length,
-      parameters: allDiscoveredContent.filter(c => c.content_type === 'parameter').length,
-      xss_sinks: allDiscoveredContent.filter(c => c.content_type === 'xss_sink').length,
-      forms: allDiscoveredContent.filter(c => c.content_type === 'form').length,
-      ajax_endpoints: allDiscoveredContent.filter(c => c.content_type === 'ajax').length,
+      discovered_content: deduplicatedContent,
+      total_items: deduplicatedContent.length,
+      endpoints: deduplicatedContent.filter(c => c.content_type === 'endpoint').length,
+      parameters: deduplicatedContent.filter(c => c.content_type === 'parameter').length,
+      xss_sinks: deduplicatedContent.filter(c => c.content_type === 'xss_sink').length,
+      forms: deduplicatedContent.filter(c => c.content_type === 'form').length,
+      ajax_endpoints: deduplicatedContent.filter(c => c.content_type === 'ajax').length,
       scan_targets: scanTargets.length,
       discovery_methods: [
         'robots.txt analysis',
@@ -226,13 +230,19 @@ async function runEnhancedContentDiscovery(scan, target) {
       target_domain: target.domain,
       config: config,
       status_summary: {
-        with_status_codes: allDiscoveredContent.filter(c => c.status_code).length,
-        pending_status_checks: allDiscoveredContent.filter(c => !c.status_code).length
+        with_status_codes: deduplicatedContent.filter(c => c.status_code).length,
+        pending_status_checks: deduplicatedContent.filter(c => !c.status_code).length
+      },
+      deduplication_stats: {
+        original_items: allDiscoveredContent.length,
+        deduplicated_items: deduplicatedContent.length,
+        duplicates_removed: allDiscoveredContent.length - deduplicatedContent.length
       }
     };
 
-    console.log(`✅ Passive content discovery completed for ${target.domain}: found ${allDiscoveredContent.length} items using stealth methods`);
+    console.log(`✅ Passive content discovery completed for ${target.domain}: found ${deduplicatedContent.length} items using stealth methods`);
     console.log(`📊 Status codes: ${results.status_summary.with_status_codes} checked, ${results.status_summary.pending_status_checks} pending`);
+    console.log(`🎯 Deduplication: ${results.deduplication_stats.duplicates_removed} duplicates removed`);
     
     await ScanJob.updateProgress(scan.id, 100);
     return results;
@@ -241,6 +251,27 @@ async function runEnhancedContentDiscovery(scan, target) {
     console.error(`❌ Passive content discovery failed for ${target.domain}:`, error);
     throw new Error(`Content discovery failed: ${error.message}`);
   }
+}
+
+/**
+ * NEW: Deduplicate discovered content based on (subdomain_id, path) combination
+ */
+function deduplicateDiscoveredContent(contentItems) {
+  const seen = new Map();
+  const deduplicatedItems = [];
+  
+  for (const item of contentItems) {
+    const key = `${item.subdomain_id}:${item.path}`;
+    
+    if (!seen.has(key)) {
+      seen.set(key, true);
+      deduplicatedItems.push(item);
+    } else {
+      console.debug(`Skipping duplicate content: subdomain_id=${item.subdomain_id}, path=${item.path}, source=${item.source}`);
+    }
+  }
+  
+  return deduplicatedItems;
 }
 
 /**
@@ -700,6 +731,7 @@ async function analyzeHTMLContent(scanTarget, parameterExtraction) {
 
 module.exports = {
   runEnhancedContentDiscovery,
+  deduplicateDiscoveredContent,
   ensureRootSubdomain,
   analyzeRobotsTxt,
   analyzeSitemap,

@@ -1,4 +1,4 @@
-// backend/src/models/Directory.js - FIXED VERSION WITH BATCH PROCESSING
+// backend/src/models/Directory.js - FIXED VERSION WITH DEDUPLICATION
 const knex = require('../config/database');
 
 class Directory {
@@ -196,7 +196,7 @@ class Directory {
     }
   }
 
-  // FIXED: Improved bulkCreate with batch processing and better error handling
+  // FIXED: Improved bulkCreate with DEDUPLICATION and better error handling
   static async bulkCreate(directories) {
     if (!directories || directories.length === 0) {
       console.log('No directories to create');
@@ -235,15 +235,26 @@ class Directory {
 
       console.log(`Final validation: ${validatedRecords.length} directories with valid subdomain references`);
 
+      // FIXED: DEDUPLICATE records before processing to avoid constraint violations
+      const deduplicatedRecords = this.deduplicateRecords(validatedRecords);
+      console.log(`After deduplication: ${deduplicatedRecords.length} unique records (removed ${validatedRecords.length - deduplicatedRecords.length} duplicates)`);
+
       // FIXED: Process in batches to avoid query size limits
       const BATCH_SIZE = 50; // Reasonable batch size
       let allCreatedRecords = [];
 
-      for (let i = 0; i < validatedRecords.length; i += BATCH_SIZE) {
-        const batch = validatedRecords.slice(i, i + BATCH_SIZE);
+      for (let i = 0; i < deduplicatedRecords.length; i += BATCH_SIZE) {
+        const batch = deduplicatedRecords.slice(i, i + BATCH_SIZE);
         console.log(`Processing batch ${Math.floor(i / BATCH_SIZE) + 1}: ${batch.length} records`);
 
         try {
+          // ADDITIONAL SAFETY: Deduplicate within batch as well
+          const batchDeduplicated = this.deduplicateRecords(batch);
+          
+          if (batchDeduplicated.length !== batch.length) {
+            console.warn(`Found ${batch.length - batchDeduplicated.length} additional duplicates within batch ${Math.floor(i / BATCH_SIZE) + 1}`);
+          }
+          
           // Use upsert to handle duplicates - only merge columns that exist
           const mergeColumns = [
             'status_code', 
@@ -262,7 +273,7 @@ class Directory {
           }
 
           const batchResults = await knex(this.tableName)
-            .insert(batch)
+            .insert(batchDeduplicated)
             .onConflict(['subdomain_id', 'path'])
             .merge(mergeColumns)
             .returning('*');
@@ -302,6 +313,25 @@ class Directory {
       console.error('Full error details:', error);
       return [];
     }
+  }
+
+  // NEW: Deduplication method to remove duplicate (subdomain_id, path) combinations
+  static deduplicateRecords(records) {
+    const seen = new Map();
+    const deduplicatedRecords = [];
+    
+    for (const record of records) {
+      const key = `${record.subdomain_id}:${record.path}`;
+      
+      if (!seen.has(key)) {
+        seen.set(key, true);
+        deduplicatedRecords.push(record);
+      } else {
+        console.debug(`Skipping duplicate: subdomain_id=${record.subdomain_id}, path=${record.path}`);
+      }
+    }
+    
+    return deduplicatedRecords;
   }
 
   // Helper method to validate and clean directory data
