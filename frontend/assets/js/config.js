@@ -1,4 +1,4 @@
-// frontend/assets/js/config.js - ENHANCED WITH DYNAMIC ENDPOINT SETTINGS
+// frontend/assets/js/config.js - UPDATED CONFIG WITH ENHANCED CONTENT DISCOVERY SETTINGS
 const CONFIG = {
     API_BASE: 'http://localhost:3001/api/v1',
     
@@ -10,7 +10,7 @@ const CONFIG = {
     PORT_SCAN_REFRESH_INTERVAL: 3000,   // Port scanning updates every 3 seconds
     SUBDOMAIN_REFRESH_INTERVAL: 10000,  // Subdomain updates every 10 seconds
     DIRECTORY_REFRESH_INTERVAL: 8000,   // Directory updates every 8 seconds
-    DYNAMIC_ENDPOINTS_REFRESH_INTERVAL: 5000,  // Dynamic endpoints updates every 5 seconds
+    CONTENT_DISCOVERY_REFRESH_INTERVAL: 5000,  // Content discovery updates every 5 seconds
     
     // Bulk operations
     BULK_CHECK_BATCH_SIZE: 5,
@@ -30,16 +30,20 @@ const CONFIG = {
         SHOW_PERFORMANCE_STATS: true
     },
     
-    // Dynamic endpoint analysis settings
-    DYNAMIC_ENDPOINT_SETTINGS: {
+    // Enhanced content discovery settings (includes dynamic analysis)
+    CONTENT_DISCOVERY_SETTINGS: {
         SHOW_PROGRESS_BAR: true,
-        SHOW_ANALYSIS_STATUS: true,
-        AUTO_REFRESH_ON_ACTIVE_ANALYSIS: true,
-        PROGRESS_UPDATE_INTERVAL: 2000,  // Check analysis progress every 2 seconds
+        SHOW_DISCOVERY_STATUS: true,
+        AUTO_REFRESH_ON_ACTIVE_DISCOVERY: true,
+        PROGRESS_UPDATE_INTERVAL: 1000,  // Check discovery progress every 1 second
         SHOW_BEHAVIORAL_STATS: true,
-        PARAMETER_TESTING_TIMEOUT: 5000,  // Timeout for parameter testing
+        PARAMETER_TESTING_TIMEOUT: 8000,  // Timeout for parameter testing
         DOM_MUTATION_TRACKING: true,
-        AJAX_CALL_MONITORING: true
+        AJAX_CALL_MONITORING: true,
+        DYNAMIC_ANALYSIS_ENABLED: true,   // Enable dynamic endpoint discovery
+        XSS_SINK_DETECTION: true,
+        STEALTH_MODE_AVAILABLE: true,
+        ENHANCED_REPORTING: true
     },
     
     // UI settings
@@ -54,8 +58,7 @@ const CONFIG = {
         subdomains: 'Live Hosts',
         directories: 'Directories',
         'port-scanning': 'Port Scanning',
-        'content-discovery': 'Content Discovery',
-        'dynamic-endpoints': 'Dynamic Endpoints',  // NEW
+        'content-discovery': 'Content Discovery',  // Now includes dynamic endpoints
         'js-analysis': 'JS Analysis',
         'api-discovery': 'API Discovery',
         'vuln-scanning': 'Vulnerability Scanning',
@@ -66,49 +69,52 @@ const CONFIG = {
     SCAN_TYPES: {
         SUBDOMAIN: 'subdomain_scan',
         PORT: 'port_scan',
-        CONTENT: 'content_discovery',
-        DYNAMIC_ENDPOINT: 'dynamic_endpoint_analysis',  // NEW
+        CONTENT: 'content_discovery',           // Enhanced to include dynamic analysis
         JS: 'js_files_scan',
         API: 'api_discovery',
         VULN: 'vulnerability_scan',
         FULL: 'full_scan'
     },
     
-    // Dynamic endpoint analysis types
-    DYNAMIC_ANALYSIS_TYPES: {
+    // Content discovery analysis types (includes dynamic endpoint types)
+    CONTENT_ANALYSIS_TYPES: {
+        STATIC_ENDPOINT: 'static_endpoint',
+        DYNAMIC_ENDPOINT: 'dynamic_endpoint',
         REACTIVE_PARAM: 'reactive_param',
         AJAX_TRIGGER: 'ajax_trigger',
         DOM_MUTATOR: 'dom_mutator',
         STATE_CHANGER: 'state_changer',
         INTERACTIVE_FORM: 'interactive_form',
-        CONDITIONAL_ENDPOINT: 'conditional_endpoint'
+        CONDITIONAL_ENDPOINT: 'conditional_endpoint',
+        XSS_SINK: 'xss_sink',
+        PARAMETER: 'parameter'
     },
     
-    // Dynamic endpoint analysis depths
-    ANALYSIS_DEPTHS: {
-        'basic': {
-            name: 'Basic Analysis',
-            description: 'Form & URL parameters only (fastest)',
-            estimated_time: '30s - 2m',
-            techniques: ['form_analysis', 'url_parameter_testing']
-        },
-        'standard': {
-            name: 'Standard Analysis',
-            description: 'JS functions & AJAX calls (recommended)',
-            estimated_time: '2m - 10m',
-            techniques: ['form_analysis', 'url_parameter_testing', 'javascript_analysis', 'ajax_monitoring']
-        },
-        'deep': {
-            name: 'Deep Analysis',
-            description: 'DOM mutations & state tracking (thorough)',
-            estimated_time: '5m - 20m',
-            techniques: ['form_analysis', 'url_parameter_testing', 'javascript_analysis', 'ajax_monitoring', 'dom_mutation_tracking', 'state_monitoring']
-        },
+    // Enhanced content discovery modes
+    DISCOVERY_MODES: {
         'comprehensive': {
-            name: 'Comprehensive Analysis',
-            description: 'All methods + fuzzing (complete)',
-            estimated_time: '10m - 45m',
-            techniques: ['form_analysis', 'url_parameter_testing', 'javascript_analysis', 'ajax_monitoring', 'dom_mutation_tracking', 'state_monitoring', 'parameter_fuzzing', 'behavioral_analysis']
+            name: 'Comprehensive Discovery',
+            description: 'Static + Dynamic analysis with all techniques',
+            estimated_time: '10m - 30m',
+            techniques: ['robots_txt', 'sitemap_xml', 'wayback_machine', 'javascript_analysis', 'dynamic_analysis', 'parameter_testing', 'xss_detection', 'form_analysis', 'ajax_monitoring']
+        },
+        'static_only': {
+            name: 'Static Discovery Only',
+            description: 'Traditional passive discovery methods (faster)',
+            estimated_time: '3m - 10m',
+            techniques: ['robots_txt', 'sitemap_xml', 'wayback_machine', 'javascript_analysis', 'link_extraction']
+        },
+        'dynamic_only': {
+            name: 'Dynamic Analysis Only',
+            description: 'Focus on interactive endpoints and behavior',
+            estimated_time: '5m - 20m',
+            techniques: ['dynamic_analysis', 'parameter_testing', 'ajax_monitoring', 'dom_mutation_tracking', 'state_monitoring']
+        },
+        'stealth': {
+            name: 'Stealth Mode',
+            description: 'Minimal footprint with maximum stealth',
+            estimated_time: '2m - 8m',
+            techniques: ['robots_txt', 'javascript_analysis', 'wayback_machine']
         }
     },
     
@@ -125,7 +131,8 @@ const CONFIG = {
         active: '🟢',
         inactive: '🔴', 
         scanning: '🟡',
-        analyzing: '🔵',  // NEW for dynamic analysis
+        discovering: '🔵',     // For content discovery
+        analyzing: '🟣',       // For dynamic analysis
         error: '🔴',
         unknown: '⚪'
     },
@@ -133,13 +140,13 @@ const CONFIG = {
     // Performance monitoring
     PERFORMANCE_MONITORING: {
         TRACK_SCAN_PERFORMANCE: true,
-        TRACK_ANALYSIS_PERFORMANCE: true,  // NEW
+        TRACK_DISCOVERY_PERFORMANCE: true,
         SHOW_SCAN_METRICS: true,
-        SHOW_ANALYSIS_METRICS: true,  // NEW
+        SHOW_DISCOVERY_METRICS: true,
         LOG_PERFORMANCE_DATA: false // Set to true for detailed logging
     },
     
-    // Port scanning profiles and their descriptions
+    // Port scanning profiles
     PORT_SCAN_PROFILES: {
         'top-100': {
             name: 'Top 100 Ports',
@@ -179,17 +186,22 @@ const CONFIG = {
         }
     },
     
-    // Dynamic endpoint test payloads
+    // Enhanced test payloads for dynamic analysis
     DYNAMIC_TEST_PAYLOADS: {
         'safe': {
             name: 'Safe Payloads',
             description: 'Safe test values that won\'t cause harm',
-            payloads: ['test', '123', 'true', 'false', 'sample']
+            payloads: ['test', '123', 'true', 'false', 'sample', 'example']
         },
         'extended': {
             name: 'Extended Payloads',
             description: 'More comprehensive testing payloads',
-            payloads: ['test', '123', 'true', 'false', 'sample', '<script>console.log("test")</script>', '{"test": "value"}', 'admin', 'user']
+            payloads: ['test', '123', 'true', 'false', 'sample', '<img src=x>', '{"test": "value"}', 'admin', 'user', 'null', 'undefined']
+        },
+        'behavioral': {
+            name: 'Behavioral Payloads',
+            description: 'Payloads designed to trigger dynamic behavior',
+            payloads: ['onload=alert(1)', 'javascript:void(0)', '../../etc/passwd', 'SELECT * FROM users', '${7*7}', '{{7*7}}']
         },
         'custom': {
             name: 'Custom Payloads',
@@ -202,10 +214,11 @@ const CONFIG = {
     DEBUG: {
         LOG_API_CALLS: false,
         LOG_SCAN_PROGRESS: true,
-        LOG_ANALYSIS_PROGRESS: true,  // NEW
+        LOG_DISCOVERY_PROGRESS: true,
+        LOG_DYNAMIC_ANALYSIS: true,      // Enhanced logging for dynamic analysis
         LOG_AUTO_REFRESH: false,
         SHOW_PERFORMANCE_METRICS: true,
-        LOG_DYNAMIC_BEHAVIOR: false  // NEW
+        LOG_PROGRESS_DETAILS: false      // Detailed progress logging
     }
 };
 
@@ -220,10 +233,8 @@ CONFIG.getRefreshInterval = function(module) {
             return this.SUBDOMAIN_REFRESH_INTERVAL;
         case 'directories':
             return this.DIRECTORY_REFRESH_INTERVAL;
-        case 'dynamic-endpoints':
-            return this.DYNAMIC_ENDPOINTS_REFRESH_INTERVAL;
         case 'content-discovery':
-            return this.DIRECTORY_REFRESH_INTERVAL;  // Reuse directory interval
+            return this.CONTENT_DISCOVERY_REFRESH_INTERVAL;
         default:
             return this.SCAN_REFRESH_INTERVAL;
     }
@@ -237,8 +248,12 @@ CONFIG.shouldShowLiveIndicators = function() {
     return this.SHOW_LIVE_INDICATORS && this.REAL_TIME_ENABLED;
 };
 
+CONFIG.isContentDiscoveryEnabled = function() {
+    return this.REAL_TIME_ENABLED && this.CONTENT_DISCOVERY_SETTINGS.AUTO_REFRESH_ON_ACTIVE_DISCOVERY;
+};
+
 CONFIG.isDynamicAnalysisEnabled = function() {
-    return this.REAL_TIME_ENABLED && this.DYNAMIC_ENDPOINT_SETTINGS.AUTO_REFRESH_ON_ACTIVE_ANALYSIS;
+    return this.CONTENT_DISCOVERY_SETTINGS.DYNAMIC_ANALYSIS_ENABLED;
 };
 
 // Development mode detection
@@ -248,18 +263,48 @@ CONFIG.isDevelopment = function() {
            this.DEBUG.LOG_API_CALLS;
 };
 
+// Get discovery mode details
+CONFIG.getDiscoveryModeDetails = function(mode) {
+    return this.DISCOVERY_MODES[mode] || {
+        name: 'Unknown Mode',
+        description: 'Unknown discovery mode',
+        estimated_time: 'Unknown',
+        techniques: []
+    };
+};
+
+// Get content analysis type details
+CONFIG.getContentAnalysisTypeDetails = function(type) {
+    const typeDetails = {
+        'static_endpoint': { icon: '🔗', description: 'Static web endpoint' },
+        'dynamic_endpoint': { icon: '🎯', description: 'Interactive dynamic endpoint' },
+        'reactive_param': { icon: '⚡', description: 'Parameter that triggers responses' },
+        'ajax_trigger': { icon: '📡', description: 'Triggers AJAX calls' },
+        'dom_mutator': { icon: '🔄', description: 'Modifies DOM structure' },
+        'state_changer': { icon: '🎭', description: 'Changes application state' },
+        'interactive_form': { icon: '📝', description: 'Interactive form element' },
+        'conditional_endpoint': { icon: '🔀', description: 'Conditional endpoint' },
+        'xss_sink': { icon: '⚠️', description: 'Potential XSS vulnerability' },
+        'parameter': { icon: '🔍', description: 'URL or form parameter' }
+    };
+    
+    return typeDetails[type] || { icon: '📄', description: 'Unknown content type' };
+};
+
 // Log configuration on load if in development mode
 if (typeof window !== 'undefined') {
     window.CONFIG = CONFIG;
     
     if (CONFIG.isDevelopment()) {
-        console.log('🔧 Bug Bounty Platform Configuration Loaded:', {
+        console.log('🔧 Enhanced Bug Bounty Platform Configuration Loaded:', {
             realTimeEnabled: CONFIG.isRealTimeEnabled(),
+            contentDiscoveryEnabled: CONFIG.isContentDiscoveryEnabled(),
             dynamicAnalysisEnabled: CONFIG.isDynamicAnalysisEnabled(),
             portScanRefreshInterval: CONFIG.PORT_SCAN_REFRESH_INTERVAL,
-            dynamicEndpointsRefreshInterval: CONFIG.DYNAMIC_ENDPOINTS_REFRESH_INTERVAL,
+            contentDiscoveryRefreshInterval: CONFIG.CONTENT_DISCOVERY_REFRESH_INTERVAL,
             showLiveIndicators: CONFIG.shouldShowLiveIndicators(),
-            debugMode: CONFIG.SHOW_DEBUG_INFO
+            debugMode: CONFIG.SHOW_DEBUG_INFO,
+            enhancedContentDiscovery: CONFIG.CONTENT_DISCOVERY_SETTINGS
         });
     }
 }
