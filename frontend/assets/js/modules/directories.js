@@ -1,7 +1,8 @@
-// frontend/assets/js/modules/directories.js - REDESIGNED TO MIMIC SCANS STYLE
+// frontend/assets/js/modules/directories.js - ENHANCED WITH SUBDOMAIN FILTERING
 
 const Directories = {
     refreshInterval: null,
+    activeScanJobId: null,
     isAutoRefreshEnabled: true,
     lastUpdate: null,
     targetsCache: {}, // Cache for target information
@@ -103,11 +104,17 @@ const Directories = {
                 <div class="card-title">Start Content Discovery Scan</div>
                 <div id="scan-messages"></div>
                 <form id="scan-form">
-                    <div style="display: grid; grid-template-columns: 1fr auto; gap: 20px; align-items: end;">
+                    <div style="display: grid; grid-template-columns: 1fr 1fr auto; gap: 20px; align-items: end;">
                         <div class="form-group">
                             <label for="scan-target">Target Domain</label>
                             <select id="scan-target" required>
                                 <option value="">Select target...</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="scan-subdomain">Subdomain (optional)</label>
+                            <select id="scan-subdomain">
+                                <option value="">All subdomains</option>
                             </select>
                         </div>
                         <button type="submit" class="btn btn-primary" id="start-scan-btn">🕷️ Start Content Discovery</button>
@@ -147,6 +154,7 @@ const Directories = {
                             <tr>
                                 <th>ID</th>
                                 <th>Target</th>
+                                <th>Subdomain</th>
                                 <th>Type</th>
                                 <th>Status</th>
                                 <th>Progress</th>
@@ -157,7 +165,7 @@ const Directories = {
                         </thead>
                         <tbody id="scans-list">
                             <tr>
-                                <td colspan="8" style="text-align: center; color: #6b46c1;">Loading content discovery scans...</td>
+                                <td colspan="9" style="text-align: center; color: #6b46c1;">Loading content discovery scans...</td>
                             </tr>
                         </tbody>
                     </table>
@@ -176,6 +184,41 @@ const Directories = {
             });
         }
 
+        // Target change events - update subdomains when target changes
+        const scanTargetSelect = document.getElementById('scan-target');
+        if (scanTargetSelect) {
+            scanTargetSelect.addEventListener('change', async () => {
+                await this.loadScanSubdomains();
+            });
+        }
+
+        const directoryTargetFilter = document.getElementById('directory-target-filter');
+        if (directoryTargetFilter) {
+            directoryTargetFilter.addEventListener('change', async () => {
+                await this.loadFilterSubdomains();
+                this.search(1);
+            });
+        }
+
+        // Other filter change events
+        ['directory-subdomain-filter', 'directory-source-filter', 'directory-status-filter'].forEach(filterId => {
+            const element = document.getElementById(filterId);
+            if (element) {
+                element.addEventListener('change', () => this.search(1));
+            }
+        });
+
+        // Search with debounce and Enter key support
+        const directorySearch = document.getElementById('directory-search');
+        if (directorySearch) {
+            directorySearch.addEventListener('input', Utils.debounce(() => this.search(1), 500));
+            directorySearch.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    this.search(1);
+                }
+            });
+        }
+
         // Close export menus when clicking outside
         document.addEventListener('click', (e) => {
             if (!e.target.closest('.export-menu') && !e.target.closest('[id^="export-btn-"]')) {
@@ -184,6 +227,42 @@ const Directories = {
                 });
             }
         });
+    },
+
+    // Enhanced search method
+    async search(page = 1) {
+        console.log('🔍 Search triggered for content discovery');
+        
+        // Show searching message in scans table
+        const scansList = document.getElementById('scans-list');
+        if (scansList) {
+            scansList.innerHTML = '<tr><td colspan="9" style="text-align: center; color: #a855f7;">🔍 Searching content discovery scans...</td></tr>';
+        }
+        
+        await this.load(page);
+    },
+
+    // Clear filters method
+    clearFilters() {
+        const targetFilter = document.getElementById('directory-target-filter');
+        const subdomainFilter = document.getElementById('directory-subdomain-filter');
+        const sourceFilter = document.getElementById('directory-source-filter');
+        const statusFilter = document.getElementById('directory-status-filter');
+        const searchFilter = document.getElementById('directory-search');
+        
+        if (targetFilter) targetFilter.value = '';
+        if (subdomainFilter) subdomainFilter.value = '';
+        if (sourceFilter) sourceFilter.value = '';
+        if (statusFilter) statusFilter.value = '';
+        if (searchFilter) searchFilter.value = '';
+        
+        // Reload subdomains for cleared target
+        this.loadFilterSubdomains();
+        
+        // Reload with cleared filters
+        this.search(1);
+        
+        Utils.showMessage('Filters cleared', 'info', 'scan-messages');
     },
 
     // Enhanced real-time updates
@@ -288,8 +367,10 @@ const Directories = {
             const activeScan = runningScans[0]; // Show progress for first active scan
             const progress = activeScan.progress_percentage || 0;
             const targetName = this.getTargetName(activeScan);
+            const subdomainName = this.getSubdomainName(activeScan);
             
-            progressText.textContent = `${targetName} - ${activeScan.status} (${progress}%)`;
+            const displayName = subdomainName ? `${subdomainName} (${targetName})` : targetName;
+            progressText.textContent = `${displayName} - ${activeScan.status} (${progress}%)`;
             progressDiv.style.display = 'block';
         }
     },
@@ -358,6 +439,13 @@ const Directories = {
         return 'Unknown Target';
     },
 
+    // Get subdomain name from scan
+    getSubdomainName(scan) {
+        if (scan.subdomain_name) return scan.subdomain_name;
+        if (scan.subdomain) return scan.subdomain;
+        return null;
+    },
+
     // Load targets and build cache
     async loadTargets() {
         try {
@@ -373,36 +461,169 @@ const Directories = {
                 this.targetsCache[target.id] = target;
             });
             
-            const targetSelect = document.getElementById('scan-target');
-            if (targetSelect) {
-                // Clear existing options except the first one
-                targetSelect.innerHTML = '<option value="">Select target...</option>';
-                
-                // Add target options
-                targets.forEach(target => {
-                    const option = document.createElement('option');
-                    option.value = target.id;
-                    option.textContent = target.domain;
-                    targetSelect.appendChild(option);
-                });
-
-                console.log(`Loaded ${targets.length} targets for content discovery scan dropdown`);
-            }
-        } catch (error) {
-            console.error('Failed to load targets for content discovery scan form:', error);
+            // Update both scan form dropdown and filter dropdown
+            const targetSelects = ['scan-target', 'directory-target-filter'];
             
-            // Show error message in the form
-            const targetSelect = document.getElementById('scan-target');
-            if (targetSelect) {
-                targetSelect.innerHTML = '<option value="">Error loading targets</option>';
+            targetSelects.forEach(selectId => {
+                const targetSelect = document.getElementById(selectId);
+                if (targetSelect) {
+                    const currentValue = targetSelect.value;
+                    const isFilter = selectId.includes('filter');
+                    const placeholder = isFilter ? 'All Targets' : 'Select target...';
+                    
+                    targetSelect.innerHTML = `<option value="">${placeholder}</option>`;
+                    
+                    targets.forEach(target => {
+                        const option = document.createElement('option');
+                        option.value = target.id;
+                        option.textContent = target.domain;
+                        targetSelect.appendChild(option);
+                    });
+
+                    // Restore previous selection if it still exists
+                    if (currentValue && targets.find(t => t.id == currentValue)) {
+                        targetSelect.value = currentValue;
+                    }
+                }
+            });
+
+            console.log(`Loaded ${targets.length} targets for content discovery`);
+            
+            // Load subdomains for both dropdowns
+            await this.loadScanSubdomains();
+            await this.loadFilterSubdomains();
+            
+        } catch (error) {
+            console.error('Failed to load targets for content discovery:', error);
+        }
+    },
+
+    // Load subdomains for scan form
+    async loadScanSubdomains() {
+        try {
+            const targetId = document.getElementById('scan-target')?.value;
+            const subdomainSelect = document.getElementById('scan-subdomain');
+            
+            if (!subdomainSelect) return;
+
+            const currentValue = subdomainSelect.value;
+            subdomainSelect.innerHTML = '<option value="">All subdomains</option>';
+            
+            if (!targetId) return;
+
+            const response = await API.subdomains.getAll({ 
+                target_id: targetId,
+                limit: 1000,
+                status: 'active' // Only load active subdomains for scanning
+            });
+            
+            if (response && response.ok) {
+                const data = await response.json();
+                const subdomains = data.success ? data.data : [];
+                
+                subdomains.forEach(subdomain => {
+                    const option = document.createElement('option');
+                    option.value = subdomain.id;
+                    option.textContent = subdomain.subdomain;
+                    subdomainSelect.appendChild(option);
+                });
+                
+                console.log(`Loaded ${subdomains.length} subdomains for content discovery scan form`);
             }
+            
+            if (currentValue) {
+                const optionExists = Array.from(subdomainSelect.options).some(option => option.value === currentValue);
+                if (optionExists) {
+                    subdomainSelect.value = currentValue;
+                }
+            }
+            
+        } catch (error) {
+            console.error('Failed to load subdomains for content discovery scan form:', error);
+        }
+    },
+
+    // Load subdomains for filter
+    async loadFilterSubdomains() {
+        try {
+            const targetId = document.getElementById('directory-target-filter')?.value;
+            const subdomainSelect = document.getElementById('directory-subdomain-filter');
+            
+            if (!subdomainSelect) return;
+
+            const currentValue = subdomainSelect.value;
+            subdomainSelect.innerHTML = '<option value="">All Subdomains</option>';
+            
+            if (!targetId) {
+                // Load all subdomains if no target is selected
+                const response = await API.subdomains.getAll({ limit: 1000 });
+                if (response && response.ok) {
+                    const data = await response.json();
+                    const subdomains = data.success ? data.data : [];
+                    
+                    subdomains.forEach(subdomain => {
+                        const option = document.createElement('option');
+                        option.value = subdomain.id;
+                        option.textContent = `${subdomain.subdomain} (${subdomain.target_domain})`;
+                        subdomainSelect.appendChild(option);
+                    });
+                }
+            } else {
+                // Load subdomains for specific target
+                const response = await API.subdomains.getAll({ 
+                    target_id: targetId,
+                    limit: 1000
+                });
+                
+                if (response && response.ok) {
+                    const data = await response.json();
+                    const subdomains = data.success ? data.data : [];
+                    
+                    subdomains.forEach(subdomain => {
+                        const option = document.createElement('option');
+                        option.value = subdomain.id;
+                        option.textContent = subdomain.subdomain;
+                        subdomainSelect.appendChild(option);
+                    });
+                }
+            }
+            
+            if (currentValue) {
+                const optionExists = Array.from(subdomainSelect.options).some(option => option.value === currentValue);
+                if (optionExists) {
+                    subdomainSelect.value = currentValue;
+                }
+            }
+            
+            console.log(`Loaded subdomains for content discovery filter`);
+            
+        } catch (error) {
+            console.error('Failed to load subdomains for content discovery filter:', error);
         }
     },
 
     async load() {
         try {
+            // Get filter values including subdomain
+            const targetId = document.getElementById('directory-target-filter')?.value;
+            const subdomainId = document.getElementById('directory-subdomain-filter')?.value;
+            const sourceFilter = document.getElementById('directory-source-filter')?.value;
+            const statusFilter = document.getElementById('directory-status-filter')?.value;
+            const search = document.getElementById('directory-search')?.value;
+            
+            // Build API parameters
+            const params = { job_type: 'content_discovery' };
+            
+            if (targetId) params.target_id = targetId;
+            if (subdomainId) params.subdomain_id = subdomainId;
+            if (sourceFilter) params.source = sourceFilter;
+            if (statusFilter) params.status_code = statusFilter;
+            if (search && search.trim()) params.search = search.trim();
+
+            console.log('📡 Loading content discovery scans with params:', params);
+
             // Only load content_discovery scan jobs
-            const response = await API.scans.getJobs({ job_type: 'content_discovery' });
+            const response = await API.scans.getJobs(params);
             if (!response) return;
             
             const data = await response.json();
@@ -415,10 +636,21 @@ const Directories = {
                 scan.status === 'running' || scan.status === 'pending'
             ));
             this.updateLastUpdateTime();
+            
+            // Show search results message if search was performed
+            if (search && search.trim()) {
+                const message = `Found ${scans.length} content discovery scans matching "${search.trim()}"`;
+                if (scans.length === 0) {
+                    Utils.showMessage('No scans found matching your search criteria', 'warning', 'scan-messages');
+                } else {
+                    Utils.showMessage(message, 'success', 'scan-messages');
+                }
+            }
+            
         } catch (error) {
             console.error('Failed to load content discovery scans:', error);
             document.getElementById('scans-list').innerHTML = 
-                '<tr><td colspan="8" style="text-align: center; color: #dc2626;">Failed to load content discovery scans</td></tr>';
+                '<tr><td colspan="9" style="text-align: center; color: #dc2626;">Failed to load content discovery scans</td></tr>';
         }
     },
 
@@ -429,9 +661,10 @@ const Directories = {
             scansList.innerHTML = scans.map(scan => {
                 // Enhanced target name resolution
                 const targetName = this.getTargetName(scan);
+                const subdomainName = this.getSubdomainName(scan);
                 const isRunning = scan.status === 'running' || scan.status === 'pending';
                 
-                console.log(`🎯 Content Discovery Scan ${scan.id}: target_domain="${scan.target_domain}", domain="${scan.domain}", target_id="${scan.target_id}", resolved="${targetName}"`); // Debug log
+                console.log(`🎯 Content Discovery Scan ${scan.id}: target_domain="${scan.target_domain}", domain="${scan.domain}", target_id="${scan.target_id}", subdomain="${subdomainName}", resolved="${targetName}"`); // Debug log
                 
                 // Extract endpoint count from results
                 let endpointCount = '-';
@@ -450,6 +683,7 @@ const Directories = {
                     <tr class="${isRunning ? 'progress-row' : ''}">
                         <td style="font-family: 'Courier New', monospace;">${scan.id}</td>
                         <td style="color: #7c3aed; font-weight: bold;" title="Target ID: ${scan.target_id}">${targetName}</td>
+                        <td style="color: #9a4dff; font-weight: 600;" title="Subdomain: ${subdomainName || 'All subdomains'}">${subdomainName || 'All'}</td>
                         <td>Content Discovery</td>
                         <td><span class="status status-${scan.status} ${isRunning ? 'status-updating' : ''}">${scan.status.toUpperCase()}</span></td>
                         <td>
@@ -481,12 +715,13 @@ const Directories = {
                 `;
             }).join('');
         } else {
-            scansList.innerHTML = '<tr><td colspan="8" style="text-align: center; color: #6b46c1;">No content discovery scans yet. Start your first scan above!</td></tr>';
+            scansList.innerHTML = '<tr><td colspan="9" style="text-align: center; color: #6b46c1;">No content discovery scans yet. Start your first scan above!</td></tr>';
         }
     },
 
     async startScan() {
         const targetId = document.getElementById('scan-target').value;
+        const subdomainId = document.getElementById('scan-subdomain').value;
         
         if (!targetId) {
             Utils.showMessage('Please select a target', 'error', 'scan-messages');
@@ -497,13 +732,20 @@ const Directories = {
             Utils.setButtonLoading('start-scan-btn', true, '🕷️ Starting Content Discovery...');
             
             // Start content_discovery scan type
-            const response = await API.scans.start(targetId, ['content_discovery'], 'medium');
+            const scanTypes = ['content_discovery'];
+            const config = {
+                subdomain_id: subdomainId || null
+            };
+            
+            const response = await API.scans.start(targetId, scanTypes, 'medium', config);
             
             if (response && response.ok) {
-                Utils.showMessage('Content discovery scan started successfully!', 'success', 'scan-messages');
+                const subdomainText = subdomainId ? ' on selected subdomain' : ' on all subdomains';
+                Utils.showMessage('Content discovery scan started successfully!' + subdomainText, 'success', 'scan-messages');
                 
                 // Reset the form
                 document.getElementById('scan-target').value = '';
+                document.getElementById('scan-subdomain').value = '';
                 
                 // Immediately refresh and enable aggressive updates
                 await this.load();
@@ -566,11 +808,13 @@ const Directories = {
                 
                 // Get target name for export
                 const targetName = this.getTargetName(scanData);
+                const subdomainName = this.getSubdomainName(scanData);
                 
                 // Prepare export data
                 const exportData = {
                     scan_id: scanId,
                     target: targetName,
+                    subdomain: subdomainName || 'All subdomains',
                     scan_type: 'Content Discovery',
                     status: scanData.status,
                     created_at: scanData.created_at,
@@ -604,8 +848,8 @@ const Directories = {
     },
 
     downloadCSV(data, scanId) {
-        let csvContent = 'Scan ID,Target,Scan Type,Status,Created,Completed,Total Endpoints\n';
-        csvContent += `${data.scan_id},"${data.target}","${data.scan_type}","${data.status}","${data.created_at}","${data.completed_at || 'N/A'}","${data.results.total_count || data.results.endpoints_found || 0}"\n\n`;
+        let csvContent = 'Scan ID,Target,Subdomain,Scan Type,Status,Created,Completed,Total Endpoints\n';
+        csvContent += `${data.scan_id},"${data.target}","${data.subdomain}","${data.scan_type}","${data.status}","${data.created_at}","${data.completed_at || 'N/A'}","${data.results.total_count || data.results.endpoints_found || 0}"\n\n`;
         
         // Add endpoints if available
         if (data.results.endpoints && data.results.endpoints.length > 0) {
@@ -638,6 +882,7 @@ const Directories = {
         xmlContent += '<content_discovery_scan_results>\n';
         xmlContent += `  <scan_id>${data.scan_id}</scan_id>\n`;
         xmlContent += `  <target>${this.escapeXml(data.target)}</target>\n`;
+        xmlContent += `  <subdomain>${this.escapeXml(data.subdomain)}</subdomain>\n`;
         xmlContent += `  <scan_type>${this.escapeXml(data.scan_type)}</scan_type>\n`;
         xmlContent += `  <status>${this.escapeXml(data.status)}</status>\n`;
         xmlContent += `  <created_at>${this.escapeXml(data.created_at)}</created_at>\n`;

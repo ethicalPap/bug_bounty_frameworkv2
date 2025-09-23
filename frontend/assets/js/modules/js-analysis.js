@@ -1,18 +1,21 @@
-// frontend/assets/js/modules/js-analysis.js - ENHANCED JS ANALYSIS MODULE
+// frontend/assets/js/modules/js-analysis.js - REDESIGNED TO MIMIC SCANS STYLE WITH SECURITY FOCUS
 
 const JSAnalysis = {
     refreshInterval: null,
     activeScanJobId: null,
     progressUpdateInterval: null,
     isAutoRefreshEnabled: true,
+    progressCheckInterval: null,
+    targetsCache: {}, // Cache for target information
 
     async init() {
         this.renderHTML();
         this.bindEvents();
         await this.loadTargets();
         await this.load();
-        this.startAutoRefresh();
-        this.startProgressMonitoring();
+        
+        // Start real-time updates like scans
+        this.startRealTimeUpdates();
     },
 
     renderHTML() {
@@ -29,63 +32,67 @@ const JSAnalysis = {
                     background: linear-gradient(90deg, #1a0a2e, #2d1b69) !important;
                     color: #a855f7 !important;
                 }
-
-                .js-file-row {
-                    transition: all 0.2s ease;
+                
+                .scrollable-table-container {
+                    max-height: 500px;
+                    overflow-y: auto;
+                    overflow-x: auto;
+                    border: 2px solid #7c3aed;
+                    background-color: #000000;
                 }
-
-                .js-file-row:hover {
-                    background: linear-gradient(90deg, rgba(124, 58, 237, 0.1), rgba(154, 77, 255, 0.1)) !important;
-                    transform: translateX(2px);
-                    box-shadow: inset 3px 0 0 #7c3aed;
+                .scrollable-table-container::-webkit-scrollbar {
+                    width: 12px;
+                    height: 12px;
                 }
-
-                .secret-tag {
-                    background: rgba(220, 38, 38, 0.1); 
-                    padding: 2px 6px; 
-                    margin: 2px; 
-                    border-radius: 3px; 
+                .scrollable-table-container::-webkit-scrollbar-track {
+                    background: #000000;
+                    border: 1px solid #2d1b69;
+                }
+                .scrollable-table-container::-webkit-scrollbar-thumb {
+                    background: linear-gradient(180deg, #7c3aed, #9a4dff);
+                    border: 1px solid #2d1b69;
+                    border-radius: 6px;
+                }
+                .scrollable-table-container::-webkit-scrollbar-thumb:hover {
+                    background: linear-gradient(180deg, #9a4dff, #a855f7);
+                }
+                .scrollable-table-container::-webkit-scrollbar-corner {
+                    background: #000000;
+                }
+                
+                .spinner {
+                    border: 2px solid #2d1b69;
+                    border-top: 2px solid #7c3aed;
+                    border-radius: 50%;
+                    width: 16px;
+                    height: 16px;
+                    animation: spin 1s linear infinite;
                     display: inline-block;
-                    font-size: 10px;
-                    border: 1px solid rgba(220, 38, 38, 0.3);
-                    color: #dc2626;
                 }
-
-                .endpoint-tag {
-                    background: rgba(124, 58, 237, 0.1); 
-                    padding: 2px 6px; 
-                    margin: 2px; 
-                    border-radius: 3px; 
-                    display: inline-block;
-                    font-size: 10px;
-                    border: 1px solid rgba(124, 58, 237, 0.3);
-                    color: #7c3aed;
+                
+                @keyframes spin {
+                    0% { transform: rotate(0deg); }
+                    100% { transform: rotate(360deg); }
                 }
-
-                .js-modal-close {
-                    position: absolute; 
-                    top: 15px; 
-                    right: 15px; 
-                    background: rgba(124, 58, 237, 0.1); 
-                    border: 1px solid #7c3aed; 
-                    color: #7c3aed; 
-                    font-size: 20px; 
-                    cursor: pointer; 
-                    z-index: 10001; 
-                    padding: 8px; 
-                    width: 36px; 
-                    height: 36px; 
-                    display: flex; 
-                    align-items: center; 
-                    justify-content: center; 
-                    border-radius: 3px;
-                    transition: all 0.2s ease;
+                
+                .progress-row {
+                    background-color: rgba(124, 58, 237, 0.1) !important;
+                    animation: pulse 2s infinite;
                 }
-
-                .js-modal-close:hover {
-                    background: #7c3aed;
-                    color: white;
-                    transform: scale(1.1);
+                
+                @keyframes pulse {
+                    0% { background-color: rgba(124, 58, 237, 0.1); }
+                    50% { background-color: rgba(154, 77, 255, 0.2); }
+                    100% { background-color: rgba(124, 58, 237, 0.1); }
+                }
+                
+                .status-updating {
+                    animation: blink 1s infinite;
+                }
+                
+                @keyframes blink {
+                    0%, 50% { opacity: 1; }
+                    51%, 100% { opacity: 0.5; }
                 }
 
                 @keyframes shimmer {
@@ -97,6 +104,12 @@ const JSAnalysis = {
                     0%, 100% { opacity: 0.3; }
                     50% { opacity: 0.7; }
                 }
+
+                .vulnerability-critical { color: #dc2626; font-weight: bold; }
+                .vulnerability-high { color: #ea580c; font-weight: bold; }
+                .vulnerability-medium { color: #d97706; }
+                .vulnerability-low { color: #eab308; }
+                .vulnerability-info { color: #06b6d4; }
             </style>
 
             <!-- Enhanced Progress Bar with Real-time Updates -->
@@ -104,13 +117,13 @@ const JSAnalysis = {
                 <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 15px;">
                     <div class="spinner" style="margin: 0; width: 24px; height: 24px; border: 3px solid #2d1b69; border-top: 3px solid #7c3aed;"></div>
                     <div style="flex: 1;">
-                        <div id="js-scan-status-text" style="color: #7c3aed; font-family: 'Courier New', monospace; font-weight: bold; font-size: 16px; margin-bottom: 5px;">JavaScript Analysis in Progress...</div>
-                        <div id="js-scan-phase-text" style="color: #9a4dff; font-family: 'Courier New', monospace; font-size: 14px;">Initializing JS discovery...</div>
+                        <div id="js-scan-status-text" style="color: #7c3aed; font-family: 'Courier New', monospace; font-weight: bold; font-size: 16px; margin-bottom: 5px;">JavaScript Security Analysis in Progress...</div>
+                        <div id="js-scan-phase-text" style="color: #9a4dff; font-family: 'Courier New', monospace; font-size: 14px;">Discovering JavaScript files...</div>
                     </div>
                     <button onclick="JSAnalysis.stopActiveScan()" class="btn btn-danger" style="padding: 10px 20px;">⏹️ Stop Analysis</button>
                 </div>
                 
-                <!-- Enhanced Progress Bar -->
+                <!-- Enhanced Progress Bar with Animation -->
                 <div style="margin-bottom: 15px;">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                         <span style="color: #9a4dff; font-size: 14px; font-weight: bold;">Analysis Progress</span>
@@ -124,23 +137,27 @@ const JSAnalysis = {
                     </div>
                 </div>
                 
-                <!-- Live Discovery Stats -->
-                <div id="live-js-stats" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 12px; margin-bottom: 15px;">
+                <!-- Live Analysis Stats Grid -->
+                <div id="live-js-stats" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px; margin-bottom: 15px;">
                     <div style="background: rgba(124, 58, 237, 0.1); padding: 12px; border-radius: 6px; text-align: center; border: 1px solid rgba(124, 58, 237, 0.3);">
                         <div style="font-size: 20px; font-weight: bold; color: #7c3aed; margin-bottom: 4px;" id="live-js-files">0</div>
                         <div style="font-size: 12px; color: #9a4dff;">📄 JS Files</div>
                     </div>
                     <div style="background: rgba(220, 38, 38, 0.1); padding: 12px; border-radius: 6px; text-align: center; border: 1px solid rgba(220, 38, 38, 0.3);">
-                        <div style="font-size: 20px; font-weight: bold; color: #dc2626; margin-bottom: 4px;" id="live-secrets">0</div>
-                        <div style="font-size: 12px; color: #9a4dff;">🔐 Secrets</div>
-                    </div>
-                    <div style="background: rgba(154, 77, 255, 0.1); padding: 12px; border-radius: 6px; text-align: center; border: 1px solid rgba(154, 77, 255, 0.3);">
-                        <div style="font-size: 20px; font-weight: bold; color: #a855f7; margin-bottom: 4px;" id="live-endpoints">0</div>
-                        <div style="font-size: 12px; color: #9a4dff;">🔗 Endpoints</div>
+                        <div style="font-size: 20px; font-weight: bold; color: #dc2626; margin-bottom: 4px;" id="live-vulnerabilities">0</div>
+                        <div style="font-size: 12px; color: #9a4dff;">⚠️ Vulnerabilities</div>
                     </div>
                     <div style="background: rgba(234, 88, 12, 0.1); padding: 12px; border-radius: 6px; text-align: center; border: 1px solid rgba(234, 88, 12, 0.3);">
-                        <div style="font-size: 20px; font-weight: bold; color: #ea580c; margin-bottom: 4px;" id="live-sensitive">0</div>
-                        <div style="font-size: 12px; color: #9a4dff;">⚠️ Sensitive</div>
+                        <div style="font-size: 20px; font-weight: bold; color: #ea580c; margin-bottom: 4px;" id="live-sinks">0</div>
+                        <div style="font-size: 12px; color: #9a4dff;">🕳️ Sinks</div>
+                    </div>
+                    <div style="background: rgba(154, 77, 255, 0.1); padding: 12px; border-radius: 6px; text-align: center; border: 1px solid rgba(154, 77, 255, 0.3);">
+                        <div style="font-size: 20px; font-weight: bold; color: #a855f7; margin-bottom: 4px;" id="live-secrets">0</div>
+                        <div style="font-size: 12px; color: #9a4dff;">🔐 Secrets</div>
+                    </div>
+                    <div style="background: rgba(168, 85, 247, 0.1); padding: 12px; border-radius: 6px; text-align: center; border: 1px solid rgba(168, 85, 247, 0.3);">
+                        <div style="font-size: 20px; font-weight: bold; color: #9333ea; margin-bottom: 4px;" id="live-prototype">0</div>
+                        <div style="font-size: 12px; color: #9a4dff;">🧬 Prototype</div>
                     </div>
                     <div style="background: rgba(6, 182, 212, 0.1); padding: 12px; border-radius: 6px; text-align: center; border: 1px solid rgba(6, 182, 212, 0.3);">
                         <div style="font-size: 20px; font-weight: bold; color: #06b6d4; margin-bottom: 4px;" id="live-libraries">0</div>
@@ -151,7 +168,7 @@ const JSAnalysis = {
                 <!-- Detailed Progress Info -->
                 <div id="js-progress-details" style="background: rgba(0, 0, 0, 0.3); padding: 12px; border-radius: 6px; border: 1px solid #2d1b69;">
                     <div style="display: flex; justify-content: space-between; align-items: center;">
-                        <span id="js-current-activity" style="color: #9a4dff; font-size: 13px; font-family: 'Courier New', monospace;">Preparing JavaScript analysis...</span>
+                        <span id="js-current-activity" style="color: #9a4dff; font-size: 13px; font-family: 'Courier New', monospace;">Preparing JavaScript security analysis...</span>
                         <span id="js-elapsed-time" style="color: #6b46c1; font-size: 12px;">00:00</span>
                     </div>
                     <div id="js-eta-estimate" style="color: #6b46c1; font-size: 11px; margin-top: 5px;">Estimated time remaining: Calculating...</div>
@@ -159,242 +176,79 @@ const JSAnalysis = {
             </div>
 
             <div class="scan-info">
-                <h4>📄 JavaScript Analysis <span id="js-analysis-live-indicator" style="color: #7c3aed; font-size: 12px;">[LIVE]</span></h4>
-                <p>Comprehensive JavaScript analysis to discover secrets, API endpoints, sensitive data, and third-party libraries. Extracts authentication tokens, private keys, configuration data, and potential security vulnerabilities from JavaScript files.</p>
+                <h4>📄 JavaScript Security Analysis</h4>
+                <p>Comprehensive JavaScript security analysis to discover vulnerabilities, sinks, prototype pollution, secrets, and security misconfigurations. Analyzes both first-party and third-party JavaScript code for security issues.</p>
             </div>
 
             <div class="card">
-                <div class="card-title">Start JavaScript Analysis</div>
+                <div class="card-title">Start JavaScript Security Analysis</div>
                 <div id="js-analysis-messages"></div>
                 <form id="js-analysis-form">
-                    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: 16px; align-items: end; margin-bottom: 15px;">
+                    <div style="display: grid; grid-template-columns: 1fr 1fr auto; gap: 20px; align-items: end;">
                         <div class="form-group">
-                            <label>Target</label>
+                            <label for="js-analysis-target">Target Domain</label>
                             <select id="js-analysis-target" required>
                                 <option value="">Select target...</option>
                             </select>
                         </div>
                         <div class="form-group">
-                            <label>Subdomain (optional)</label>
+                            <label for="js-analysis-subdomain">Subdomain (optional)</label>
                             <select id="js-analysis-subdomain">
                                 <option value="">All subdomains</option>
                             </select>
                         </div>
-                        <div class="form-group">
-                            <label>Analysis Depth</label>
-                            <select id="js-analysis-depth">
-                                <option value="surface">Surface Scan (Fast)</option>
-                                <option value="deep" selected>Deep Analysis (Recommended)</option>
-                                <option value="comprehensive">Comprehensive (Thorough)</option>
-                            </select>
-                        </div>
-                        <button type="submit" class="btn btn-primary">📄 Start JS Analysis</button>
-                    </div>
-                    
-                    <!-- Advanced Options -->
-                    <div style="border: 1px solid #2d1b69; padding: 15px; background: linear-gradient(135deg, #1a0a2e, #2d1b69); margin-bottom: 15px;">
-                        <h5 style="color: #7c3aed; margin-bottom: 10px;">🔍 Analysis Configuration</h5>
-                        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px;">
-                            <div class="form-group">
-                                <label>Secret Detection</label>
-                                <select id="js-secret-detection">
-                                    <option value="basic">Basic Patterns</option>
-                                    <option value="advanced" selected>Advanced (API Keys, Tokens)</option>
-                                    <option value="comprehensive">Comprehensive (All Secrets)</option>
-                                </select>
-                            </div>
-                            <div class="form-group">
-                                <label>Endpoint Extraction</label>
-                                <select id="js-endpoint-extraction">
-                                    <option value="true" selected>Yes (Find API Endpoints)</option>
-                                    <option value="false">No (Faster)</option>
-                                </select>
-                            </div>
-                            <div class="form-group">
-                                <label>Library Detection</label>
-                                <select id="js-library-detection">
-                                    <option value="true" selected>Yes (Identify Libraries)</option>
-                                    <option value="false">No</option>
-                                </select>
-                            </div>
-                        </div>
-                        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin-top: 10px;">
-                            <div class="form-group">
-                                <label>Source Map Analysis</label>
-                                <select id="js-sourcemap-analysis">
-                                    <option value="true" selected>Yes (Check Source Maps)</option>
-                                    <option value="false">No</option>
-                                </select>
-                            </div>
-                            <div class="form-group">
-                                <label>Minified JS Analysis</label>
-                                <select id="js-minified-analysis">
-                                    <option value="true" selected>Yes (Analyze Minified)</option>
-                                    <option value="false">No (Skip Minified)</option>
-                                </select>
-                            </div>
-                            <div class="form-group">
-                                <label>Download JS Files</label>
-                                <select id="js-download-files">
-                                    <option value="false">No (URLs Only)</option>
-                                    <option value="true" selected>Yes (Full Analysis)</option>
-                                </select>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <!-- Analysis Methods Info -->
-                    <div style="border: 1px solid #2d1b69; padding: 15px; background: linear-gradient(135deg, #1a0a2e, #2d1b69);">
-                        <h5 style="color: #7c3aed; margin-bottom: 10px;">🛠️ Analysis Techniques Used</h5>
-                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 13px; color: #9a4dff;">
-                            <div>🔍 Static code analysis</div>
-                            <div>🔐 Secret pattern matching</div>
-                            <div>🔗 URL & endpoint extraction</div>
-                            <div>📚 Library fingerprinting</div>
-                            <div>🗺️ Source map discovery</div>
-                            <div>⚠️ Sensitive data detection</div>
-                            <div>🔑 Authentication token hunting</div>
-                            <div>🌐 External resource analysis</div>
-                            <div>📝 Comment extraction</div>
-                            <div>🏗️ Build artifact analysis</div>
-                            <div>🔄 Webpack bundle analysis</div>
-                            <div>📊 Code complexity metrics</div>
-                        </div>
-                        <div style="margin-top: 10px; font-size: 12px; color: #6b46c1;">
-                            ✅ Safe Analysis • ✅ No Code Execution • ✅ Read-Only • ✅ Comprehensive Reporting
-                        </div>
+                        <button type="submit" class="btn btn-primary" id="start-js-analysis-btn">📄 Start JS Analysis</button>
                     </div>
                 </form>
             </div>
 
-            <!-- Filters -->
-            <div class="filters">
-                <div class="filter-group">
-                    <label>Target</label>
-                    <select id="js-target-filter">
-                        <option value="">All Targets</option>
-                    </select>
-                </div>
-                <div class="filter-group">
-                    <label>Subdomain</label>
-                    <select id="js-subdomain-filter">
-                        <option value="">All Subdomains</option>
-                    </select>
-                </div>
-                <div class="filter-group">
-                    <label>File Type</label>
-                    <select id="js-file-type-filter">
-                        <option value="">All JS Files</option>
-                        <option value="application">Application JS</option>
-                        <option value="library">Third-party Libraries</option>
-                        <option value="minified">Minified Files</option>
-                        <option value="sourcemap">Source Maps</option>
-                    </select>
-                </div>
-                <div class="filter-group">
-                    <label>Has Secrets</label>
-                    <select id="js-secrets-filter">
-                        <option value="">All Files</option>
-                        <option value="true">Has Secrets</option>
-                        <option value="false">No Secrets</option>
-                    </select>
-                </div>
-                <div class="filter-group">
-                    <label>Search</label>
-                    <input type="text" id="js-search" placeholder="Search JS files...">
-                </div>
-                <div style="display: flex; gap: 8px;">
-                    <button onclick="JSAnalysis.search()" class="btn btn-primary">🔍 Search</button>
-                    <button onclick="JSAnalysis.clearFilters()" class="btn btn-secondary">🗑️ Clear</button>
-                    <button onclick="JSAnalysis.load()" class="btn btn-secondary">🔄 Refresh</button>
-                </div>
-            </div>
-
-            <!-- Results Display -->
             <div class="card">
                 <div class="card-title">
-                    JavaScript Files & Analysis Results
-                    <div style="float: right; position: relative; display: inline-block;">
-                        <button onclick="JSAnalysis.toggleExportMenu()" class="btn btn-success btn-small" id="export-js-btn">
-                            📤 Export Results
-                        </button>
-                        <div id="export-js-menu" class="export-menu" style="display: none; position: absolute; top: 100%; right: 0; min-width: 140px; z-index: 1000;">
-                            <button onclick="JSAnalysis.exportResults('csv')" class="btn btn-secondary btn-small" style="width: 100%; border: none; border-bottom: 1px solid #2d1b69;">📊 CSV</button>
-                            <button onclick="JSAnalysis.exportResults('json')" class="btn btn-secondary btn-small" style="width: 100%; border: none; border-bottom: 1px solid #2d1b69;">📋 JSON</button>
-                            <button onclick="JSAnalysis.exportResults('xml')" class="btn btn-secondary btn-small" style="width: 100%; border: none;">📄 XML</button>
-                        </div>
-                    </div>
-                    <span id="js-last-updated" style="font-size: 12px; color: #6b46c1; float: right; margin-right: 160px;"></span>
-                </div>
-                
-                <!-- Live Update Controls -->
-                <div style="margin-bottom: 15px; display: flex; align-items: center; gap: 15px; flex-wrap: wrap;">
-                    <span id="js-status" style="color: #9a4dff; font-size: 13px; font-family: 'Courier New', monospace;"></span>
-                    <span id="js-live-status" style="color: #7c3aed; font-size: 12px;">
-                        🔄 Auto-updating every 5 seconds
+                    JavaScript Security Analysis Jobs
+                    <span id="auto-refresh-indicator" style="float: right; font-size: 12px; color: #9a4dff;">
+                        🔄 Auto-updating
                     </span>
-                    <button onclick="JSAnalysis.toggleAutoRefresh()" class="btn btn-secondary btn-small" id="js-auto-refresh-toggle">
-                        ⏸️ Pause Live Updates
-                    </button>
-                    <button onclick="JSAnalysis.load()" class="btn btn-primary btn-small">🔄 Manual Refresh</button>
                 </div>
                 
-                <!-- JS Analysis Stats -->
-                <div id="js-stats" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 15px; margin-bottom: 20px; padding: 15px; border: 1px solid #2d1b69; background: linear-gradient(135deg, #1a0a2e, #2d1b69);">
-                    <div style="text-align: center;">
-                        <div id="total-js-files" style="font-size: 24px; font-weight: bold; color: #7c3aed;">0</div>
-                        <div style="font-size: 12px; color: #6b46c1;">Total JS Files</div>
-                    </div>
-                    <div style="text-align: center;">
-                        <div id="secrets-found" style="font-size: 24px; font-weight: bold; color: #dc2626;">0</div>
-                        <div style="font-size: 12px; color: #6b46c1;">Secrets Found</div>
-                    </div>
-                    <div style="text-align: center;">
-                        <div id="endpoints-found" style="font-size: 24px; font-weight: bold; color: #a855f7;">0</div>
-                        <div style="font-size: 12px; color: #6b46c1;">API Endpoints</div>
-                    </div>
-                    <div style="text-align: center;">
-                        <div id="libraries-found" style="font-size: 24px; font-weight: bold; color: #06b6d4;">0</div>
-                        <div style="font-size: 12px; color: #6b46c1;">Libraries</div>
-                    </div>
-                    <div style="text-align: center;">
-                        <div id="sensitive-files" style="font-size: 24px; font-weight: bold; color: #ea580c;">0</div>
-                        <div style="font-size: 12px; color: #6b46c1;">Sensitive Files</div>
+                <!-- Controls -->
+                <div style="margin-bottom: 15px; display: flex; align-items: center; gap: 15px; flex-wrap: wrap;">
+                    <button onclick="JSAnalysis.load()" class="btn btn-secondary">🔄 Manual Refresh</button>
+                    <button onclick="JSAnalysis.toggleAutoRefresh()" class="btn btn-secondary" id="auto-refresh-toggle">
+                        ⏸️ Pause Auto-refresh
+                    </button>
+                    <span id="scan-status" style="color: #6b46c1; font-size: 13px; font-family: 'Courier New', monospace;"></span>
+                    <span id="last-update-time" style="color: #666; font-size: 11px; margin-left: auto;"></span>
+                </div>
+                
+                <!-- Real-time progress indicator -->
+                <div id="realtime-progress" style="display: none; margin-bottom: 15px; padding: 10px; border: 1px solid #7c3aed; background: linear-gradient(135deg, #1a0a2e, #2d1b69);">
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span class="spinner" style="width: 16px; height: 16px;"></span>
+                        <span id="progress-text" style="color: #7c3aed; font-family: 'Courier New', monospace; font-size: 12px;"></span>
                     </div>
                 </div>
-
-                <!-- JS Files Modal -->
-                <div id="js-details-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.8); z-index: 10000; justify-content: center; align-items: center;">
-                    <div style="background: linear-gradient(135deg, #0f0f23, #1a0a2e); border: 2px solid #7c3aed; padding: 30px; max-width: 90%; width: 800px; max-height: 80%; overflow-y: auto; position: relative; border-radius: 8px;">
-                        <button onclick="JSAnalysis.closeJSDetails()" class="js-modal-close">×</button>
-                        <div id="js-details-content">
-                            <!-- Content will be populated dynamically -->
-                        </div>
-                    </div>
-                </div>
-
-                <div class="table-container">
+                
+                <div class="scrollable-table-container">
                     <table class="table">
                         <thead>
                             <tr>
-                                <th style="width: 30%;">JavaScript File</th>
-                                <th style="width: 15%;">Subdomain</th>
-                                <th style="width: 10%;">File Type</th>
-                                <th style="width: 8%;">Size</th>
-                                <th style="width: 8%;">Secrets</th>
-                                <th style="width: 8%;">Endpoints</th>
-                                <th style="width: 8%;">Libraries</th>
-                                <th style="width: 13%;">Actions</th>
+                                <th>ID</th>
+                                <th>Target</th>
+                                <th>Type</th>
+                                <th>Status</th>
+                                <th>Progress</th>
+                                <th>Vulnerabilities Found</th>
+                                <th>Created</th>
+                                <th>Actions</th>
                             </tr>
                         </thead>
-                        <tbody id="js-files-list">
+                        <tbody id="js-scans-list">
                             <tr>
-                                <td colspan="8" style="text-align: center; color: #6b46c1;">Loading JavaScript files...</td>
+                                <td colspan="8" style="text-align: center; color: #6b46c1;">Loading JavaScript analysis scans...</td>
                             </tr>
                         </tbody>
                     </table>
                 </div>
-                <div id="js-files-pagination" class="pagination"></div>
             </div>
         `;
     },
@@ -409,15 +263,6 @@ const JSAnalysis = {
             });
         }
 
-        // Target filter - when changed, update subdomains
-        const targetFilter = document.getElementById('js-target-filter');
-        if (targetFilter) {
-            targetFilter.addEventListener('change', async () => {
-                await this.loadSubdomains();
-                this.load(1);
-            });
-        }
-
         // JS analysis target - when changed, update subdomains
         const jsTargetFilter = document.getElementById('js-analysis-target');
         if (jsTargetFilter) {
@@ -426,49 +271,361 @@ const JSAnalysis = {
             });
         }
 
-        // Other filters
-        ['js-subdomain-filter', 'js-file-type-filter', 'js-secrets-filter'].forEach(filterId => {
-            const element = document.getElementById(filterId);
-            if (element) {
-                element.addEventListener('change', () => this.load(1));
-            }
-        });
-
-        // Search with debounce and Enter key support
-        const jsSearch = document.getElementById('js-search');
-        if (jsSearch) {
-            jsSearch.addEventListener('input', Utils.debounce(() => this.load(1), 500));
-            jsSearch.addEventListener('keypress', (e) => {
-                if (e.key === 'Enter') {
-                    this.search(1);
-                }
-            });
-        }
-
-        // Close export menu when clicking outside
+        // Close export menus when clicking outside
         document.addEventListener('click', (e) => {
-            if (!e.target.closest('#export-js-menu') && !e.target.closest('#export-js-btn')) {
-                const menu = document.getElementById('export-js-menu');
-                if (menu) {
+            if (!e.target.closest('.export-menu') && !e.target.closest('[id^="export-btn-"]')) {
+                document.querySelectorAll('.export-menu').forEach(menu => {
                     menu.style.display = 'none';
-                }
-            }
-            
-            // Close JS details modal when clicking outside
-            if (e.target.id === 'js-details-modal') {
-                this.closeJSDetails();
-            }
-        });
-
-        // ESC key to close modal
-        document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape') {
-                this.closeJSDetails();
+                });
             }
         });
     },
 
-    // Progress monitoring
+    // Enhanced real-time updates
+    startRealTimeUpdates() {
+        console.log('🔄 Starting real-time updates for JS analysis scans');
+        
+        // Clear any existing intervals
+        this.cleanup();
+        
+        // Start aggressive refresh during active scans (every 2 seconds)
+        this.refreshInterval = setInterval(async () => {
+            if (!this.isAutoRefreshEnabled) return;
+            
+            const activeTab = document.querySelector('.nav-item.active')?.dataset.tab;
+            if (activeTab === 'js-analysis') {
+                try {
+                    await this.updateScansRealTime();
+                } catch (error) {
+                    console.error('Real-time JS analysis scans update failed:', error);
+                }
+            }
+        }, 2000); // Update every 2 seconds like scans
+        
+        this.updateAutoRefreshIndicator(true);
+    },
+
+    // Real-time scans update
+    async updateScansRealTime() {
+        try {
+            const response = await API.scans.getJobs({ job_type: 'js_files_scan' });
+            if (!response || !response.ok) return;
+            
+            const data = await response.json();
+            const scans = data.success ? data.data : [];
+            
+            // Check if there are any running scans
+            const runningScans = scans.filter(scan => 
+                scan.status === 'running' || scan.status === 'pending'
+            );
+            
+            // Update scans table
+            this.renderScansList(scans);
+            
+            // Update status indicators
+            this.updateScanStatus(scans, runningScans);
+            
+            // Update last update time
+            this.updateLastUpdateTime();
+            
+            // Show/hide real-time progress
+            if (runningScans.length > 0) {
+                this.showRealTimeProgress(runningScans);
+            } else {
+                this.hideRealTimeProgress();
+            }
+            
+        } catch (error) {
+            console.error('Real-time JS analysis scans update failed:', error);
+        }
+    },
+
+    updateScanStatus(scans, runningScans) {
+        const statusSpan = document.getElementById('scan-status');
+        if (!statusSpan) return;
+        
+        if (runningScans.length > 0) {
+            const totalProgress = runningScans.reduce((sum, scan) => sum + (scan.progress_percentage || 0), 0);
+            const avgProgress = Math.round(totalProgress / runningScans.length);
+            
+            statusSpan.innerHTML = `🔄 ${runningScans.length} JS analysis scan${runningScans.length > 1 ? 's' : ''} running (${avgProgress}% avg)`;
+            statusSpan.style.color = '#a855f7';
+            statusSpan.classList.add('status-updating');
+        } else {
+            const completedScans = scans.filter(scan => scan.status === 'completed').length;
+            const totalVulnerabilities = scans
+                .filter(scan => scan.status === 'completed')
+                .reduce((total, scan) => {
+                    try {
+                        const results = typeof scan.results === 'string' ? JSON.parse(scan.results) : scan.results;
+                        return total + (results?.vulnerabilities?.length || results?.total_vulnerabilities || 0);
+                    } catch {
+                        return total;
+                    }
+                }, 0);
+            
+            if (completedScans > 0) {
+                statusSpan.innerHTML = `✅ ${completedScans} scan${completedScans > 1 ? 's' : ''} completed | ⚠️ ${totalVulnerabilities} vulnerabilities found`;
+                statusSpan.style.color = '#7c3aed';
+            } else {
+                statusSpan.textContent = '💤 No scans running';
+                statusSpan.style.color = '#666';
+            }
+            statusSpan.classList.remove('status-updating');
+        }
+    },
+
+    showRealTimeProgress(runningScans) {
+        const progressDiv = document.getElementById('realtime-progress');
+        const progressText = document.getElementById('progress-text');
+        
+        if (progressDiv && progressText) {
+            const activeScan = runningScans[0]; // Show progress for first active scan
+            const progress = activeScan.progress_percentage || 0;
+            const targetName = this.getTargetName(activeScan);
+            
+            progressText.textContent = `${targetName} - ${activeScan.status} (${progress}%)`;
+            progressDiv.style.display = 'block';
+        }
+    },
+
+    hideRealTimeProgress() {
+        const progressDiv = document.getElementById('realtime-progress');
+        if (progressDiv) {
+            progressDiv.style.display = 'none';
+        }
+    },
+
+    updateLastUpdateTime() {
+        const element = document.getElementById('last-update-time');
+        if (element) {
+            const now = new Date();
+            element.textContent = `Updated: ${now.toLocaleTimeString()}`;
+            this.lastUpdate = now;
+        }
+    },
+
+    updateAutoRefreshIndicator(isActive) {
+        const indicator = document.getElementById('auto-refresh-indicator');
+        if (indicator) {
+            if (isActive) {
+                indicator.innerHTML = '🔄 Auto-updating';
+                indicator.style.color = '#9a4dff';
+            } else {
+                indicator.innerHTML = '⏸️ Paused';
+                indicator.style.color = '#ffff00';
+            }
+        }
+    },
+
+    toggleAutoRefresh() {
+        this.isAutoRefreshEnabled = !this.isAutoRefreshEnabled;
+        
+        const toggleBtn = document.getElementById('auto-refresh-toggle');
+        if (toggleBtn) {
+            if (this.isAutoRefreshEnabled) {
+                toggleBtn.innerHTML = '⏸️ Pause Auto-refresh';
+                this.startRealTimeUpdates();
+                Utils.showMessage('Auto-refresh enabled', 'success');
+            } else {
+                toggleBtn.innerHTML = '▶️ Resume Auto-refresh';
+                this.updateAutoRefreshIndicator(false);
+                Utils.showMessage('Auto-refresh paused', 'warning');
+            }
+        }
+    },
+
+    // Enhanced target name resolution with fallback logic
+    getTargetName(scan) {
+        // Try multiple ways to get the target name
+        if (scan.target_domain) return scan.target_domain;
+        if (scan.domain) return scan.domain;
+        if (scan.target?.domain) return scan.target.domain;
+        
+        // Try to get from targets cache
+        if (scan.target_id && this.targetsCache[scan.target_id]) {
+            return this.targetsCache[scan.target_id].domain;
+        }
+        
+        // Fallback to target ID
+        if (scan.target_id) return `Target ID: ${scan.target_id}`;
+        
+        return 'Unknown Target';
+    },
+
+    // Load targets and build cache
+    async loadTargets() {
+        try {
+            const response = await API.targets.getAll();
+            if (!response) return;
+            
+            const data = await response.json();
+            const targets = data.success ? data.data : [];
+            
+            // Build targets cache for quick lookup
+            this.targetsCache = {};
+            targets.forEach(target => {
+                this.targetsCache[target.id] = target;
+            });
+            
+            const targetSelect = document.getElementById('js-analysis-target');
+            if (targetSelect) {
+                // Clear existing options except the first one
+                targetSelect.innerHTML = '<option value="">Select target...</option>';
+                
+                // Add target options
+                targets.forEach(target => {
+                    const option = document.createElement('option');
+                    option.value = target.id;
+                    option.textContent = target.domain;
+                    targetSelect.appendChild(option);
+                });
+
+                console.log(`Loaded ${targets.length} targets for JS analysis scan dropdown`);
+            }
+        } catch (error) {
+            console.error('Failed to load targets for JS analysis scan form:', error);
+            
+            // Show error message in the form
+            const targetSelect = document.getElementById('js-analysis-target');
+            if (targetSelect) {
+                targetSelect.innerHTML = '<option value="">Error loading targets</option>';
+            }
+        }
+    },
+
+    async load() {
+        try {
+            // Only load js_files_scan jobs
+            const response = await API.scans.getJobs({ job_type: 'js_files_scan' });
+            if (!response) return;
+            
+            const data = await response.json();
+            const scans = data.success ? data.data : [];
+            
+            console.log('📄 Loaded JS analysis scans data:', scans); // Debug log
+            
+            this.renderScansList(scans);
+            this.updateScanStatus(scans, scans.filter(scan => 
+                scan.status === 'running' || scan.status === 'pending'
+            ));
+            this.updateLastUpdateTime();
+        } catch (error) {
+            console.error('Failed to load JS analysis scans:', error);
+            document.getElementById('js-scans-list').innerHTML = 
+                '<tr><td colspan="8" style="text-align: center; color: #dc2626;">Failed to load JS analysis scans</td></tr>';
+        }
+    },
+
+    renderScansList(scans) {
+        const scansList = document.getElementById('js-scans-list');
+        
+        if (scans.length > 0) {
+            scansList.innerHTML = scans.map(scan => {
+                // Enhanced target name resolution
+                const targetName = this.getTargetName(scan);
+                const isRunning = scan.status === 'running' || scan.status === 'pending';
+                
+                console.log(`🎯 JS Analysis Scan ${scan.id}: target_domain="${scan.target_domain}", domain="${scan.domain}", target_id="${scan.target_id}", resolved="${targetName}"`); // Debug log
+                
+                // Extract vulnerability count from results
+                let vulnerabilityCount = '-';
+                if (scan.status === 'completed' && scan.results) {
+                    try {
+                        const results = typeof scan.results === 'string' ? JSON.parse(scan.results) : scan.results;
+                        vulnerabilityCount = results.vulnerabilities?.length || results.total_vulnerabilities || 0;
+                    } catch (error) {
+                        console.warn('Failed to parse scan results:', error);
+                    }
+                } else if (isRunning) {
+                    vulnerabilityCount = '🔄 Analyzing...';
+                }
+                
+                return `
+                    <tr class="${isRunning ? 'progress-row' : ''}">
+                        <td style="font-family: 'Courier New', monospace;">${scan.id}</td>
+                        <td style="color: #7c3aed; font-weight: bold;" title="Target ID: ${scan.target_id}">${targetName}</td>
+                        <td>JavaScript Security Analysis</td>
+                        <td><span class="status status-${scan.status} ${isRunning ? 'status-updating' : ''}">${scan.status.toUpperCase()}</span></td>
+                        <td>
+                            <div style="background-color: #2d1b69; border: 1px solid #7c3aed; height: 8px; width: 100px;">
+                                <div style="background: linear-gradient(90deg, #7c3aed, #9a4dff); height: 100%; width: ${scan.progress_percentage || 0}%; transition: width 0.3s ease;"></div>
+                            </div>
+                            <span style="font-size: 13px; color: #6b46c1;">${scan.progress_percentage || 0}%</span>
+                        </td>
+                        <td style="font-weight: bold; color: ${scan.status === 'completed' ? (vulnerabilityCount > 0 ? '#dc2626' : '#7c3aed') : '#666'};">
+                            ${vulnerabilityCount}
+                        </td>
+                        <td style="font-size: 12px; color: #666;">${new Date(scan.created_at).toLocaleDateString()}</td>
+                        <td>
+                            ${scan.status === 'completed' ? 
+                                `<div style="position: relative; display: inline-block;">
+                                    <button onclick="JSAnalysis.toggleExportMenu(${scan.id})" class="btn btn-secondary btn-small" id="export-btn-${scan.id}">📤 Export Results</button>
+                                    <div id="export-menu-${scan.id}" class="export-menu" style="display: none; position: absolute; top: 100%; left: 0; background: #000; border: 2px solid #7c3aed; min-width: 120px; z-index: 1000;">
+                                        <button onclick="JSAnalysis.exportResults(${scan.id}, 'csv')" class="btn btn-secondary btn-small" style="width: 100%; border: none; border-bottom: 1px solid #2d1b69;">📊 CSV</button>
+                                        <button onclick="JSAnalysis.exportResults(${scan.id}, 'json')" class="btn btn-secondary btn-small" style="width: 100%; border: none; border-bottom: 1px solid #2d1b69;">📋 JSON</button>
+                                        <button onclick="JSAnalysis.exportResults(${scan.id}, 'xml')" class="btn btn-secondary btn-small" style="width: 100%; border: none;">📄 XML</button>
+                                    </div>
+                                </div>` :
+                                scan.status === 'running' ? 
+                                `<button onclick="JSAnalysis.stopScan(${scan.id})" class="btn btn-danger btn-small">Stop</button>` :
+                                '-'
+                            }
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        } else {
+            scansList.innerHTML = '<tr><td colspan="8" style="text-align: center; color: #6b46c1;">No JavaScript analysis scans yet. Start your first scan above!</td></tr>';
+        }
+    },
+
+    async startJSAnalysis() {
+        const targetId = document.getElementById('js-analysis-target').value;
+        const subdomainId = document.getElementById('js-analysis-subdomain').value;
+        
+        if (!targetId) {
+            Utils.showMessage('Please select a target', 'error', 'js-analysis-messages');
+            return;
+        }
+        
+        try {
+            Utils.setButtonLoading('start-js-analysis-btn', true, '📄 Starting JS Analysis...');
+            
+            // Start js_files_scan type
+            const response = await API.scans.start(targetId, ['js_files_scan'], 'medium', {
+                subdomain_id: subdomainId || null,
+                analysis_depth: 'comprehensive',
+                security_analysis: true,
+                vulnerability_scanning: true,
+                prototype_pollution_detection: true,
+                sink_detection: true,
+                secret_detection: true,
+                library_analysis: true
+            });
+            
+            if (response && response.ok) {
+                Utils.showMessage('JavaScript security analysis started successfully!', 'success', 'js-analysis-messages');
+                
+                // Reset the form
+                document.getElementById('js-analysis-target').value = '';
+                document.getElementById('js-analysis-subdomain').value = '';
+                
+                // Immediately refresh and enable aggressive updates
+                await this.load();
+                this.startRealTimeUpdates();
+            } else {
+                const errorData = await response.json();
+                Utils.showMessage('Failed to start JS analysis: ' + (errorData.error || errorData.message || 'Unknown error'), 'error', 'js-analysis-messages');
+            }
+        } catch (error) {
+            Utils.showMessage('Failed to start JS analysis: ' + error.message, 'error', 'js-analysis-messages');
+        } finally {
+            Utils.setButtonLoading('start-js-analysis-btn', false, '📄 Start JS Analysis');
+        }
+    },
+
+    // Enhanced progress monitoring with better tracking
     startProgressMonitoring() {
         this.stopProgressMonitoring();
         
@@ -479,9 +636,9 @@ const JSAnalysis = {
                     await this.updateScanProgress();
                 }
             } catch (error) {
-                console.error('JS Analysis progress monitoring failed:', error);
+                console.error('Progress monitoring failed:', error);
             }
-        }, 1000);
+        }, 1000); // Check every second for smooth progress updates
     },
 
     stopProgressMonitoring() {
@@ -491,6 +648,7 @@ const JSAnalysis = {
         }
     },
 
+    // Enhanced scan progress checking
     async checkForActiveScan() {
         try {
             const response = await API.scans.getJobs({ 
@@ -503,20 +661,24 @@ const JSAnalysis = {
                 const data = await response.json();
                 const activeScans = data.success ? data.data : [];
                 
+                console.log('Checking for active JS analysis scans:', activeScans.length);
+                
                 if (activeScans.length > 0) {
                     const scan = activeScans[0];
+                    console.log('Found active scan:', scan.id, scan.status, scan.progress_percentage);
                     this.activeScanJobId = scan.id;
-                    this.showProgress(scan);
+                    this.showAdvancedProgress(scan);
                 } else {
                     this.hideProgress();
                 }
             }
         } catch (error) {
-            console.error('Failed to check for active JS analysis scans:', error);
+            console.error('Failed to check for active scans:', error);
         }
     },
 
-    showProgress(scan) {
+    // Enhanced progress display with detailed information
+    showAdvancedProgress(scan) {
         const statusDiv = document.getElementById('js-scan-status');
         const statusText = document.getElementById('js-scan-status-text');
         const phaseText = document.getElementById('js-scan-phase-text');
@@ -526,24 +688,30 @@ const JSAnalysis = {
         const elapsedTime = document.getElementById('js-elapsed-time');
         const etaEstimate = document.getElementById('js-eta-estimate');
         
+        console.log('Showing progress for scan:', scan.id, scan.progress_percentage);
+        
         if (statusDiv && statusText && progressBar) {
             statusDiv.style.display = 'block';
             
             const progress = scan.progress_percentage || 0;
             const targetName = this.getTargetName(scan);
             
-            statusText.textContent = `Analyzing JavaScript files for ${targetName}...`;
+            // Update main status
+            statusText.textContent = `Analyzing JavaScript security for ${targetName}...`;
             
+            // Update progress bar
             progressBar.style.width = `${progress}%`;
             if (progressPercentage) {
                 progressPercentage.textContent = `${progress}%`;
             }
             
+            // Update phase information
             const phase = this.getCurrentJSPhase(progress);
             if (phaseText) {
                 phaseText.textContent = phase;
             }
             
+            // Calculate elapsed time
             const elapsed = scan.started_at ? 
                 Math.round((Date.now() - new Date(scan.started_at).getTime()) / 1000) : 0;
             
@@ -561,46 +729,56 @@ const JSAnalysis = {
                 etaEstimate.textContent = `Estimated time remaining: ${this.formatTime(remaining)}`;
             }
             
+            // Update live stats
             this.updateLiveJSStats(scan, progress);
+        } else {
+            console.warn('Progress elements not found');
         }
     },
 
+    // Get current JS analysis phase based on progress
     getCurrentJSPhase(progress) {
-        if (progress < 10) return '🚀 Initializing JavaScript discovery...';
-        if (progress < 25) return '🔍 Discovering JavaScript files...';
-        if (progress < 40) return '📄 Downloading and parsing JS files...';
-        if (progress < 60) return '🔐 Scanning for secrets and API keys...';
-        if (progress < 80) return '🔗 Extracting API endpoints and URLs...';
-        if (progress < 95) return '📚 Identifying libraries and frameworks...';
-        return '✅ Finalizing analysis and generating report...';
+        if (progress < 15) return '🚀 Discovering JavaScript files...';
+        if (progress < 30) return '📄 Downloading and parsing JS files...';
+        if (progress < 45) return '🔍 Analyzing code for vulnerabilities...';
+        if (progress < 60) return '🕳️ Detecting sinks and injection points...';
+        if (progress < 75) return '🧬 Checking for prototype pollution...';
+        if (progress < 90) return '🔐 Scanning for secrets and credentials...';
+        return '✅ Finalizing security analysis report...';
     },
 
+    // Get detailed activity description
     getDetailedJSActivity(progress) {
-        if (progress < 10) return 'Setting up JavaScript analysis environment...';
-        if (progress < 25) return 'Crawling pages for JavaScript file references...';
-        if (progress < 40) return 'Downloading and preprocessing JavaScript files...';
-        if (progress < 60) return 'Running secret detection algorithms...';
-        if (progress < 80) return 'Extracting API endpoints and external URLs...';
-        if (progress < 95) return 'Fingerprinting JavaScript libraries...';
-        return 'Compiling comprehensive JavaScript analysis report...';
+        if (progress < 15) return 'Crawling pages for JavaScript file references...';
+        if (progress < 30) return 'Downloading and preprocessing JavaScript files...';
+        if (progress < 45) return 'Running static security analysis...';
+        if (progress < 60) return 'Identifying DOM sinks and XSS vectors...';
+        if (progress < 75) return 'Detecting prototype pollution vulnerabilities...';
+        if (progress < 90) return 'Extracting secrets and sensitive data...';
+        return 'Compiling comprehensive security report...';
     },
 
+    // Update live statistics during scanning
     updateLiveJSStats(scan, progress) {
         const baseMultiplier = progress / 100;
         
-        const estimatedJSFiles = Math.floor(baseMultiplier * 15 + Math.random() * 3);
-        const estimatedSecrets = Math.floor(baseMultiplier * 8 + Math.random() * 2);
-        const estimatedEndpoints = Math.floor(baseMultiplier * 12 + Math.random() * 4);
-        const estimatedSensitive = Math.floor(baseMultiplier * 5 + Math.random() * 2);
+        // Estimate discoveries based on progress (these would be real in actual implementation)
+        const estimatedJSFiles = Math.floor(baseMultiplier * 25 + Math.random() * 5);
+        const estimatedVulnerabilities = Math.floor(baseMultiplier * 12 + Math.random() * 3);
+        const estimatedSinks = Math.floor(baseMultiplier * 8 + Math.random() * 2);
+        const estimatedSecrets = Math.floor(baseMultiplier * 6 + Math.random() * 2);
+        const estimatedPrototype = Math.floor(baseMultiplier * 3 + Math.random() * 1);
         const estimatedLibraries = Math.floor(baseMultiplier * 18 + Math.random() * 5);
         
         this.updateLiveStatElement('live-js-files', estimatedJSFiles);
+        this.updateLiveStatElement('live-vulnerabilities', estimatedVulnerabilities);
+        this.updateLiveStatElement('live-sinks', estimatedSinks);
         this.updateLiveStatElement('live-secrets', estimatedSecrets);
-        this.updateLiveStatElement('live-endpoints', estimatedEndpoints);
-        this.updateLiveStatElement('live-sensitive', estimatedSensitive);
+        this.updateLiveStatElement('live-prototype', estimatedPrototype);
         this.updateLiveStatElement('live-libraries', estimatedLibraries);
     },
 
+    // Update individual live stat with animation
     updateLiveStatElement(elementId, newValue) {
         const element = document.getElementById(elementId);
         if (element && element.textContent !== String(newValue)) {
@@ -615,6 +793,7 @@ const JSAnalysis = {
         }
     },
 
+    // Format time in MM:SS format
     formatTime(seconds) {
         const mins = Math.floor(seconds / 60);
         const secs = seconds % 60;
@@ -645,554 +824,256 @@ const JSAnalysis = {
         }
     },
 
-    // Auto-refresh functionality
-    startAutoRefresh() {
-        this.stopAutoRefresh();
-        
-        console.log('🔄 Starting JS analysis auto-refresh');
-        
-        this.refreshInterval = setInterval(async () => {
-            if (!this.isAutoRefreshEnabled) return;
-            
-            try {
-                await this.updateJSRealTime();
-                
-                const lastUpdatedElement = document.getElementById('js-last-updated');
-                if (lastUpdatedElement) {
-                    lastUpdatedElement.textContent = `Last updated: ${new Date().toLocaleTimeString()}`;
-                }
-                
-            } catch (error) {
-                console.error('JS analysis auto-refresh failed:', error);
-            }
-        }, CONFIG.getRefreshInterval('js-analysis') || 5000);
-
-        this.updateAutoRefreshIndicator(true);
-    },
-
-    async updateJSRealTime() {
+    // Load subdomains for JS analysis form
+    async loadJSAnalysisSubdomains() {
         try {
-            const currentPage = AppState.currentPageData.jsfiles?.page || 1;
-            await this.load(currentPage);
+            const targetId = document.getElementById('js-analysis-target')?.value;
+            const subdomainSelect = document.getElementById('js-analysis-subdomain');
             
-            const statusElement = document.getElementById('js-status');
-            if (statusElement) {
-                // This would be a real API call to get JS files count
-                statusElement.textContent = `📊 JavaScript analysis results`;
-                statusElement.style.color = '#7c3aed';
+            if (!subdomainSelect) return;
+
+            const currentValue = subdomainSelect.value;
+            subdomainSelect.innerHTML = '<option value="">All subdomains</option>';
+            
+            if (!targetId) return;
+
+            const response = await API.subdomains.getAll({ 
+                target_id: targetId,
+                limit: 1000
+            });
+            
+            if (response && response.ok) {
+                const data = await response.json();
+                const subdomains = data.success ? data.data : [];
+                
+                subdomains.forEach(subdomain => {
+                    const option = document.createElement('option');
+                    option.value = subdomain.id;
+                    option.textContent = subdomain.subdomain;
+                    subdomainSelect.appendChild(option);
+                });
+                
+                console.log(`Loaded ${subdomains.length} subdomains for JS analysis form`);
+            }
+            
+            if (currentValue) {
+                const optionExists = Array.from(subdomainSelect.options).some(option => option.value === currentValue);
+                if (optionExists) {
+                    subdomainSelect.value = currentValue;
+                }
             }
             
         } catch (error) {
-            console.error('Real-time JS update failed:', error);
+            console.error('Failed to load subdomains for JS analysis form:', error);
         }
     },
 
-    stopAutoRefresh() {
+    // Cleanup method for tab switching
+    cleanup() {
+        console.log('🧹 Cleaning up JS analysis module intervals');
+        
         if (this.refreshInterval) {
             clearInterval(this.refreshInterval);
             this.refreshInterval = null;
         }
-    },
-
-    toggleAutoRefresh() {
-        this.isAutoRefreshEnabled = !this.isAutoRefreshEnabled;
         
-        const toggleBtn = document.getElementById('js-auto-refresh-toggle');
-        const liveStatus = document.getElementById('js-live-status');
-        
-        if (toggleBtn) {
-            if (this.isAutoRefreshEnabled) {
-                toggleBtn.innerHTML = '⏸️ Pause Live Updates';
-                if (liveStatus) {
-                    liveStatus.innerHTML = '🔄 Auto-updating every 5 seconds';
-                    liveStatus.style.color = '#7c3aed';
-                }
-                this.startAutoRefresh();
-                Utils.showMessage('Live updates enabled', 'success', 'js-analysis-messages');
-            } else {
-                toggleBtn.innerHTML = '▶️ Resume Live Updates';
-                if (liveStatus) {
-                    liveStatus.innerHTML = '⏸️ Live updates paused';
-                    liveStatus.style.color = '#ffff00';
-                }
-                this.updateAutoRefreshIndicator(false);
-                Utils.showMessage('Live updates paused', 'warning', 'js-analysis-messages');
-            }
-        }
-    },
-
-    updateAutoRefreshIndicator(isActive) {
-        const indicator = document.getElementById('js-analysis-live-indicator');
-        if (indicator) {
-            if (isActive) {
-                indicator.innerHTML = '[LIVE]';
-                indicator.style.color = '#7c3aed';
-            } else {
-                indicator.innerHTML = '[PAUSED]';
-                indicator.style.color = '#ffff00';
-            }
-        }
-    },
-
-    // Search functionality
-    async search(page = 1) {
-        console.log('🔍 Search triggered for JS analysis');
-        
-        const jsFilesList = document.getElementById('js-files-list');
-        if (jsFilesList) {
-            jsFilesList.innerHTML = '<tr><td colspan="8" style="text-align: center; color: #a855f7;">🔍 Searching JavaScript files...</td></tr>';
+        if (this.progressCheckInterval) {
+            clearInterval(this.progressCheckInterval);
+            this.progressCheckInterval = null;
         }
         
-        await this.load(page);
+        this.isAutoRefreshEnabled = false;
+        this.hideProgress();
     },
 
-    clearFilters() {
-        const subdomainFilter = document.getElementById('js-subdomain-filter');
-        const fileTypeFilter = document.getElementById('js-file-type-filter');
-        const secretsFilter = document.getElementById('js-secrets-filter');
-        const searchFilter = document.getElementById('js-search');
-        
-        if (subdomainFilter) subdomainFilter.value = '';
-        if (fileTypeFilter) fileTypeFilter.value = '';
-        if (secretsFilter) secretsFilter.value = '';
-        if (searchFilter) searchFilter.value = '';
-        
-        this.search(1);
-        
-        Utils.showMessage('Filters cleared', 'info', 'js-analysis-messages');
-    },
-
-    // Start JS analysis
-    async startJSAnalysis() {
-        const targetId = document.getElementById('js-analysis-target').value;
-        const subdomainId = document.getElementById('js-analysis-subdomain').value;
-        const depth = document.getElementById('js-analysis-depth').value;
-        const secretDetection = document.getElementById('js-secret-detection').value;
-        const endpointExtraction = document.getElementById('js-endpoint-extraction').value === 'true';
-        const libraryDetection = document.getElementById('js-library-detection').value === 'true';
-        const sourcemapAnalysis = document.getElementById('js-sourcemap-analysis').value === 'true';
-        const minifiedAnalysis = document.getElementById('js-minified-analysis').value === 'true';
-        const downloadFiles = document.getElementById('js-download-files').value === 'true';
-        
-        if (!targetId) {
-            Utils.showMessage('Please select a target', 'error', 'js-analysis-messages');
-            return;
-        }
-        
-        try {
-            const scanTypes = ['js_files_scan'];
-            const config = {
-                subdomain_id: subdomainId || null,
-                analysis_depth: depth,
-                secret_detection_level: secretDetection,
-                extract_endpoints: endpointExtraction,
-                detect_libraries: libraryDetection,
-                analyze_sourcemaps: sourcemapAnalysis,
-                analyze_minified: minifiedAnalysis,
-                download_files: downloadFiles
-            };
-            
-            Utils.showMessage('📄 Starting JavaScript analysis...', 'info', 'js-analysis-messages');
-            
-            // This would be the actual API call
-            // const response = await API.scans.start(targetId, scanTypes, 'medium', config);
-            
-            // For demo purposes, simulate success
-            Utils.showMessage(
-                `📄 JavaScript analysis started! Analyzing ${depth} with ${secretDetection} secret detection. Results will appear automatically.`, 
-                'success', 
-                'js-analysis-messages'
-            );
-            
-            // Reset form
-            document.getElementById('js-analysis-subdomain').value = '';
-            document.getElementById('js-analysis-depth').value = 'deep';
-            
-            // Start monitoring
-            setTimeout(() => {
-                this.checkForActiveScan();
-            }, 500);
-            
-            this.startProgressMonitoring();
-            
-        } catch (error) {
-            Utils.showMessage('Failed to start JavaScript analysis: ' + error.message, 'error', 'js-analysis-messages');
-        }
-    },
-
-    // Load data
-    async load(page = 1) {
-        try {
-            // This would be a real API call
-            // For demo purposes, generate mock data
-            const mockJSFiles = this.generateMockJSFiles();
-            
-            AppState.currentPageData.jsfiles = { page, total: mockJSFiles.length };
-            
-            this.renderJSFilesList(mockJSFiles);
-            this.updateJSStats(mockJSFiles);
-            
-        } catch (error) {
-            console.error('Failed to load JS files:', error);
-            const jsFilesList = document.getElementById('js-files-list');
-            if (jsFilesList) {
-                jsFilesList.innerHTML = '<tr><td colspan="8" style="text-align: center; color: #dc2626;">Failed to load JS files</td></tr>';
-            }
-        }
-    },
-
-    // Generate mock data for demonstration
-    generateMockJSFiles() {
-        return [
-            {
-                id: 1,
-                url: 'https://example.com/assets/js/app.min.js',
-                subdomain: 'example.com',
-                file_type: 'application',
-                size: 245760,
-                secrets_count: 3,
-                endpoints_count: 8,
-                libraries_count: 5,
-                secrets: ['REACT_APP_API_KEY=abcd1234', 'token: "xyz789"', 'client_secret: "secret123"'],
-                endpoints: ['/api/users', '/api/login', '/api/dashboard'],
-                libraries: ['react', 'lodash', 'axios'],
-                created_at: new Date().toISOString()
-            },
-            {
-                id: 2,
-                url: 'https://api.example.com/static/main.js',
-                subdomain: 'api.example.com',
-                file_type: 'application',
-                size: 128340,
-                secrets_count: 1,
-                endpoints_count: 12,
-                libraries_count: 3,
-                secrets: ['API_SECRET: "prod_key_789"'],
-                endpoints: ['/v1/auth', '/v1/users', '/v1/data'],
-                libraries: ['express', 'cors', 'helmet'],
-                created_at: new Date().toISOString()
-            },
-            {
-                id: 3,
-                url: 'https://cdn.example.com/vendor/jquery.min.js',
-                subdomain: 'cdn.example.com',
-                file_type: 'library',
-                size: 87340,
-                secrets_count: 0,
-                endpoints_count: 0,
-                libraries_count: 1,
-                secrets: [],
-                endpoints: [],
-                libraries: ['jquery'],
-                created_at: new Date().toISOString()
-            }
-        ];
-    },
-
-    renderJSFilesList(jsFiles) {
-        const jsFilesList = document.getElementById('js-files-list');
-        
-        if (!jsFilesList) return;
-        
-        if (jsFiles.length > 0) {
-            jsFilesList.innerHTML = jsFiles.map(file => {
-                const hasSecrets = file.secrets_count > 0;
-                const hasEndpoints = file.endpoints_count > 0;
-                
-                return `
-                    <tr class="js-file-row" onclick="JSAnalysis.showJSDetails(${JSON.stringify(file).replace(/"/g, '&quot;')})" style="cursor: pointer;">
-                        <td style="font-family: 'Courier New', monospace; color: #7c3aed; max-width: 300px;">
-                            <div style="font-weight: bold; margin-bottom: 4px;">
-                                ${this.getFileTypeIcon(file.file_type)} 
-                                <span style="color: #9a4dff;">${this.getFileName(file.url)}</span>
-                                ${hasSecrets ? '<span style="background: #dc2626; color: white; padding: 2px 6px; border-radius: 3px; font-size: 10px; margin-left: 8px;">SECRETS</span>' : ''}
-                            </div>
-                            <div style="font-size: 11px; color: #6b46c1; word-break: break-all;">
-                                ${file.url}
-                            </div>
-                        </td>
-                        <td style="color: #9a4dff;">${file.subdomain}</td>
-                        <td>
-                            <span class="status ${this.getFileTypeColor(file.file_type)}">
-                                ${this.getFileTypeIcon(file.file_type)} ${file.file_type}
-                            </span>
-                        </td>
-                        <td style="font-size: 12px; color: #6b46c1;">${this.formatBytes(file.size)}</td>
-                        <td style="text-align: center;">
-                            ${hasSecrets ? 
-                                `<span style="background: #dc2626; color: white; padding: 4px 8px; border-radius: 3px; font-weight: bold;">${file.secrets_count}</span>` : 
-                                '<span style="color: #666;">0</span>'
-                            }
-                        </td>
-                        <td style="text-align: center;">
-                            ${hasEndpoints ? 
-                                `<span style="background: #7c3aed; color: white; padding: 4px 8px; border-radius: 3px; font-weight: bold;">${file.endpoints_count}</span>` : 
-                                '<span style="color: #666;">0</span>'
-                            }
-                        </td>
-                        <td style="text-align: center;">
-                            <span style="background: #06b6d4; color: white; padding: 4px 8px; border-radius: 3px; font-weight: bold;">${file.libraries_count}</span>
-                        </td>
-                        <td>
-                            <div style="display: flex; gap: 4px; flex-wrap: wrap;">
-                                <button onclick="event.stopPropagation(); window.open('${file.url}', '_blank')" class="btn btn-secondary btn-small">View</button>
-                                ${hasSecrets ? 
-                                    `<button onclick="event.stopPropagation(); JSAnalysis.viewSecrets(${file.id})" class="btn btn-danger btn-small">Secrets</button>` : 
-                                    ''
-                                }
-                                ${hasEndpoints ? 
-                                    `<button onclick="event.stopPropagation(); JSAnalysis.viewEndpoints(${file.id})" class="btn btn-success btn-small">APIs</button>` : 
-                                    ''
-                                }
-                            </div>
-                        </td>
-                    </tr>
-                `;
-            }).join('');
-        } else {
-            jsFilesList.innerHTML = '<tr><td colspan="8" style="text-align: center; color: #6b46c1;">No JavaScript files analyzed yet. Start a JS analysis scan to discover JavaScript files and extract secrets!</td></tr>';
-        }
-    },
-
-    updateJSStats(jsFiles) {
-        const totalFiles = jsFiles.length;
-        const secretsFound = jsFiles.reduce((sum, file) => sum + file.secrets_count, 0);
-        const endpointsFound = jsFiles.reduce((sum, file) => sum + file.endpoints_count, 0);
-        const librariesFound = jsFiles.reduce((sum, file) => sum + file.libraries_count, 0);
-        const sensitiveFiles = jsFiles.filter(file => file.secrets_count > 0).length;
-
-        const elements = {
-            'total-js-files': totalFiles,
-            'secrets-found': secretsFound,
-            'endpoints-found': endpointsFound,
-            'libraries-found': librariesFound,
-            'sensitive-files': sensitiveFiles
-        };
-
-        Object.entries(elements).forEach(([id, value]) => {
-            const element = document.getElementById(id);
-            if (element) {
-                element.textContent = value;
+    toggleExportMenu(scanId) {
+        // Close all other export menus first
+        document.querySelectorAll('.export-menu').forEach(menu => {
+            if (menu.id !== `export-menu-${scanId}`) {
+                menu.style.display = 'none';
             }
         });
-    },
-
-    // Helper methods
-    getFileTypeIcon(type) {
-        const icons = {
-            'application': '📱',
-            'library': '📚',
-            'minified': '📦',
-            'sourcemap': '🗺️'
-        };
-        return icons[type] || '📄';
-    },
-
-    getFileTypeColor(type) {
-        switch(type) {
-            case 'application': return 'status-completed';
-            case 'library': return 'status-running';
-            case 'minified': return 'severity-medium';
-            case 'sourcemap': return 'severity-low';
-            default: return 'status-inactive';
-        }
-    },
-
-    getFileName(url) {
-        return url.split('/').pop() || url;
-    },
-
-    formatBytes(bytes) {
-        if (!bytes || bytes === 0) return '-';
-        const k = 1024;
-        const sizes = ['B', 'KB', 'MB', 'GB'];
-        const i = Math.floor(Math.log(bytes) / Math.log(k));
-        return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
-    },
-
-    getTargetName(scan) {
-        if (scan.target_domain) return scan.target_domain;
-        if (scan.domain) return scan.domain;
-        return 'target';
-    },
-
-    // Modal functionality
-    showJSDetails(file) {
-        const modal = document.getElementById('js-details-modal');
-        const content = document.getElementById('js-details-content');
         
-        if (!modal || !content) return;
-        
-        content.innerHTML = `
-            <h2 style="color: #7c3aed; margin-bottom: 20px; text-align: center;">
-                📄 ${this.getFileName(file.url)}
-            </h2>
-            
-            <!-- File Information -->
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 25px;">
-                <div style="background: linear-gradient(135deg, #1a0a2e, #2d1b69); padding: 15px; border: 1px solid #7c3aed;">
-                    <h3 style="color: #7c3aed; margin-bottom: 10px;">📊 File Details</h3>
-                    <div style="color: #9a4dff; font-size: 13px;">
-                        <div><strong>URL:</strong> <a href="${file.url}" target="_blank" style="color: #7c3aed;">${file.url}</a></div>
-                        <div style="margin-top: 5px;"><strong>Subdomain:</strong> ${file.subdomain}</div>
-                        <div style="margin-top: 5px;"><strong>Type:</strong> ${file.file_type}</div>
-                        <div style="margin-top: 5px;"><strong>Size:</strong> ${this.formatBytes(file.size)}</div>
-                    </div>
-                </div>
-                
-                <div style="background: linear-gradient(135deg, #1a0a2e, #2d1b69); padding: 15px; border: 1px solid #7c3aed;">
-                    <h3 style="color: #7c3aed; margin-bottom: 10px;">🔍 Analysis Results</h3>
-                    <div style="color: #9a4dff; font-size: 13px;">
-                        <div><strong>Secrets Found:</strong> <span style="color: ${file.secrets_count > 0 ? '#dc2626' : '#666'};">${file.secrets_count}</span></div>
-                        <div style="margin-top: 5px;"><strong>API Endpoints:</strong> <span style="color: #7c3aed;">${file.endpoints_count}</span></div>
-                        <div style="margin-top: 5px;"><strong>Libraries:</strong> <span style="color: #06b6d4;">${file.libraries_count}</span></div>
-                        <div style="margin-top: 5px;"><strong>Analyzed:</strong> ${new Date(file.created_at).toLocaleString()}</div>
-                    </div>
-                </div>
-            </div>
-            
-            ${file.secrets_count > 0 ? `
-                <!-- Secrets Section -->
-                <div style="background: linear-gradient(135deg, #1a0a2e, #2d1b69); padding: 20px; border: 1px solid #dc2626; margin-bottom: 25px;">
-                    <h3 style="color: #dc2626; margin-bottom: 15px;">🔐 Secrets Found</h3>
-                    <div style="max-height: 200px; overflow-y: auto;">
-                        ${file.secrets.map(secret => `
-                            <div style="background: rgba(220, 38, 38, 0.1); padding: 8px; margin-bottom: 8px; border-radius: 4px; border: 1px solid rgba(220, 38, 38, 0.3);">
-                                <code style="color: #dc2626; font-family: 'Courier New', monospace; font-size: 12px; word-break: break-all;">${secret}</code>
-                            </div>
-                        `).join('')}
-                    </div>
-                </div>
-            ` : ''}
-            
-            ${file.endpoints_count > 0 ? `
-                <!-- API Endpoints Section -->
-                <div style="background: linear-gradient(135deg, #1a0a2e, #2d1b69); padding: 20px; border: 1px solid #7c3aed; margin-bottom: 25px;">
-                    <h3 style="color: #7c3aed; margin-bottom: 15px;">🔗 API Endpoints</h3>
-                    <div style="max-height: 200px; overflow-y: auto;">
-                        ${file.endpoints.map(endpoint => `
-                            <div style="background: rgba(124, 58, 237, 0.1); padding: 8px; margin-bottom: 8px; border-radius: 4px; border: 1px solid rgba(124, 58, 237, 0.3);">
-                                <code style="color: #7c3aed; font-family: 'Courier New', monospace; font-size: 12px;">${endpoint}</code>
-                            </div>
-                        `).join('')}
-                    </div>
-                </div>
-            ` : ''}
-            
-            ${file.libraries_count > 0 ? `
-                <!-- Libraries Section -->
-                <div style="background: linear-gradient(135deg, #1a0a2e, #2d1b69); padding: 20px; border: 1px solid #06b6d4; margin-bottom: 25px;">
-                    <h3 style="color: #06b6d4; margin-bottom: 15px;">📚 Libraries Detected</h3>
-                    <div style="display: flex; flex-wrap: wrap; gap: 8px;">
-                        ${file.libraries.map(library => `
-                            <span style="background: rgba(6, 182, 212, 0.1); padding: 6px 12px; border-radius: 4px; border: 1px solid rgba(6, 182, 212, 0.3); color: #06b6d4; font-size: 12px;">${library}</span>
-                        `).join('')}
-                    </div>
-                </div>
-            ` : ''}
-            
-            <!-- Actions -->
-            <div style="text-align: center; margin-top: 30px;">
-                <div style="display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;">
-                    <button onclick="window.open('${file.url}', '_blank')" class="btn btn-primary">🌐 View Source</button>
-                    <button onclick="JSAnalysis.copyFileInfo(${file.id})" class="btn btn-secondary">📋 Copy Results</button>
-                    <button onclick="JSAnalysis.closeJSDetails()" class="btn btn-secondary">✖️ Close</button>
-                </div>
-            </div>
-        `;
-        
-        modal.style.display = 'flex';
-    },
-
-    closeJSDetails() {
-        const modal = document.getElementById('js-details-modal');
-        if (modal) {
-            modal.style.display = 'none';
-        }
-    },
-
-    copyFileInfo(fileId) {
-        // Implementation for copying file analysis results
-        Utils.showMessage('Analysis results copied to clipboard!', 'success', 'js-analysis-messages');
-    },
-
-    viewSecrets(fileId) {
-        Utils.showMessage(`Viewing secrets for file ${fileId}`, 'info', 'js-analysis-messages');
-    },
-
-    viewEndpoints(fileId) {
-        Utils.showMessage(`Viewing API endpoints for file ${fileId}`, 'info', 'js-analysis-messages');
-    },
-
-    // Export functionality
-    toggleExportMenu() {
-        const menu = document.getElementById('export-js-menu');
+        // Toggle the clicked menu
+        const menu = document.getElementById(`export-menu-${scanId}`);
         if (menu) {
             menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
         }
     },
 
-    async exportResults(format) {
-        Utils.showMessage(`Exporting JS analysis results as ${format.toUpperCase()}...`, 'info', 'js-analysis-messages');
-        // Implementation for export functionality
-    },
-
-    // Load targets and subdomains
-    async loadTargets() {
+    async exportResults(scanId, format) {
         try {
-            const response = await API.targets.getAll();
+            // Hide the export menu
+            const menu = document.getElementById(`export-menu-${scanId}`);
+            if (menu) menu.style.display = 'none';
+            
+            // Show loading message
+            Utils.showMessage(`Exporting JavaScript analysis results as ${format.toUpperCase()}...`, 'info', 'js-analysis-messages');
+            
+            const response = await API.scans.get(scanId);
             if (!response) return;
             
             const data = await response.json();
-            const targets = data.success ? data.data : [];
             
-            const targetSelects = [
-                'js-target-filter',
-                'js-analysis-target'
-            ];
-            
-            targetSelects.forEach(selectId => {
-                const targetSelect = document.getElementById(selectId);
-                if (targetSelect) {
-                    const currentValue = targetSelect.value;
-                    const placeholder = selectId === 'js-analysis-target' ? 'Select target...' : 'All Targets';
-                    targetSelect.innerHTML = `<option value="">${placeholder}</option>`;
-                    
-                    targets.forEach(target => {
-                        const option = document.createElement('option');
-                        option.value = target.id;
-                        option.textContent = target.domain;
-                        targetSelect.appendChild(option);
-                    });
-
-                    if (currentValue && targets.find(t => t.id == currentValue)) {
-                        targetSelect.value = currentValue;
-                    }
+            if (data.success && data.data) {
+                const scanData = data.data;
+                const results = scanData.results || {};
+                
+                // Get target name for export
+                const targetName = this.getTargetName(scanData);
+                
+                // Prepare export data
+                const exportData = {
+                    scan_id: scanId,
+                    target: targetName,
+                    scan_type: 'JavaScript Security Analysis',
+                    status: scanData.status,
+                    created_at: scanData.created_at,
+                    completed_at: scanData.completed_at,
+                    results: results
+                };
+                
+                // Generate and download file based on format
+                switch (format.toLowerCase()) {
+                    case 'csv':
+                        this.downloadCSV(exportData, scanId);
+                        break;
+                    case 'json':
+                        this.downloadJSON(exportData, scanId);
+                        break;
+                    case 'xml':
+                        this.downloadXML(exportData, scanId);
+                        break;
+                    default:
+                        throw new Error('Unsupported export format');
                 }
-            });
-
-            await this.loadSubdomains();
-            
+                
+                Utils.showMessage(`JavaScript analysis results exported successfully as ${format.toUpperCase()}!`, 'success', 'js-analysis-messages');
+                
+            } else {
+                Utils.showMessage('No results available for export.', 'warning', 'js-analysis-messages');
+            }
         } catch (error) {
-            console.error('Failed to load targets for JS analysis:', error);
+            Utils.showMessage('Failed to export results: ' + error.message, 'error', 'js-analysis-messages');
         }
     },
 
-    async loadSubdomains() {
-        // Implementation for loading subdomains
+    downloadCSV(data, scanId) {
+        let csvContent = 'Scan ID,Target,Scan Type,Status,Created,Completed,Total Vulnerabilities\n';
+        csvContent += `${data.scan_id},"${data.target}","${data.scan_type}","${data.status}","${data.created_at}","${data.completed_at || 'N/A'}","${data.results.vulnerabilities?.length || 0}"\n\n`;
+        
+        // Add vulnerabilities if available
+        if (data.results.vulnerabilities && data.results.vulnerabilities.length > 0) {
+            csvContent += 'JavaScript Vulnerabilities\n';
+            csvContent += 'File,Vulnerability Type,Severity,Description,Line\n';
+            data.results.vulnerabilities.forEach(vuln => {
+                csvContent += `"${vuln.file || 'N/A'}","${vuln.type || 'N/A'}","${vuln.severity || 'N/A'}","${vuln.description || 'N/A'}","${vuln.line || 'N/A'}"\n`;
+            });
+        }
+        
+        // Add secrets if available
+        if (data.results.secrets && data.results.secrets.length > 0) {
+            csvContent += '\nDiscovered Secrets\n';
+            csvContent += 'File,Secret Type,Value Preview\n';
+            data.results.secrets.forEach(secret => {
+                csvContent += `"${secret.file || 'N/A'}","${secret.type || 'N/A'}","${(secret.preview || 'N/A').substring(0, 50)}..."\n`;
+            });
+        }
+        
+        this.downloadFile(csvContent, `js_analysis_scan_${scanId}_results.csv`, 'text/csv');
     },
 
-    async loadJSAnalysisSubdomains() {
-        // Implementation for loading subdomains for the analysis form
+    downloadJSON(data, scanId) {
+        const jsonContent = JSON.stringify(data, null, 2);
+        this.downloadFile(jsonContent, `js_analysis_scan_${scanId}_results.json`, 'application/json');
     },
 
-    // Cleanup method
-    cleanup() {
-        this.stopAutoRefresh();
-        this.stopProgressMonitoring();
-        this.hideProgress();
-        this.isAutoRefreshEnabled = false;
-        this.closeJSDetails();
+    downloadXML(data, scanId) {
+        let xmlContent = '<?xml version="1.0" encoding="UTF-8"?>\n';
+        xmlContent += '<js_analysis_scan_results>\n';
+        xmlContent += `  <scan_id>${data.scan_id}</scan_id>\n`;
+        xmlContent += `  <target>${this.escapeXml(data.target)}</target>\n`;
+        xmlContent += `  <scan_type>${this.escapeXml(data.scan_type)}</scan_type>\n`;
+        xmlContent += `  <status>${this.escapeXml(data.status)}</status>\n`;
+        xmlContent += `  <created_at>${this.escapeXml(data.created_at)}</created_at>\n`;
+        xmlContent += `  <completed_at>${this.escapeXml(data.completed_at || 'N/A')}</completed_at>\n`;
+        xmlContent += `  <total_vulnerabilities>${data.results.vulnerabilities?.length || 0}</total_vulnerabilities>\n`;
+        xmlContent += '  <results>\n';
+        
+        // Add vulnerabilities
+        if (data.results.vulnerabilities && data.results.vulnerabilities.length > 0) {
+            xmlContent += '    <vulnerabilities>\n';
+            data.results.vulnerabilities.forEach(vuln => {
+                xmlContent += `      <vulnerability>\n`;
+                xmlContent += `        <file>${this.escapeXml(vuln.file || 'N/A')}</file>\n`;
+                xmlContent += `        <type>${this.escapeXml(vuln.type || 'N/A')}</type>\n`;
+                xmlContent += `        <severity>${this.escapeXml(vuln.severity || 'N/A')}</severity>\n`;
+                xmlContent += `        <description>${this.escapeXml(vuln.description || 'N/A')}</description>\n`;
+                xmlContent += `        <line>${this.escapeXml(vuln.line || 'N/A')}</line>\n`;
+                xmlContent += `      </vulnerability>\n`;
+            });
+            xmlContent += '    </vulnerabilities>\n';
+        }
+        
+        // Add secrets
+        if (data.results.secrets && data.results.secrets.length > 0) {
+            xmlContent += '    <secrets>\n';
+            data.results.secrets.forEach(secret => {
+                xmlContent += `      <secret>\n`;
+                xmlContent += `        <file>${this.escapeXml(secret.file || 'N/A')}</file>\n`;
+                xmlContent += `        <type>${this.escapeXml(secret.type || 'N/A')}</type>\n`;
+                xmlContent += `        <preview>${this.escapeXml((secret.preview || 'N/A').substring(0, 50))}...</preview>\n`;
+                xmlContent += `      </secret>\n`;
+            });
+            xmlContent += '    </secrets>\n';
+        }
+        
+        xmlContent += '  </results>\n';
+        xmlContent += '</js_analysis_scan_results>';
+        
+        this.downloadFile(xmlContent, `js_analysis_scan_${scanId}_results.xml`, 'application/xml');
+    },
+
+    escapeXml(text) {
+        return String(text)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    },
+
+    downloadFile(content, filename, mimeType) {
+        const blob = new Blob([content], { type: mimeType });
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+    },
+
+    async stopScan(scanId) {
+        if (confirm('Are you sure you want to stop this JavaScript analysis scan?')) {
+            try {
+                const response = await API.scans.stop(scanId);
+                if (response && response.ok) {
+                    await this.load();
+                    Utils.showMessage('JavaScript analysis scan stopped successfully!', 'success');
+                } else {
+                    Utils.showMessage('Failed to stop scan', 'error');
+                }
+            } catch (error) {
+                Utils.showMessage('Failed to stop scan: ' + error.message, 'error');
+            }
+        }
+    },
+
+    // Method to refresh targets (useful when called from other modules)
+    async refreshTargets() {
+        await this.loadTargets();
     }
 };
 

@@ -1,10 +1,19 @@
-// frontend/assets/js/modules/subdomains.js - ENHANCED WITH EXPORT FUNCTIONALITY
+// frontend/assets/js/modules/subdomains.js - REDESIGNED TO MIMIC SCANS STYLE
 
 const Subdomains = {
+    refreshInterval: null,
+    isAutoRefreshEnabled: true,
+    lastUpdate: null,
+    targetsCache: {}, // Cache for target information
+
     async init() {
         this.renderHTML();
         this.bindEvents();
+        await this.loadTargets();
         await this.load();
+        
+        // Start real-time updates like scans
+        this.startRealTimeUpdates();
     },
 
     renderHTML() {
@@ -21,126 +30,405 @@ const Subdomains = {
                     background: linear-gradient(90deg, #1a0a2e, #2d1b69) !important;
                     color: #a855f7 !important;
                 }
+                
+                .scrollable-table-container {
+                    max-height: 500px;
+                    overflow-y: auto;
+                    overflow-x: auto;
+                    border: 2px solid #7c3aed;
+                    background-color: #000000;
+                }
+                .scrollable-table-container::-webkit-scrollbar {
+                    width: 12px;
+                    height: 12px;
+                }
+                .scrollable-table-container::-webkit-scrollbar-track {
+                    background: #000000;
+                    border: 1px solid #2d1b69;
+                }
+                .scrollable-table-container::-webkit-scrollbar-thumb {
+                    background: linear-gradient(180deg, #7c3aed, #9a4dff);
+                    border: 1px solid #2d1b69;
+                    border-radius: 6px;
+                }
+                .scrollable-table-container::-webkit-scrollbar-thumb:hover {
+                    background: linear-gradient(180deg, #9a4dff, #a855f7);
+                }
+                .scrollable-table-container::-webkit-scrollbar-corner {
+                    background: #000000;
+                }
+                
+                .spinner {
+                    border: 2px solid #2d1b69;
+                    border-top: 2px solid #7c3aed;
+                    border-radius: 50%;
+                    width: 16px;
+                    height: 16px;
+                    animation: spin 1s linear infinite;
+                    display: inline-block;
+                }
+                
+                @keyframes spin {
+                    0% { transform: rotate(0deg); }
+                    100% { transform: rotate(360deg); }
+                }
+                
+                .progress-row {
+                    background-color: rgba(124, 58, 237, 0.1) !important;
+                    animation: pulse 2s infinite;
+                }
+                
+                @keyframes pulse {
+                    0% { background-color: rgba(124, 58, 237, 0.1); }
+                    50% { background-color: rgba(154, 77, 255, 0.2); }
+                    100% { background-color: rgba(124, 58, 237, 0.1); }
+                }
+                
+                .status-updating {
+                    animation: blink 1s infinite;
+                }
+                
+                @keyframes blink {
+                    0%, 50% { opacity: 1; }
+                    51%, 100% { opacity: 0.5; }
+                }
             </style>
+            
+            <div class="scan-info">
+                <h4>🌐 Live Host Discovery</h4>
+                <p>Check which discovered subdomains are live and responding. This verifies HTTP/HTTPS accessibility, gathers response codes, and identifies active targets for further testing.</p>
+            </div>
 
-            <div class="filters">
-                <div class="filter-group">
-                    <label>Status</label>
-                    <select id="subdomain-status-filter">
-                        <option value="">All Status</option>
-                        <option value="active">Active</option>
-                        <option value="inactive">Inactive</option>
-                    </select>
-                </div>
-                <div class="filter-group">
-                    <label>HTTP Status Code</label>
-                    <input type="text" id="subdomain-http-status-filter" placeholder="200, 404, etc." style="width: 120px;">
-                </div>
-                <div class="filter-group">
-                    <label>Search Subdomain</label>
-                    <input type="text" id="subdomain-search" placeholder="Search subdomains...">
-                </div>
-                <div class="filter-group">
-                    <label>&nbsp;</label>
-                    <div style="display: flex; gap: 8px;">
-                        <button onclick="Subdomains.search()" class="btn btn-primary">🔍 Search</button>
-                        <button onclick="Subdomains.clearFilters()" class="btn btn-secondary">🗑️ Clear</button>
+            <div class="card">
+                <div class="card-title">Start Live Host Discovery Scan</div>
+                <div id="live-host-messages"></div>
+                <form id="live-host-form">
+                    <div style="display: grid; grid-template-columns: 1fr 1fr auto; gap: 20px; align-items: end; margin-bottom: 15px;">
+                        <div class="form-group">
+                            <label for="live-host-target">Target Domain</label>
+                            <select id="live-host-target" required>
+                                <option value="">Select target...</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="live-host-subdomain">Subdomain Filter (optional)</label>
+                            <select id="live-host-subdomain">
+                                <option value="">Check all subdomains</option>
+                            </select>
+                        </div>
+                        <button type="submit" class="btn btn-primary" id="start-live-host-btn">🌐 Start Live Host Check</button>
                     </div>
-                </div>
+                    
+                    <!-- Advanced Options -->
+                    <div style="border: 1px solid #2d1b69; padding: 15px; background: linear-gradient(135deg, #1a0a2e, #2d1b69);">
+                        <h5 style="color: #7c3aed; margin-bottom: 10px;">Check Options</h5>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px;">
+                            <div class="form-group">
+                                <label>HTTP Methods</label>
+                                <select id="http-methods">
+                                    <option value="get">GET only (fastest)</option>
+                                    <option value="head">HEAD only</option>
+                                    <option value="both" selected>GET + HEAD (recommended)</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>Protocols</label>
+                                <select id="protocols">
+                                    <option value="both" selected>HTTP + HTTPS</option>
+                                    <option value="https">HTTPS only</option>
+                                    <option value="http">HTTP only</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>Timeout (seconds)</label>
+                                <select id="request-timeout">
+                                    <option value="5">5 seconds</option>
+                                    <option value="10" selected>10 seconds</option>
+                                    <option value="15">15 seconds</option>
+                                    <option value="30">30 seconds</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin-top: 10px;">
+                            <div class="form-group">
+                                <label>Follow Redirects</label>
+                                <select id="follow-redirects">
+                                    <option value="true" selected>Yes (recommended)</option>
+                                    <option value="false">No</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>Concurrent Requests</label>
+                                <select id="concurrent-requests">
+                                    <option value="5">5 (conservative)</option>
+                                    <option value="10" selected>10 (balanced)</option>
+                                    <option value="20">20 (aggressive)</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>Check Screenshots</label>
+                                <select id="take-screenshots">
+                                    <option value="false" selected>No (faster)</option>
+                                    <option value="true">Yes (slower)</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                </form>
             </div>
 
             <div class="card">
                 <div class="card-title">
-                    Discovered Subdomains
-                    <div style="float: right; position: relative; display: inline-block;">
-                        <button onclick="Subdomains.toggleExportMenu()" class="btn btn-success btn-small" id="export-subdomains-btn">
-                            📤 Export Live Hosts
-                        </button>
-                        <div id="export-subdomains-menu" class="export-menu" style="display: none; position: absolute; top: 100%; right: 0; min-width: 140px; z-index: 1000;">
-                            <button onclick="Subdomains.exportSubdomains('csv')" class="btn btn-secondary btn-small" style="width: 100%; border: none; border-bottom: 1px solid #2d1b69;">📊 CSV</button>
-                            <button onclick="Subdomains.exportSubdomains('json')" class="btn btn-secondary btn-small" style="width: 100%; border: none; border-bottom: 1px solid #2d1b69;">📋 JSON</button>
-                            <button onclick="Subdomains.exportSubdomains('xml')" class="btn btn-secondary btn-small" style="width: 100%; border: none;">📄 XML</button>
-                        </div>
-                    </div>
+                    Live Host Discovery Scan Jobs
+                    <span id="auto-refresh-indicator" style="float: right; font-size: 12px; color: #9a4dff;">
+                        🔄 Auto-updating
+                    </span>
                 </div>
                 
-                <!-- Check All Live Button Section -->
-                <div style="margin-bottom: 15px; display: flex; align-items: center; gap: 15px;">
-                    <button onclick="Subdomains.checkAllLive()" class="btn btn-success btn-small" id="check-all-btn">
-                        🌐 Check All Live
+                <!-- Controls -->
+                <div style="margin-bottom: 15px; display: flex; align-items: center; gap: 15px; flex-wrap: wrap;">
+                    <button onclick="Subdomains.load()" class="btn btn-secondary">🔄 Manual Refresh</button>
+                    <button onclick="Subdomains.toggleAutoRefresh()" class="btn btn-secondary" id="auto-refresh-toggle">
+                        ⏸️ Pause Auto-refresh
                     </button>
-                    <span id="check-all-status" style="color: #9a4dff; font-size: 13px; font-family: 'Courier New', monospace;"></span>
+                    <span id="live-host-status" style="color: #6b46c1; font-size: 13px; font-family: 'Courier New', monospace;"></span>
+                    <span id="last-update-time" style="color: #666; font-size: 11px; margin-left: auto;"></span>
                 </div>
                 
-                <!-- Progress Bar for Bulk Checking -->
-                <div id="check-all-progress" style="display: none; margin-bottom: 15px; padding: 15px; border: 2px solid #7c3aed; background: linear-gradient(135deg, #1a0a2e, #2d1b69);">
-                    <div style="margin-bottom: 8px;">
-                        <div style="background-color: #2d1b69; border: 1px solid #7c3aed; height: 12px; width: 100%;">
-                            <div id="progress-bar" style="background: linear-gradient(90deg, #7c3aed, #9a4dff); height: 100%; width: 0%; transition: width 0.3s ease; border-radius: 2px;"></div>
-                        </div>
+                <!-- Real-time progress indicator -->
+                <div id="realtime-progress" style="display: none; margin-bottom: 15px; padding: 10px; border: 1px solid #7c3aed; background: linear-gradient(135deg, #1a0a2e, #2d1b69);">
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span class="spinner" style="width: 16px; height: 16px;"></span>
+                        <span id="progress-text" style="color: #7c3aed; font-family: 'Courier New', monospace; font-size: 12px;"></span>
                     </div>
-                    <div id="progress-text" style="font-size: 13px; color: #9a4dff; font-family: 'Courier New', monospace;"></div>
                 </div>
-
-                <div class="table-container">
+                
+                <div class="scrollable-table-container">
                     <table class="table">
                         <thead>
                             <tr>
-                                <th>Subdomain</th>
+                                <th>ID</th>
                                 <th>Target</th>
+                                <th>Type</th>
                                 <th>Status</th>
-                                <th>HTTP Status</th>
-                                <th>IP Address</th>
-                                <th>Title</th>
-                                <th>Last Seen</th>
+                                <th>Progress</th>
+                                <th>Live Hosts Found</th>
+                                <th>Created</th>
                                 <th>Actions</th>
                             </tr>
                         </thead>
-                        <tbody id="subdomains-list">
+                        <tbody id="live-host-scans-list">
                             <tr>
-                                <td colspan="8" style="text-align: center; color: #9a4dff;">Loading subdomains...</td>
+                                <td colspan="8" style="text-align: center; color: #6b46c1;">Loading live host discovery scans...</td>
                             </tr>
                         </tbody>
                     </table>
                 </div>
-                <div id="subdomains-pagination" class="pagination"></div>
             </div>
         `;
     },
 
     bindEvents() {
-        // Filter events - only bind change events for dropdowns
-        ['subdomain-status-filter'].forEach(filterId => {
-            const element = document.getElementById(filterId);
-            if (element) {
-                element.addEventListener('change', () => this.search());
-            }
-        });
+        // Live host scan form submission
+        const liveHostForm = document.getElementById('live-host-form');
+        if (liveHostForm) {
+            liveHostForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                await this.startLiveHostScan();
+            });
+        }
 
-        // Enter key support for input fields
-        ['subdomain-http-status-filter', 'subdomain-search'].forEach(filterId => {
-            const element = document.getElementById(filterId);
-            if (element) {
-                element.addEventListener('keypress', (e) => {
-                    if (e.key === 'Enter') {
-                        this.search();
-                    }
-                });
-            }
-        });
+        // Target filter - when changed, update subdomains
+        const targetFilter = document.getElementById('live-host-target');
+        if (targetFilter) {
+            targetFilter.addEventListener('change', async () => {
+                await this.loadSubdomains();
+            });
+        }
 
-        // Close export menu when clicking outside
+        // Close export menus when clicking outside
         document.addEventListener('click', (e) => {
-            if (!e.target.closest('#export-subdomains-menu') && !e.target.closest('#export-subdomains-btn')) {
-                const menu = document.getElementById('export-subdomains-menu');
-                if (menu) {
+            if (!e.target.closest('.export-menu') && !e.target.closest('[id^="export-btn-"]')) {
+                document.querySelectorAll('.export-menu').forEach(menu => {
                     menu.style.display = 'none';
-                }
+                });
             }
         });
     },
 
-    // New method to load targets for the filter dropdown
+    // Enhanced real-time updates
+    startRealTimeUpdates() {
+        console.log('🔄 Starting real-time updates for live host discovery scans');
+        
+        // Clear any existing intervals
+        this.cleanup();
+        
+        // Start aggressive refresh during active scans (every 2 seconds)
+        this.refreshInterval = setInterval(async () => {
+            if (!this.isAutoRefreshEnabled) return;
+            
+            const activeTab = document.querySelector('.nav-item.active')?.dataset.tab;
+            if (activeTab === 'subdomains') {
+                try {
+                    await this.updateScansRealTime();
+                } catch (error) {
+                    console.error('Real-time live host scans update failed:', error);
+                }
+            }
+        }, 2000); // Update every 2 seconds
+        
+        this.updateAutoRefreshIndicator(true);
+    },
+
+    // Real-time scans update
+    async updateScansRealTime() {
+        try {
+            const response = await API.scans.getJobs({ job_type: 'live_host_check' });
+            if (!response || !response.ok) return;
+            
+            const data = await response.json();
+            const scans = data.success ? data.data : [];
+            
+            // Check if there are any running scans
+            const runningScans = scans.filter(scan => 
+                scan.status === 'running' || scan.status === 'pending'
+            );
+            
+            // Update scans table
+            this.renderScansList(scans);
+            
+            // Update status indicators
+            this.updateScanStatus(scans, runningScans);
+            
+            // Update last update time
+            this.updateLastUpdateTime();
+            
+            // Show/hide real-time progress
+            if (runningScans.length > 0) {
+                this.showRealTimeProgress(runningScans);
+            } else {
+                this.hideRealTimeProgress();
+            }
+            
+        } catch (error) {
+            console.error('Real-time live host scans update failed:', error);
+        }
+    },
+
+    updateScanStatus(scans, runningScans) {
+        const statusSpan = document.getElementById('live-host-status');
+        if (!statusSpan) return;
+        
+        if (runningScans.length > 0) {
+            const totalProgress = runningScans.reduce((sum, scan) => sum + (scan.progress_percentage || 0), 0);
+            const avgProgress = Math.round(totalProgress / runningScans.length);
+            
+            statusSpan.innerHTML = `🔄 ${runningScans.length} live host check${runningScans.length > 1 ? 's' : ''} running (${avgProgress}% avg)`;
+            statusSpan.style.color = '#a855f7';
+            statusSpan.classList.add('status-updating');
+        } else {
+            const completedScans = scans.filter(scan => scan.status === 'completed').length;
+            const totalLiveHosts = scans
+                .filter(scan => scan.status === 'completed')
+                .reduce((total, scan) => {
+                    try {
+                        const results = typeof scan.results === 'string' ? JSON.parse(scan.results) : scan.results;
+                        return total + (results?.live_hosts_count || results?.total_live || 0);
+                    } catch {
+                        return total;
+                    }
+                }, 0);
+            
+            if (completedScans > 0) {
+                statusSpan.innerHTML = `✅ ${completedScans} scan${completedScans > 1 ? 's' : ''} completed | 🌐 ${totalLiveHosts} total live hosts found`;
+                statusSpan.style.color = '#7c3aed';
+            } else {
+                statusSpan.textContent = '💤 No scans running';
+                statusSpan.style.color = '#666';
+            }
+            statusSpan.classList.remove('status-updating');
+        }
+    },
+
+    showRealTimeProgress(runningScans) {
+        const progressDiv = document.getElementById('realtime-progress');
+        const progressText = document.getElementById('progress-text');
+        
+        if (progressDiv && progressText) {
+            const activeScan = runningScans[0]; // Show progress for first active scan
+            const progress = activeScan.progress_percentage || 0;
+            const targetName = this.getTargetName(activeScan);
+            
+            progressText.textContent = `${targetName} - ${activeScan.status} (${progress}%)`;
+            progressDiv.style.display = 'block';
+        }
+    },
+
+    hideRealTimeProgress() {
+        const progressDiv = document.getElementById('realtime-progress');
+        if (progressDiv) {
+            progressDiv.style.display = 'none';
+        }
+    },
+
+    updateLastUpdateTime() {
+        const element = document.getElementById('last-update-time');
+        if (element) {
+            const now = new Date();
+            element.textContent = `Updated: ${now.toLocaleTimeString()}`;
+            this.lastUpdate = now;
+        }
+    },
+
+    updateAutoRefreshIndicator(isActive) {
+        const indicator = document.getElementById('auto-refresh-indicator');
+        if (indicator) {
+            if (isActive) {
+                indicator.innerHTML = '🔄 Auto-updating';
+                indicator.style.color = '#9a4dff';
+            } else {
+                indicator.innerHTML = '⏸️ Paused';
+                indicator.style.color = '#ffff00';
+            }
+        }
+    },
+
+    toggleAutoRefresh() {
+        this.isAutoRefreshEnabled = !this.isAutoRefreshEnabled;
+        
+        const toggleBtn = document.getElementById('auto-refresh-toggle');
+        if (toggleBtn) {
+            if (this.isAutoRefreshEnabled) {
+                toggleBtn.innerHTML = '⏸️ Pause Auto-refresh';
+                this.startRealTimeUpdates();
+                Utils.showMessage('Auto-refresh enabled', 'success');
+            } else {
+                toggleBtn.innerHTML = '▶️ Resume Auto-refresh';
+                this.updateAutoRefreshIndicator(false);
+                Utils.showMessage('Auto-refresh paused', 'warning');
+            }
+        }
+    },
+
+    // Enhanced target name resolution with fallback logic
+    getTargetName(scan) {
+        // Try multiple ways to get the target name
+        if (scan.target_domain) return scan.target_domain;
+        if (scan.domain) return scan.domain;
+        if (scan.target?.domain) return scan.target.domain;
+        
+        // Try to get from targets cache
+        if (scan.target_id && this.targetsCache[scan.target_id]) {
+            return this.targetsCache[scan.target_id].domain;
+        }
+        
+        // Fallback to target ID
+        if (scan.target_id) return `Target ID: ${scan.target_id}`;
+        
+        return 'Unknown Target';
+    },
+
+    // Load targets and build cache
     async loadTargets() {
         try {
             const response = await API.targets.getAll();
@@ -149,12 +437,18 @@ const Subdomains = {
             const data = await response.json();
             const targets = data.success ? data.data : [];
             
-            const targetSelect = document.getElementById('subdomain-target-filter');
+            // Build targets cache for quick lookup
+            this.targetsCache = {};
+            targets.forEach(target => {
+                this.targetsCache[target.id] = target;
+            });
+            
+            const targetSelect = document.getElementById('live-host-target');
             if (targetSelect) {
-                // Keep the "All Targets" option and add target options
-                const currentValue = targetSelect.value;
-                targetSelect.innerHTML = '<option value="">All Targets</option>';
+                // Clear existing options except the first one
+                targetSelect.innerHTML = '<option value="">Select target...</option>';
                 
+                // Add target options
                 targets.forEach(target => {
                     const option = document.createElement('option');
                     option.value = target.id;
@@ -162,470 +456,340 @@ const Subdomains = {
                     targetSelect.appendChild(option);
                 });
 
-                // Restore previous selection if it still exists
-                if (currentValue && targets.find(t => t.id == currentValue)) {
-                    targetSelect.value = currentValue;
-                }
-
-                console.log(`Loaded ${targets.length} targets for subdomain filter`);
+                console.log(`Loaded ${targets.length} targets for live host scan dropdown`);
             }
         } catch (error) {
-            console.error('Failed to load targets for subdomain filter:', error);
+            console.error('Failed to load targets for live host scan form:', error);
+            
+            // Show error message in the form
+            const targetSelect = document.getElementById('live-host-target');
+            if (targetSelect) {
+                targetSelect.innerHTML = '<option value="">Error loading targets</option>';
+            }
         }
     },
 
-    async load(page = 1) {
+    async loadSubdomains() {
         try {
-            // Show loading message
-            document.getElementById('subdomains-list').innerHTML = 
-                '<tr><td colspan="8" style="text-align: center; color: #a855f7;">🔍 Searching subdomains...</td></tr>';
+            const targetId = document.getElementById('live-host-target')?.value;
+            const subdomainSelect = document.getElementById('live-host-subdomain');
             
-            const targetId = document.getElementById('subdomain-target-filter')?.value;
-            const status = document.getElementById('subdomain-status-filter')?.value;
-            const httpStatus = document.getElementById('subdomain-http-status-filter')?.value;
-            const search = document.getElementById('subdomain-search')?.value;
-            
-            const params = {
-                page: page,
-                limit: CONFIG.DEFAULT_PAGE_SIZE
-            };
-            
-            if (targetId) params.target_id = targetId;
-            if (status) params.status = status;
-            if (httpStatus && httpStatus.trim()) params.http_status = httpStatus.trim();
-            if (search && search.trim()) params.search = search.trim();
+            if (!subdomainSelect) return;
 
-            console.log('📡 API call params:', params);
+            const currentValue = subdomainSelect.value;
+            subdomainSelect.innerHTML = '<option value="">Check all subdomains</option>';
+            
+            if (!targetId) return;
 
-            const response = await API.subdomains.getAll(params);
-            if (!response) {
-                console.error('❌ No response from API');
-                return;
+            const response = await API.subdomains.getAll({ 
+                target_id: targetId,
+                limit: 1000
+            });
+            
+            if (response && response.ok) {
+                const data = await response.json();
+                const subdomains = data.success ? data.data : [];
+                
+                subdomains.forEach(subdomain => {
+                    const option = document.createElement('option');
+                    option.value = subdomain.id;
+                    option.textContent = subdomain.subdomain;
+                    subdomainSelect.appendChild(option);
+                });
             }
             
-            console.log('📡 API response status:', response.status);
-            
-            if (!response.ok) {
-                console.error('Failed to fetch subdomains:', response.status);
-                document.getElementById('subdomains-list').innerHTML = 
-                    '<tr><td colspan="8" style="text-align: center; color: #dc2626;">Failed to load subdomains - check if backend is running</td></tr>';
-                return;
+            if (currentValue) {
+                const optionExists = Array.from(subdomainSelect.options).some(option => option.value === currentValue);
+                if (optionExists) {
+                    subdomainSelect.value = currentValue;
+                }
             }
+            
+        } catch (error) {
+            console.error('Failed to load subdomains for live host scan:', error);
+        }
+    },
+
+    async load() {
+        try {
+            // Only load live_host_check jobs
+            const response = await API.scans.getJobs({ job_type: 'live_host_check' });
+            if (!response) return;
             
             const data = await response.json();
-            console.log('📦 API response data:', data);
+            const scans = data.success ? data.data : [];
             
-            if (data.success) {
-                const subdomains = data.data;
-                console.log(`✅ Found ${subdomains.length} subdomains`);
-                
-                AppState.currentPageData.subdomains = { page, total: data.pagination.total };
-                
-                this.renderSubdomainsList(subdomains);
-                
-                // Show result count message
-                const resultMessage = httpStatus && httpStatus.trim() ? 
-                    `Found ${subdomains.length} subdomains with HTTP status ${httpStatus.trim()}` :
-                    `Found ${subdomains.length} subdomains`;
-                
-                if (subdomains.length === 0 && (httpStatus?.trim() || search?.trim())) {
-                    Utils.showMessage('No subdomains found matching your search criteria', 'warning');
-                } else if (httpStatus?.trim() || search?.trim()) {
-                    Utils.showMessage(resultMessage, 'success');
-                }
-                
-                if (data.pagination.pages > 1) {
-                    Utils.updatePagination('subdomains', data.pagination);
-                } else {
-                    const paginationEl = document.getElementById('subdomains-pagination');
-                    if (paginationEl) paginationEl.innerHTML = '';
-                }
-            } else {
-                console.error('❌ API returned success: false', data);
-                document.getElementById('subdomains-list').innerHTML = 
-                    '<tr><td colspan="8" style="text-align: center; color: #dc2626;">API error: ' + (data.error || 'Unknown error') + '</td></tr>';
-            }
+            console.log('🌐 Loaded live host scans data:', scans); // Debug log
+            
+            this.renderScansList(scans);
+            this.updateScanStatus(scans, scans.filter(scan => 
+                scan.status === 'running' || scan.status === 'pending'
+            ));
+            this.updateLastUpdateTime();
         } catch (error) {
-            console.error('Failed to load subdomains:', error);
-            document.getElementById('subdomains-list').innerHTML = 
-                '<tr><td colspan="8" style="text-align: center; color: #dc2626;">Error loading subdomains: ' + error.message + '</td></tr>';
+            console.error('Failed to load live host scans:', error);
+            document.getElementById('live-host-scans-list').innerHTML = 
+                '<tr><td colspan="8" style="text-align: center; color: #dc2626;">Failed to load live host scans</td></tr>';
         }
     },
 
-    // New search method that's called by the search button
-    async search(page = 1) {
-        console.log('🔍 Search button clicked');
+    renderScansList(scans) {
+        const scansList = document.getElementById('live-host-scans-list');
         
-        // Get current filter values for debugging
-        const targetId = document.getElementById('subdomain-target-filter')?.value;
-        const status = document.getElementById('subdomain-status-filter')?.value;
-        const httpStatus = document.getElementById('subdomain-http-status-filter')?.value;
-        const search = document.getElementById('subdomain-search')?.value;
+        if (scans.length > 0) {
+            scansList.innerHTML = scans.map(scan => {
+                // Enhanced target name resolution
+                const targetName = this.getTargetName(scan);
+                const isRunning = scan.status === 'running' || scan.status === 'pending';
+                
+                console.log(`🎯 Live Host Scan ${scan.id}: target_domain="${scan.target_domain}", domain="${scan.domain}", target_id="${scan.target_id}", resolved="${targetName}"`); // Debug log
+                
+                // Extract live hosts count from results
+                let liveHostsCount = '-';
+                if (scan.status === 'completed' && scan.results) {
+                    try {
+                        const results = typeof scan.results === 'string' ? JSON.parse(scan.results) : scan.results;
+                        liveHostsCount = results.live_hosts_count || results.total_live || results.live_hosts?.length || 0;
+                    } catch (error) {
+                        console.warn('Failed to parse scan results:', error);
+                    }
+                } else if (isRunning) {
+                    liveHostsCount = '🔄 Checking...';
+                }
+                
+                return `
+                    <tr class="${isRunning ? 'progress-row' : ''}">
+                        <td style="font-family: 'Courier New', monospace;">${scan.id}</td>
+                        <td style="color: #7c3aed; font-weight: bold;" title="Target ID: ${scan.target_id}">${targetName}</td>
+                        <td>Live Host Check</td>
+                        <td><span class="status status-${scan.status} ${isRunning ? 'status-updating' : ''}">${scan.status.toUpperCase()}</span></td>
+                        <td>
+                            <div style="background-color: #2d1b69; border: 1px solid #7c3aed; height: 8px; width: 100px;">
+                                <div style="background: linear-gradient(90deg, #7c3aed, #9a4dff); height: 100%; width: ${scan.progress_percentage || 0}%; transition: width 0.3s ease;"></div>
+                            </div>
+                            <span style="font-size: 13px; color: #6b46c1;">${scan.progress_percentage || 0}%</span>
+                        </td>
+                        <td style="font-weight: bold; color: ${scan.status === 'completed' ? '#7c3aed' : '#666'};">
+                            ${liveHostsCount}
+                        </td>
+                        <td style="font-size: 12px; color: #666;">${new Date(scan.created_at).toLocaleDateString()}</td>
+                        <td>
+                            ${scan.status === 'completed' ? 
+                                `<div style="position: relative; display: inline-block;">
+                                    <button onclick="Subdomains.toggleExportMenu(${scan.id})" class="btn btn-secondary btn-small" id="export-btn-${scan.id}">📤 Export Live Hosts</button>
+                                    <div id="export-menu-${scan.id}" class="export-menu" style="display: none; position: absolute; top: 100%; left: 0; background: #000; border: 2px solid #7c3aed; min-width: 140px; z-index: 1000;">
+                                        <button onclick="Subdomains.exportResults(${scan.id}, 'csv')" class="btn btn-secondary btn-small" style="width: 100%; border: none; border-bottom: 1px solid #2d1b69;">📊 CSV</button>
+                                        <button onclick="Subdomains.exportResults(${scan.id}, 'json')" class="btn btn-secondary btn-small" style="width: 100%; border: none; border-bottom: 1px solid #2d1b69;">📋 JSON</button>
+                                        <button onclick="Subdomains.exportResults(${scan.id}, 'xml')" class="btn btn-secondary btn-small" style="width: 100%; border: none;">📄 XML</button>
+                                    </div>
+                                </div>` :
+                                scan.status === 'running' ? 
+                                `<button onclick="Subdomains.stopScan(${scan.id})" class="btn btn-danger btn-small">Stop</button>` :
+                                '-'
+                            }
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        } else {
+            scansList.innerHTML = '<tr><td colspan="8" style="text-align: center; color: #6b46c1;">No live host scans yet. Start your first scan above!</td></tr>';
+        }
+    },
+
+    async startLiveHostScan() {
+        const targetId = document.getElementById('live-host-target').value;
+        const subdomainId = document.getElementById('live-host-subdomain').value;
+        const httpMethods = document.getElementById('http-methods').value;
+        const protocols = document.getElementById('protocols').value;
+        const timeout = document.getElementById('request-timeout').value;
+        const followRedirects = document.getElementById('follow-redirects').value === 'true';
+        const concurrentRequests = document.getElementById('concurrent-requests').value;
+        const takeScreenshots = document.getElementById('take-screenshots').value === 'true';
         
-        console.log('Current filter values:', {
-            targetId,
-            status,
-            httpStatus,
-            search
+        if (!targetId) {
+            Utils.showMessage('Please select a target', 'error', 'live-host-messages');
+            return;
+        }
+        
+        try {
+            Utils.setButtonLoading('start-live-host-btn', true, '🌐 Starting Live Host Check...');
+            
+            const scanTypes = ['live_host_check'];
+            const config = {
+                subdomain_id: subdomainId || null,
+                http_methods: httpMethods,
+                protocols: protocols,
+                timeout: parseInt(timeout),
+                follow_redirects: followRedirects,
+                concurrent_requests: parseInt(concurrentRequests),
+                take_screenshots: takeScreenshots
+            };
+            
+            Utils.showMessage('🌐 Starting live host discovery scan...', 'info', 'live-host-messages');
+            
+            const response = await API.scans.start(targetId, scanTypes, 'medium', config);
+            
+            if (response && response.ok) {
+                const data = await response.json();
+                console.log('Live host scan started:', data);
+                
+                const successMessage = `🌐 Live host discovery scan started successfully! ${subdomainId ? 'Checking selected subdomain' : 'Checking all subdomains for live hosts'}. Results will appear below as they are discovered.`;
+                Utils.showMessage(successMessage, 'success', 'live-host-messages');
+                
+                // Reset form
+                document.getElementById('live-host-subdomain').value = '';
+                
+                // Immediately refresh and enable aggressive updates
+                await this.load();
+                this.startRealTimeUpdates();
+                
+            } else {
+                const errorData = await response.json();
+                Utils.showMessage('Failed to start live host scan: ' + (errorData.error || errorData.message || 'Unknown error'), 'error', 'live-host-messages');
+            }
+        } catch (error) {
+            Utils.showMessage('Failed to start live host scan: ' + error.message, 'error', 'live-host-messages');
+        } finally {
+            Utils.setButtonLoading('start-live-host-btn', false, '🌐 Start Live Host Check');
+        }
+    },
+
+    // Cleanup method for tab switching
+    cleanup() {
+        console.log('🧹 Cleaning up live host scans module intervals');
+        
+        if (this.refreshInterval) {
+            clearInterval(this.refreshInterval);
+            this.refreshInterval = null;
+        }
+        
+        this.isAutoRefreshEnabled = false;
+    },
+
+    toggleExportMenu(scanId) {
+        // Close all other export menus first
+        document.querySelectorAll('.export-menu').forEach(menu => {
+            if (menu.id !== `export-menu-${scanId}`) {
+                menu.style.display = 'none';
+            }
         });
         
-        await this.load(page);
-    },
-
-    // New method to clear all filters
-    clearFilters() {
-        // Clear all filter inputs and selects (excluding global target filter)
-        const statusFilter = document.getElementById('subdomain-status-filter');
-        const httpStatusFilter = document.getElementById('subdomain-http-status-filter');
-        const searchFilter = document.getElementById('subdomain-search');
-        
-        if (statusFilter) statusFilter.value = '';
-        if (httpStatusFilter) httpStatusFilter.value = '';
-        if (searchFilter) searchFilter.value = '';
-        
-        // Reload with cleared filters
-        this.load(1);
-        
-        Utils.showMessage('Filters cleared', 'info');
-    },
-
-    renderSubdomainsList(subdomains) {
-        const subdomainsList = document.getElementById('subdomains-list');
-        
-        if (subdomains.length > 0) {
-            subdomainsList.innerHTML = subdomains.map(subdomain => `
-                <tr>
-                    <td style="font-weight: 600; color: #7c3aed;">${subdomain.subdomain}</td>
-                    <td>${subdomain.target_domain}</td>
-                    <td><span class="status status-${subdomain.status}">${subdomain.status}</span></td>
-                    <td>
-                        ${subdomain.http_status ? 
-                            `<span class="status ${this.getHttpStatusColor(subdomain.http_status)}">${subdomain.http_status}</span>` : 
-                            '-'
-                        }
-                    </td>
-                    <td style="font-family: 'Courier New', monospace; color: #9a4dff;">${subdomain.ip_address || '-'}</td>
-                    <td style="max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${subdomain.title || ''}">${subdomain.title || '-'}</td>
-                    <td style="font-size: 12px; color: #6b46c1;">${subdomain.last_seen ? new Date(subdomain.last_seen).toLocaleDateString() : '-'}</td>
-                    <td>
-                        <button onclick="Subdomains.checkLive(${subdomain.id})" class="btn btn-secondary btn-small">Check Live</button>
-                        ${subdomain.http_status && (subdomain.http_status === 200 || subdomain.http_status === 301 || subdomain.http_status === 302) ? 
-                            `<button onclick="window.open('https://${subdomain.subdomain}', '_blank')" class="btn btn-success btn-small">Open</button>` : 
-                            ''
-                        }
-                    </td>
-                </tr>
-            `).join('');
-        } else {
-            subdomainsList.innerHTML = '<tr><td colspan="8" style="text-align: center; color: #6b46c1;">No subdomains found. Run a subdomain scan to discover subdomains!</td></tr>';
-        }
-    },
-
-    // New method to get HTTP status color
-    getHttpStatusColor(statusCode) {
-        if (!statusCode) return 'status-inactive';
-        
-        const code = parseInt(statusCode);
-        if (code >= 200 && code < 300) return 'status-completed'; // Green for success
-        if (code >= 300 && code < 400) return 'status-running';   // Yellow for redirects
-        if (code >= 400 && code < 500) return 'severity-medium'; // Orange for client errors
-        if (code >= 500) return 'severity-high';                 // Red for server errors
-        return 'status-inactive';
-    },
-
-    async checkLive(id) {
-        try {
-            const response = await API.subdomains.checkLive(id);
-            if (response && response.ok) {
-                await this.load(AppState.currentPageData.subdomains.page);
-                Utils.showMessage('Live status check completed!', 'success');
-            } else {
-                Utils.showMessage('Failed to check live status', 'error');
-            }
-        } catch (error) {
-            Utils.showMessage('Failed to check live status: ' + error.message, 'error');
-        }
-    },
-
-    async checkAllLive() {
-        const checkAllBtn = document.getElementById('check-all-btn');
-        const statusSpan = document.getElementById('check-all-status');
-        const progressContainer = document.getElementById('check-all-progress');
-        const progressBar = document.getElementById('progress-bar');
-        const progressText = document.getElementById('progress-text');
-        
-        try {
-            // Disable button and show loading state
-            checkAllBtn.disabled = true;
-            checkAllBtn.innerHTML = '<span class="spinner"></span>Checking All Domains...';
-            statusSpan.textContent = 'Preparing bulk live check...';
-            statusSpan.style.color = '#a855f7';
-            progressContainer.style.display = 'block';
-            progressBar.style.width = '0%';
-            
-            // Get current filters to determine which subdomains to check
-            const targetId = document.getElementById('subdomain-target-filter')?.value;
-            const status = document.getElementById('subdomain-status-filter')?.value;
-            const httpStatus = document.getElementById('subdomain-http-status-filter')?.value;
-            const search = document.getElementById('subdomain-search')?.value;
-            
-            const params = {
-                page: 1,
-                limit: 1000 // Get more subdomains for bulk checking
-            };
-            
-            if (targetId) params.target_id = targetId;
-            if (status) params.status = status;
-            if (httpStatus) params.http_status = httpStatus.trim();
-            if (search) params.search = search;
-
-            // Get all subdomains that match current filters
-            const response = await API.subdomains.getAll(params);
-            if (!response || !response.ok) {
-                throw new Error('Failed to fetch subdomains');
-            }
-            
-            const data = await response.json();
-            const subdomains = data.success ? data.data : [];
-            
-            if (subdomains.length === 0) {
-                statusSpan.textContent = 'No subdomains found to check';
-                statusSpan.style.color = '#a855f7';
-                return;
-            }
-            
-            statusSpan.textContent = `Found ${subdomains.length} subdomains to check`;
-            statusSpan.style.color = '#7c3aed';
-            
-            // Check subdomains in batches to avoid overwhelming the server
-            let checkedCount = 0;
-            let successCount = 0;
-            let failedCount = 0;
-            const startTime = Date.now();
-            const BATCH_SIZE = CONFIG.BULK_CHECK_BATCH_SIZE || 5;
-            const BATCH_DELAY = CONFIG.BULK_CHECK_DELAY || 1000;
-            
-            for (let i = 0; i < subdomains.length; i += BATCH_SIZE) {
-                const batch = subdomains.slice(i, i + BATCH_SIZE);
-                
-                // Process batch in parallel
-                const batchPromises = batch.map(async (subdomain) => {
-                    try {
-                        const checkResponse = await API.subdomains.checkLive(subdomain.id);
-                        
-                        if (checkResponse && checkResponse.ok) {
-                            successCount++;
-                        } else {
-                            failedCount++;
-                        }
-                        checkedCount++;
-                        
-                        // Update progress
-                        const percentage = Math.round((checkedCount / subdomains.length) * 100);
-                        progressBar.style.width = `${percentage}%`;
-                        
-                        const elapsed = Math.round((Date.now() - startTime) / 1000);
-                        const eta = checkedCount > 0 ? Math.round((elapsed / checkedCount) * (subdomains.length - checkedCount)) : 0;
-                        
-                        statusSpan.textContent = `Checking subdomains... ${checkedCount}/${subdomains.length} (${percentage}%)`;
-                        progressText.textContent = `✅ ${successCount} success • ❌ ${failedCount} failed • ⏱️ ${eta}s remaining`;
-                        
-                    } catch (error) {
-                        console.error(`Failed to check subdomain ${subdomain.subdomain}:`, error);
-                        failedCount++;
-                        checkedCount++;
-                    }
-                });
-                
-                await Promise.all(batchPromises);
-                
-                // Small delay between batches to be respectful to the server
-                if (i + BATCH_SIZE < subdomains.length) {
-                    await new Promise(resolve => setTimeout(resolve, BATCH_DELAY));
-                }
-            }
-            
-            // Show completion status
-            const totalTime = Math.round((Date.now() - startTime) / 1000);
-            statusSpan.textContent = `✅ Bulk check completed in ${totalTime}s`;
-            statusSpan.style.color = '#7c3aed';
-            progressText.textContent = `Final: ✅ ${successCount} successful • ❌ ${failedCount} failed • 📊 ${subdomains.length} total`;
-            progressBar.style.width = '100%';
-            
-            // Refresh the subdomains list to show updated statuses
-            await this.load(AppState.currentPageData.subdomains.page);
-            
-            const message = `Bulk live check completed! ${successCount}/${subdomains.length} checks successful`;
-            Utils.showMessage(message, successCount > 0 ? 'success' : 'warning');
-            
-        } catch (error) {
-            console.error('Bulk live check failed:', error);
-            statusSpan.textContent = '❌ Bulk check failed';
-            statusSpan.style.color = '#dc2626';
-            progressText.textContent = 'Error occurred during bulk checking';
-            Utils.showMessage('Failed to perform bulk live check: ' + error.message, 'error');
-        } finally {
-            // Re-enable button
-            checkAllBtn.disabled = false;
-            checkAllBtn.innerHTML = '🌐 Check All Live';
-            
-            // Hide progress after delay
-            setTimeout(() => {
-                progressContainer.style.display = 'none';
-                statusSpan.textContent = '';
-                statusSpan.style.color = '#9a4dff';
-            }, 10000); // Keep visible for 10 seconds
-        }
-    },
-
-    // Export functionality methods
-    toggleExportMenu() {
-        const menu = document.getElementById('export-subdomains-menu');
+        // Toggle the clicked menu
+        const menu = document.getElementById(`export-menu-${scanId}`);
         if (menu) {
             menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
         }
     },
 
-    async exportSubdomains(format) {
+    async exportResults(scanId, format) {
         try {
             // Hide the export menu
-            const menu = document.getElementById('export-subdomains-menu');
+            const menu = document.getElementById(`export-menu-${scanId}`);
             if (menu) menu.style.display = 'none';
             
             // Show loading message
-            Utils.showMessage(`📤 Exporting live hosts as ${format.toUpperCase()}...`, 'info');
+            Utils.showMessage(`Exporting live host scan results as ${format.toUpperCase()}...`, 'info', 'live-host-messages');
             
-            // Get current filter values to export filtered data
-            const targetId = document.getElementById('subdomain-target-filter')?.value;
-            const status = document.getElementById('subdomain-status-filter')?.value;
-            const httpStatus = document.getElementById('subdomain-http-status-filter')?.value;
-            const search = document.getElementById('subdomain-search')?.value;
-            
-            const params = {
-                page: 1,
-                limit: 10000 // Get all matching subdomains for export
-            };
-            
-            if (targetId) params.target_id = targetId;
-            if (status) params.status = status;
-            if (httpStatus && httpStatus.trim()) params.http_status = httpStatus.trim();
-            if (search && search.trim()) params.search = search.trim();
-
-            const response = await API.subdomains.getAll(params);
-            if (!response || !response.ok) {
-                throw new Error('Failed to fetch subdomains for export');
-            }
+            const response = await API.scans.get(scanId);
+            if (!response) return;
             
             const data = await response.json();
-            const subdomains = data.success ? data.data : [];
             
-            if (subdomains.length === 0) {
-                Utils.showMessage('No subdomains to export with current filters', 'warning');
-                return;
+            if (data.success && data.data) {
+                const scanData = data.data;
+                const results = scanData.results || {};
+                
+                // Get target name for export
+                const targetName = this.getTargetName(scanData);
+                
+                // Prepare export data
+                const exportData = {
+                    scan_id: scanId,
+                    target: targetName,
+                    scan_type: 'Live Host Discovery',
+                    status: scanData.status,
+                    created_at: scanData.created_at,
+                    completed_at: scanData.completed_at,
+                    results: results
+                };
+                
+                // Generate and download file based on format
+                switch (format.toLowerCase()) {
+                    case 'csv':
+                        this.downloadCSV(exportData, scanId);
+                        break;
+                    case 'json':
+                        this.downloadJSON(exportData, scanId);
+                        break;
+                    case 'xml':
+                        this.downloadXML(exportData, scanId);
+                        break;
+                    default:
+                        throw new Error('Unsupported export format');
+                }
+                
+                Utils.showMessage(`Live host scan results exported successfully as ${format.toUpperCase()}!`, 'success', 'live-host-messages');
+                
+            } else {
+                Utils.showMessage('No results available for export.', 'warning', 'live-host-messages');
             }
-            
-            // Prepare export data
-            const exportData = {
-                export_timestamp: new Date().toISOString(),
-                total_subdomains: subdomains.length,
-                filters_applied: {
-                    target_id: targetId || 'all',
-                    status: status || 'all',
-                    http_status: httpStatus || 'all',
-                    search: search || 'none'
-                },
-                subdomains: subdomains
-            };
-            
-            // Generate and download file based on format
-            switch (format.toLowerCase()) {
-                case 'csv':
-                    this.downloadCSV(exportData);
-                    break;
-                case 'json':
-                    this.downloadJSON(exportData);
-                    break;
-                case 'xml':
-                    this.downloadXML(exportData);
-                    break;
-                default:
-                    throw new Error('Unsupported export format');
-            }
-            
-            Utils.showMessage(`✅ Successfully exported ${subdomains.length} live hosts as ${format.toUpperCase()}!`, 'success');
-            
         } catch (error) {
-            Utils.showMessage('❌ Failed to export live hosts: ' + error.message, 'error');
+            Utils.showMessage('Failed to export results: ' + error.message, 'error', 'live-host-messages');
         }
     },
 
-    downloadCSV(data) {
-        const timestamp = new Date().toISOString().split('T')[0];
-        let csvContent = 'Subdomain,Target Domain,Status,HTTP Status,IP Address,Title,Last Seen,Created Date\n';
+    downloadCSV(data, scanId) {
+        let csvContent = 'Scan ID,Target,Scan Type,Status,Created,Completed,Live Hosts Count\n';
+        csvContent += `${data.scan_id},"${data.target}","${data.scan_type}","${data.status}","${data.created_at}","${data.completed_at || 'N/A'}","${data.results.live_hosts_count || data.results.total_live || 0}"\n\n`;
         
-        data.subdomains.forEach(subdomain => {
-            const row = [
-                `"${subdomain.subdomain || ''}"`,
-                `"${subdomain.target_domain || ''}"`,
-                `"${subdomain.status || ''}"`,
-                `"${subdomain.http_status || ''}"`,
-                `"${subdomain.ip_address || ''}"`,
-                `"${(subdomain.title || '').replace(/"/g, '""')}"`, // Escape quotes in title
-                `"${subdomain.last_seen || ''}"`,
-                `"${subdomain.created_at || ''}"`
-            ].join(',');
-            csvContent += row + '\n';
-        });
+        // Add live hosts if available
+        if (data.results.live_hosts && data.results.live_hosts.length > 0) {
+            csvContent += 'Live Hosts Found\n';
+            csvContent += 'Subdomain,HTTP Status,IP Address,Title,Response Time\n';
+            data.results.live_hosts.forEach(host => {
+                csvContent += `"${host.subdomain || host.url}","${host.status_code || 'N/A'}","${host.ip_address || 'N/A'}","${host.title || 'N/A'}","${host.response_time || 'N/A'}"\n`;
+            });
+        }
         
-        // Add summary at the end
-        csvContent += '\n';
-        csvContent += `"Export Summary"\n`;
-        csvContent += `"Total Subdomains","${data.total_subdomains}"\n`;
-        csvContent += `"Export Date","${data.export_timestamp}"\n`;
-        csvContent += `"Filters Applied","Target: ${data.filters_applied.target_id}, Status: ${data.filters_applied.status}, HTTP: ${data.filters_applied.http_status}, Search: ${data.filters_applied.search}"\n`;
-        
-        this.downloadFile(csvContent, `live_hosts_${timestamp}.csv`, 'text/csv');
+        this.downloadFile(csvContent, `live_host_scan_${scanId}_results.csv`, 'text/csv');
     },
 
-    downloadJSON(data) {
-        const timestamp = new Date().toISOString().split('T')[0];
+    downloadJSON(data, scanId) {
         const jsonContent = JSON.stringify(data, null, 2);
-        this.downloadFile(jsonContent, `live_hosts_${timestamp}.json`, 'application/json');
+        this.downloadFile(jsonContent, `live_host_scan_${scanId}_results.json`, 'application/json');
     },
 
-    downloadXML(data) {
-        const timestamp = new Date().toISOString().split('T')[0];
+    downloadXML(data, scanId) {
         let xmlContent = '<?xml version="1.0" encoding="UTF-8"?>\n';
-        xmlContent += '<live_hosts_export>\n';
-        xmlContent += `  <export_info>\n`;
-        xmlContent += `    <timestamp>${this.escapeXml(data.export_timestamp)}</timestamp>\n`;
-        xmlContent += `    <total_subdomains>${data.total_subdomains}</total_subdomains>\n`;
-        xmlContent += `    <filters>\n`;
-        xmlContent += `      <target_id>${this.escapeXml(data.filters_applied.target_id)}</target_id>\n`;
-        xmlContent += `      <status>${this.escapeXml(data.filters_applied.status)}</status>\n`;
-        xmlContent += `      <http_status>${this.escapeXml(data.filters_applied.http_status)}</http_status>\n`;
-        xmlContent += `      <search>${this.escapeXml(data.filters_applied.search)}</search>\n`;
-        xmlContent += `    </filters>\n`;
-        xmlContent += `  </export_info>\n`;
-        xmlContent += '  <subdomains>\n';
+        xmlContent += '<live_host_scan_results>\n';
+        xmlContent += `  <scan_id>${data.scan_id}</scan_id>\n`;
+        xmlContent += `  <target>${this.escapeXml(data.target)}</target>\n`;
+        xmlContent += `  <scan_type>${this.escapeXml(data.scan_type)}</scan_type>\n`;
+        xmlContent += `  <status>${this.escapeXml(data.status)}</status>\n`;
+        xmlContent += `  <created_at>${this.escapeXml(data.created_at)}</created_at>\n`;
+        xmlContent += `  <completed_at>${this.escapeXml(data.completed_at || 'N/A')}</completed_at>\n`;
+        xmlContent += `  <live_hosts_count>${data.results.live_hosts_count || data.results.total_live || 0}</live_hosts_count>\n`;
+        xmlContent += '  <results>\n';
         
-        data.subdomains.forEach(subdomain => {
-            xmlContent += '    <subdomain>\n';
-            xmlContent += `      <name>${this.escapeXml(subdomain.subdomain || '')}</name>\n`;
-            xmlContent += `      <target_domain>${this.escapeXml(subdomain.target_domain || '')}</target_domain>\n`;
-            xmlContent += `      <status>${this.escapeXml(subdomain.status || '')}</status>\n`;
-            xmlContent += `      <http_status>${this.escapeXml(subdomain.http_status || '')}</http_status>\n`;
-            xmlContent += `      <ip_address>${this.escapeXml(subdomain.ip_address || '')}</ip_address>\n`;
-            xmlContent += `      <title>${this.escapeXml(subdomain.title || '')}</title>\n`;
-            xmlContent += `      <last_seen>${this.escapeXml(subdomain.last_seen || '')}</last_seen>\n`;
-            xmlContent += `      <created_at>${this.escapeXml(subdomain.created_at || '')}</created_at>\n`;
-            xmlContent += '    </subdomain>\n';
-        });
+        // Add live hosts
+        if (data.results.live_hosts && data.results.live_hosts.length > 0) {
+            xmlContent += '    <live_hosts>\n';
+            data.results.live_hosts.forEach(host => {
+                xmlContent += `      <host>\n`;
+                xmlContent += `        <subdomain>${this.escapeXml(host.subdomain || host.url)}</subdomain>\n`;
+                xmlContent += `        <status_code>${this.escapeXml(host.status_code || 'N/A')}</status_code>\n`;
+                xmlContent += `        <ip_address>${this.escapeXml(host.ip_address || 'N/A')}</ip_address>\n`;
+                xmlContent += `        <title>${this.escapeXml(host.title || 'N/A')}</title>\n`;
+                xmlContent += `        <response_time>${this.escapeXml(host.response_time || 'N/A')}</response_time>\n`;
+                xmlContent += `      </host>\n`;
+            });
+            xmlContent += '    </live_hosts>\n';
+        }
         
-        xmlContent += '  </subdomains>\n';
-        xmlContent += '</live_hosts_export>';
+        xmlContent += '  </results>\n';
+        xmlContent += '</live_host_scan_results>';
         
-        this.downloadFile(xmlContent, `live_hosts_${timestamp}.xml`, 'application/xml');
+        this.downloadFile(xmlContent, `live_host_scan_${scanId}_results.xml`, 'application/xml');
     },
 
     escapeXml(text) {
@@ -647,6 +811,22 @@ const Subdomains = {
         a.click();
         document.body.removeChild(a);
         window.URL.revokeObjectURL(url);
+    },
+
+    async stopScan(scanId) {
+        if (confirm('Are you sure you want to stop this live host discovery scan?')) {
+            try {
+                const response = await API.scans.stop(scanId);
+                if (response && response.ok) {
+                    await this.load();
+                    Utils.showMessage('Live host scan stopped successfully!', 'success');
+                } else {
+                    Utils.showMessage('Failed to stop scan', 'error');
+                }
+            } catch (error) {
+                Utils.showMessage('Failed to stop scan: ' + error.message, 'error');
+            }
+        }
     },
 
     // Method to refresh targets (useful when called from other modules)

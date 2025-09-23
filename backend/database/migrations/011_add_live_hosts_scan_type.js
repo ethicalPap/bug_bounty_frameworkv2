@@ -1,4 +1,4 @@
-// backend/database/migrations/011_add_live_hosts_scan_type.js
+// backend/database/migrations/011_add_live_hosts_scan_type.js (UPDATED)
 exports.up = function(knex) {
   return knex.raw(`
     ALTER TABLE scan_jobs 
@@ -14,7 +14,8 @@ exports.up = function(knex) {
       'api_discovery',
       'vulnerability_scan',
       'full_scan',
-      'live_hosts_scan'
+      'live_hosts_scan',
+      'live_host_check'
     ));
   `);
 };

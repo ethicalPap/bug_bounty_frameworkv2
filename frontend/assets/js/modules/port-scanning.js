@@ -1,16 +1,20 @@
-// frontend/assets/js/modules/port-scanning.js - ENHANCED WITH SERVICE LOADING INDICATORS
+// frontend/assets/js/modules/port-scanning.js - REDESIGNED TO MIMIC SCANS STYLE
 
 const PortScanning = {
     refreshInterval: null,
     activeScanJobId: null,
-    isScanning: false,
+    isAutoRefreshEnabled: true,
+    lastUpdate: null,
+    targetsCache: {}, // Cache for target information
 
     async init() {
         this.renderHTML();
         this.bindEvents();
         await this.loadTargets();
         await this.load();
-        this.startAutoRefresh(); // Start real-time updates
+        
+        // Start real-time updates like scans
+        this.startRealTimeUpdates();
     },
 
     renderHTML() {
@@ -27,26 +31,73 @@ const PortScanning = {
                     background: linear-gradient(90deg, #1a0a2e, #2d1b69) !important;
                     color: #a855f7 !important;
                 }
+                
+                .scrollable-table-container {
+                    max-height: 500px;
+                    overflow-y: auto;
+                    overflow-x: auto;
+                    border: 2px solid #7c3aed;
+                    background-color: #000000;
+                }
+                .scrollable-table-container::-webkit-scrollbar {
+                    width: 12px;
+                    height: 12px;
+                }
+                .scrollable-table-container::-webkit-scrollbar-track {
+                    background: #000000;
+                    border: 1px solid #2d1b69;
+                }
+                .scrollable-table-container::-webkit-scrollbar-thumb {
+                    background: linear-gradient(180deg, #7c3aed, #9a4dff);
+                    border: 1px solid #2d1b69;
+                    border-radius: 6px;
+                }
+                .scrollable-table-container::-webkit-scrollbar-thumb:hover {
+                    background: linear-gradient(180deg, #9a4dff, #a855f7);
+                }
+                .scrollable-table-container::-webkit-scrollbar-corner {
+                    background: #000000;
+                }
+                
+                .spinner {
+                    border: 2px solid #2d1b69;
+                    border-top: 2px solid #7c3aed;
+                    border-radius: 50%;
+                    width: 16px;
+                    height: 16px;
+                    animation: spin 1s linear infinite;
+                    display: inline-block;
+                }
+                
+                @keyframes spin {
+                    0% { transform: rotate(0deg); }
+                    100% { transform: rotate(360deg); }
+                }
+                
+                .progress-row {
+                    background-color: rgba(124, 58, 237, 0.1) !important;
+                    animation: pulse 2s infinite;
+                }
+                
+                @keyframes pulse {
+                    0% { background-color: rgba(124, 58, 237, 0.1); }
+                    50% { background-color: rgba(154, 77, 255, 0.2); }
+                    100% { background-color: rgba(124, 58, 237, 0.1); }
+                }
+                
+                .status-updating {
+                    animation: blink 1s infinite;
+                }
+                
+                @keyframes blink {
+                    0%, 50% { opacity: 1; }
+                    51%, 100% { opacity: 0.5; }
+                }
             </style>
-
-            <!-- Real-time status indicator -->
-            <div id="port-scan-status" style="display: none; background: linear-gradient(135deg, #1a0a2e, #2d1b69); border: 2px solid #7c3aed; padding: 12px; margin-bottom: 15px;">
-                <div style="display: flex; align-items: center; gap: 10px;">
-                    <div class="spinner" style="margin: 0;"></div>
-                    <span id="port-scan-status-text" style="color: #7c3aed; font-family: 'Courier New', monospace;">Port scan in progress...</span>
-                    <button onclick="PortScanning.stopActiveScan()" class="btn btn-danger btn-small" style="margin-left: auto;">Stop Scan</button>
-                </div>
-                <div id="port-scan-progress" style="margin-top: 8px;">
-                    <div style="background-color: #2d1b69; border: 1px solid #7c3aed; height: 8px; width: 100%;">
-                        <div id="port-scan-progress-bar" style="background: linear-gradient(90deg, #7c3aed, #9a4dff); height: 100%; width: 0%; transition: width 0.3s ease;"></div>
-                    </div>
-                    <div id="port-scan-progress-text" style="font-size: 12px; color: #9a4dff; margin-top: 4px;"></div>
-                </div>
-            </div>
 
             <div class="scan-info">
                 <h4>🔌 Port Scanning <span id="port-scan-live-indicator" style="color: #7c3aed; font-size: 12px;">[LIVE]</span></h4>
-                <p>Discover open ports and services on your targets using nmap. Scans update automatically in real-time.</p>
+                <p>Discover open ports and services on your targets using nmap. Identifies running services, versions, and potential attack vectors on discovered hosts.</p>
             </div>
 
             <div class="card">
@@ -149,137 +200,53 @@ const PortScanning = {
                 </form>
             </div>
 
-            <div class="filters">
-                <div class="filter-group">
-                    <label>Target</label>
-                    <select id="port-target-filter">
-                        <option value="">All Targets</option>
-                    </select>
-                </div>
-                <div class="filter-group">
-                    <label>Subdomain</label>
-                    <select id="port-subdomain-filter">
-                        <option value="">All Subdomains</option>
-                    </select>
-                </div>
-                <div class="filter-group">
-                    <label>Subdomain Status</label>
-                    <select id="subdomain-status-filter">
-                        <option value="">All Status</option>
-                        <option value="active">Active Only</option>
-                        <option value="inactive">Inactive Only</option>
-                    </select>
-                </div>
-                <div class="filter-group">
-                    <label>Port State</label>
-                    <select id="port-state-filter">
-                        <option value="">All States</option>
-                        <option value="open">Open</option>
-                        <option value="closed">Closed</option>
-                        <option value="filtered">Filtered</option>
-                    </select>
-                </div>
-                <div class="filter-group">
-                    <label>Service</label>
-                    <input type="text" id="service-search" placeholder="Search services...">
-                </div>
-                <div style="display: flex; gap: 8px;">
-                    <button onclick="PortScanning.search()" class="btn btn-primary">🔍 Search</button>
-                    <button onclick="PortScanning.toggleAutoRefresh()" class="btn btn-secondary" id="port-auto-refresh-toggle">
-                        ⏸️ Pause Live Updates
-                    </button>
-                </div>
-            </div>
-
             <div class="card">
                 <div class="card-title">
-                    Discovered Ports & Services
-                    <div style="float: right; position: relative; display: inline-block;">
-                        <button onclick="PortScanning.toggleExportMenu()" class="btn btn-success btn-small" id="export-ports-btn">
-                            📤 Export Services
-                        </button>
-                        <div id="export-ports-menu" class="export-menu" style="display: none; position: absolute; top: 100%; right: 0; min-width: 140px; z-index: 1000;">
-                            <button onclick="PortScanning.exportPorts('csv')" class="btn btn-secondary btn-small" style="width: 100%; border: none; border-bottom: 1px solid #2d1b69;">📊 CSV</button>
-                            <button onclick="PortScanning.exportPorts('json')" class="btn btn-secondary btn-small" style="width: 100%; border: none; border-bottom: 1px solid #2d1b69;">📋 JSON</button>
-                            <button onclick="PortScanning.exportPorts('xml')" class="btn btn-secondary btn-small" style="width: 100%; border: none;">📄 XML</button>
-                        </div>
-                    </div>
-                    <span id="last-updated" style="font-size: 12px; color: #666; float: right; margin-right: 160px;"></span>
+                    Port Scanning Scan Jobs
+                    <span id="auto-refresh-indicator" style="float: right; font-size: 12px; color: #9a4dff;">
+                        🔄 Auto-updating
+                    </span>
                 </div>
                 
-                <!-- Port Stats -->
-                <div id="port-stats" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; margin-bottom: 20px; padding: 15px; border: 1px solid #2d1b69; background: linear-gradient(135deg, #1a0a2e, #2d1b69);">
-                    <div style="text-align: center;">
-                        <div id="total-ports" style="font-size: 24px; font-weight: bold; color: #7c3aed;">0</div>
-                        <div style="font-size: 12px; color: #6b46c1;">Total Ports</div>
-                    </div>
-                    <div style="text-align: center;">
-                        <div id="open-ports" style="font-size: 24px; font-weight: bold; color: #7c3aed;">0</div>
-                        <div style="font-size: 12px; color: #6b46c1;">Open Ports</div>
-                    </div>
-                    <div style="text-align: center;">
-                        <div id="unique-services" style="font-size: 24px; font-weight: bold; color: #eab308;">0</div>
-                        <div style="font-size: 12px; color: #6b46c1;">Unique Services</div>
-                    </div>
-                    <div style="text-align: center;">
-                        <div id="high-risk-ports" style="font-size: 24px; font-weight: bold; color: #ea580c;">0</div>
-                        <div style="font-size: 12px; color: #6b46c1;">High Risk Ports</div>
-                    </div>
-                    <div style="text-align: center;">
-                        <div id="scanning-status" style="font-size: 14px; font-weight: bold; color: #9a4dff;">
-                            ${this.isScanning ? '🔄 Scanning...' : '💤 Idle'}
-                        </div>
-                        <div style="font-size: 12px; color: #6b46c1;">Scan Status</div>
+                <!-- Controls -->
+                <div style="margin-bottom: 15px; display: flex; align-items: center; gap: 15px; flex-wrap: wrap;">
+                    <button onclick="PortScanning.load()" class="btn btn-secondary">🔄 Manual Refresh</button>
+                    <button onclick="PortScanning.toggleAutoRefresh()" class="btn btn-secondary" id="auto-refresh-toggle">
+                        ⏸️ Pause Auto-refresh
+                    </button>
+                    <span id="port-scan-status" style="color: #6b46c1; font-size: 13px; font-family: 'Courier New', monospace;"></span>
+                    <span id="last-update-time" style="color: #666; font-size: 11px; margin-left: auto;"></span>
+                </div>
+                
+                <!-- Real-time progress indicator -->
+                <div id="realtime-progress" style="display: none; margin-bottom: 15px; padding: 10px; border: 1px solid #7c3aed; background: linear-gradient(135deg, #1a0a2e, #2d1b69);">
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span class="spinner" style="width: 16px; height: 16px;"></span>
+                        <span id="progress-text" style="color: #7c3aed; font-family: 'Courier New', monospace; font-size: 12px;"></span>
                     </div>
                 </div>
-
-                <!-- Service Loading Indicator -->
-                <div id="services-loading" style="display: none; margin-bottom: 15px; padding: 12px; border: 1px solid #7c3aed; background: linear-gradient(135deg, #1a0a2e, #2d1b69); text-align: center;">
-                    <div style="display: inline-flex; align-items: center; gap: 10px;">
-                        <div class="spinner" style="margin: 0;"></div>
-                        <span style="color: #7c3aed; font-family: 'Courier New', monospace; font-size: 14px;">
-                            🔍 Discovering services and ports...
-                        </span>
-                    </div>
-                    <div style="margin-top: 8px; font-size: 12px; color: #9a4dff;">
-                        Services will appear here as they are discovered
-                    </div>
-                </div>
-
-                <!-- Port Details Modal -->
-                <div id="port-details-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.8); z-index: 10000; justify-content: center; align-items: center;">
-                    <div style="background: linear-gradient(135deg, #0f0f23, #1a0a2e); border: 2px solid #7c3aed; padding: 30px; max-width: 600px; width: 90%; max-height: 80%; overflow-y: auto; position: relative;">
-                        <button onclick="PortScanning.closePortDetails()" style="position: absolute; top: 15px; right: 15px; background: none; border: none; color: #7c3aed; font-size: 24px; cursor: pointer;">×</button>
-                        
-                        <div id="port-details-content">
-                            <!-- Content will be populated dynamically -->
-                        </div>
-                    </div>
-                </div>
-
-                <div class="table-container">
+                
+                <div class="scrollable-table-container">
                     <table class="table">
                         <thead>
                             <tr>
-                                <th>Subdomain</th>
-                                <th>Port</th>
-                                <th>Protocol</th>
-                                <th>State</th>
-                                <th>Service</th>
-                                <th>Version</th>
-                                <th>Risk</th>
-                                <th>Discovered</th>
+                                <th>ID</th>
+                                <th>Target</th>
+                                <th>Type</th>
+                                <th>Status</th>
+                                <th>Progress</th>
+                                <th>Ports Found</th>
+                                <th>Created</th>
                                 <th>Actions</th>
                             </tr>
                         </thead>
-                        <tbody id="ports-list">
+                        <tbody id="port-scans-list">
                             <tr>
-                                <td colspan="9" style="text-align: center; color: #9a4dff;">Loading ports...</td>
+                                <td colspan="8" style="text-align: center; color: #6b46c1;">Loading port scanning jobs...</td>
                             </tr>
                         </tbody>
                     </table>
                 </div>
-                <div id="ports-pagination" class="pagination"></div>
             </div>
         `;
     },
@@ -365,15 +332,6 @@ const PortScanning = {
             });
         }
 
-        // Target filter - update subdomains when target changes
-        const targetFilter = document.getElementById('port-target-filter');
-        if (targetFilter) {
-            targetFilter.addEventListener('change', async () => {
-                await this.loadSubdomains();
-                this.search(1);
-            });
-        }
-
         // Scan target - update scan subdomains when target changes
         const scanTargetSelect = document.getElementById('port-scan-target');
         if (scanTargetSelect) {
@@ -382,222 +340,189 @@ const PortScanning = {
             });
         }
 
-        // Other filters
-        ['port-subdomain-filter', 'subdomain-status-filter', 'port-state-filter'].forEach(filterId => {
-            const element = document.getElementById(filterId);
-            if (element) {
-                element.addEventListener('change', () => this.search(1));
-            }
-        });
-
-        // Service search with debounce and Enter key support
-        const serviceSearch = document.getElementById('service-search');
-        if (serviceSearch) {
-            serviceSearch.addEventListener('input', Utils.debounce(() => this.search(1), 500));
-            serviceSearch.addEventListener('keypress', (e) => {
-                if (e.key === 'Enter') {
-                    this.search(1);
-                }
-            });
-        }
-
-        // Close export menu when clicking outside
+        // Close export menus when clicking outside
         document.addEventListener('click', (e) => {
-            if (!e.target.closest('#export-ports-menu') && !e.target.closest('#export-ports-btn')) {
-                const menu = document.getElementById('export-ports-menu');
-                if (menu) {
+            if (!e.target.closest('.export-menu') && !e.target.closest('[id^="export-btn-"]')) {
+                document.querySelectorAll('.export-menu').forEach(menu => {
                     menu.style.display = 'none';
-                }
-            }
-            
-            // Close port details modal when clicking outside
-            if (e.target.id === 'port-details-modal') {
-                this.closePortDetails();
-            }
-        });
-
-        // ESC key to close modal
-        document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape') {
-                this.closePortDetails();
+                });
             }
         });
     },
 
-    // Search method
-    async search(page = 1) {
-        console.log('🔍 Search triggered for port scanning');
+    // Enhanced real-time updates
+    startRealTimeUpdates() {
+        console.log('🔄 Starting real-time updates for port scanning jobs');
         
-        // Show searching message in services table
-        const portsList = document.getElementById('ports-list');
-        if (portsList) {
-            portsList.innerHTML = '<tr><td colspan="9" style="text-align: center; color: #a855f7;">🔍 Searching ports and services...</td></tr>';
-        }
+        // Clear any existing intervals
+        this.cleanup();
         
-        await this.load(page);
-    },
-
-    // NEW: Start auto-refresh functionality
-    startAutoRefresh() {
-        // Stop any existing refresh
-        this.stopAutoRefresh();
-        
-        console.log('🔄 Starting port scanning auto-refresh');
-        
+        // Start aggressive refresh during active scans (every 2 seconds)
         this.refreshInterval = setInterval(async () => {
-            try {
-                // Check for active port scans
-                await this.checkActiveScanJobs();
-                
-                // Refresh port data
-                await this.load(AppState.currentPageData.ports?.page || 1);
-                
-                // Update last updated time
-                document.getElementById('last-updated').textContent = 
-                    `Last updated: ${new Date().toLocaleTimeString()}`;
-                
-            } catch (error) {
-                console.error('Auto-refresh failed:', error);
-            }
-        }, 3000); // Refresh every 3 seconds
-    },
-
-    // NEW: Stop auto-refresh
-    stopAutoRefresh() {
-        if (this.refreshInterval) {
-            clearInterval(this.refreshInterval);
-            this.refreshInterval = null;
-            console.log('🛑 Stopped port scanning auto-refresh');
-        }
-    },
-
-    // Toggle auto-refresh
-    toggleAutoRefresh() {
-        if (this.refreshInterval) {
-            this.stopAutoRefresh();
-            const toggleBtn = document.getElementById('port-auto-refresh-toggle');
-            if (toggleBtn) {
-                toggleBtn.innerHTML = '▶️ Resume Live Updates';
-            }
-            Utils.showMessage('Live updates paused', 'warning', 'port-scan-messages');
-        } else {
-            this.startAutoRefresh();
-            const toggleBtn = document.getElementById('port-auto-refresh-toggle');
-            if (toggleBtn) {
-                toggleBtn.innerHTML = '⏸️ Pause Live Updates';
-            }
-            Utils.showMessage('Live updates resumed', 'success', 'port-scan-messages');
-        }
-    },
-
-    // NEW: Check for active port scan jobs
-    async checkActiveScanJobs() {
-        try {
-            const response = await API.scans.getJobs({ 
-                job_type: 'port_scan',
-                status: ['pending', 'running'],
-                limit: 50 
-            });
+            if (!this.isAutoRefreshEnabled) return;
             
-            if (response && response.ok) {
-                const data = await response.json();
-                const activeScans = data.success ? data.data : [];
-                
-                if (activeScans.length > 0) {
-                    this.showScanProgress(activeScans[0]); // Show the most recent active scan
-                    this.showServicesLoading(true);
-                    this.isScanning = true;
-                } else {
-                    this.hideScanProgress();
-                    this.showServicesLoading(false);
-                    this.isScanning = false;
+            const activeTab = document.querySelector('.nav-item.active')?.dataset.tab;
+            if (activeTab === 'port-scanning') {
+                try {
+                    await this.updateScansRealTime();
+                } catch (error) {
+                    console.error('Real-time port scanning jobs update failed:', error);
                 }
-                
-                // Update scanning status in stats
-                this.updateScanningStatus();
             }
-        } catch (error) {
-            console.error('Failed to check active scan jobs:', error);
-        }
-    },
-
-    // NEW: Show/hide services loading indicator
-    showServicesLoading(show) {
-        const loadingDiv = document.getElementById('services-loading');
-        if (loadingDiv) {
-            loadingDiv.style.display = show ? 'block' : 'none';
-        }
-    },
-
-    // NEW: Update scanning status in stats
-    updateScanningStatus() {
-        const statusElement = document.getElementById('scanning-status');
-        if (statusElement) {
-            if (this.isScanning) {
-                statusElement.innerHTML = '🔄 Scanning...';
-                statusElement.style.color = '#a855f7';
-                statusElement.style.animation = 'pulse 2s infinite';
-            } else {
-                statusElement.innerHTML = '💤 Idle';
-                statusElement.style.color = '#6b46c1';
-                statusElement.style.animation = 'none';
-            }
-        }
-    },
-
-    // NEW: Show scan progress
-    showScanProgress(scan) {
-        const statusDiv = document.getElementById('port-scan-status');
-        const statusText = document.getElementById('port-scan-status-text');
-        const progressBar = document.getElementById('port-scan-progress-bar');
-        const progressText = document.getElementById('port-scan-progress-text');
+        }, 2000); // Update every 2 seconds
         
-        if (statusDiv && statusText && progressBar && progressText) {
-            this.activeScanJobId = scan.id;
+        this.updateAutoRefreshIndicator(true);
+    },
+
+    // Real-time scans update
+    async updateScansRealTime() {
+        try {
+            const response = await API.scans.getJobs({ job_type: 'port_scan' });
+            if (!response || !response.ok) return;
             
-            statusDiv.style.display = 'block';
-            statusText.textContent = `Port scan in progress for ${scan.domain || 'target'}...`;
+            const data = await response.json();
+            const scans = data.success ? data.data : [];
             
-            const progress = scan.progress_percentage || 0;
-            progressBar.style.width = `${progress}%`;
+            // Check if there are any running scans
+            const runningScans = scans.filter(scan => 
+                scan.status === 'running' || scan.status === 'pending'
+            );
             
-            const elapsed = scan.started_at ? 
-                Math.round((Date.now() - new Date(scan.started_at).getTime()) / 1000) : 0;
+            // Update scans table
+            this.renderScansList(scans);
             
-            progressText.textContent = `Progress: ${progress}% • Elapsed: ${elapsed}s • Type: ${scan.job_type}`;
+            // Update status indicators
+            this.updateScanStatus(scans, runningScans);
+            
+            // Update last update time
+            this.updateLastUpdateTime();
+            
+            // Show/hide real-time progress
+            if (runningScans.length > 0) {
+                this.showRealTimeProgress(runningScans);
+            } else {
+                this.hideRealTimeProgress();
+            }
+            
+        } catch (error) {
+            console.error('Real-time port scanning jobs update failed:', error);
         }
     },
 
-    // NEW: Hide scan progress
-    hideScanProgress() {
-        const statusDiv = document.getElementById('port-scan-status');
-        if (statusDiv) {
-            statusDiv.style.display = 'none';
+    updateScanStatus(scans, runningScans) {
+        const statusSpan = document.getElementById('port-scan-status');
+        if (!statusSpan) return;
+        
+        if (runningScans.length > 0) {
+            const totalProgress = runningScans.reduce((sum, scan) => sum + (scan.progress_percentage || 0), 0);
+            const avgProgress = Math.round(totalProgress / runningScans.length);
+            
+            statusSpan.innerHTML = `🔄 ${runningScans.length} port scan${runningScans.length > 1 ? 's' : ''} running (${avgProgress}% avg)`;
+            statusSpan.style.color = '#a855f7';
+            statusSpan.classList.add('status-updating');
+        } else {
+            const completedScans = scans.filter(scan => scan.status === 'completed').length;
+            const totalPorts = scans
+                .filter(scan => scan.status === 'completed')
+                .reduce((total, scan) => {
+                    try {
+                        const results = typeof scan.results === 'string' ? JSON.parse(scan.results) : scan.results;
+                        return total + (results?.open_ports_count || results?.ports_found || 0);
+                    } catch {
+                        return total;
+                    }
+                }, 0);
+            
+            if (completedScans > 0) {
+                statusSpan.innerHTML = `✅ ${completedScans} scan${completedScans > 1 ? 's' : ''} completed | 🔌 ${totalPorts} total open ports found`;
+                statusSpan.style.color = '#7c3aed';
+            } else {
+                statusSpan.textContent = '💤 No scans running';
+                statusSpan.style.color = '#666';
+            }
+            statusSpan.classList.remove('status-updating');
         }
-        this.activeScanJobId = null;
     },
 
-    // NEW: Stop active scan
-    async stopActiveScan() {
-        if (this.activeScanJobId) {
-            try {
-                const response = await API.scans.stop(this.activeScanJobId);
-                if (response && response.ok) {
-                    Utils.showMessage('Port scan stopped successfully!', 'success', 'port-scan-messages');
-                    this.hideScanProgress();
-                    this.showServicesLoading(false);
-                    this.isScanning = false;
-                    this.updateScanningStatus();
-                } else {
-                    Utils.showMessage('Failed to stop port scan', 'error', 'port-scan-messages');
-                }
-            } catch (error) {
-                Utils.showMessage('Failed to stop scan: ' + error.message, 'error', 'port-scan-messages');
+    showRealTimeProgress(runningScans) {
+        const progressDiv = document.getElementById('realtime-progress');
+        const progressText = document.getElementById('progress-text');
+        
+        if (progressDiv && progressText) {
+            const activeScan = runningScans[0]; // Show progress for first active scan
+            const progress = activeScan.progress_percentage || 0;
+            const targetName = this.getTargetName(activeScan);
+            
+            progressText.textContent = `${targetName} - ${activeScan.status} (${progress}%)`;
+            progressDiv.style.display = 'block';
+        }
+    },
+
+    hideRealTimeProgress() {
+        const progressDiv = document.getElementById('realtime-progress');
+        if (progressDiv) {
+            progressDiv.style.display = 'none';
+        }
+    },
+
+    updateLastUpdateTime() {
+        const element = document.getElementById('last-update-time');
+        if (element) {
+            const now = new Date();
+            element.textContent = `Updated: ${now.toLocaleTimeString()}`;
+            this.lastUpdate = now;
+        }
+    },
+
+    updateAutoRefreshIndicator(isActive) {
+        const indicator = document.getElementById('auto-refresh-indicator');
+        if (indicator) {
+            if (isActive) {
+                indicator.innerHTML = '🔄 Auto-updating';
+                indicator.style.color = '#9a4dff';
+            } else {
+                indicator.innerHTML = '⏸️ Paused';
+                indicator.style.color = '#ffff00';
             }
         }
     },
 
-    // Load targets for dropdowns
+    toggleAutoRefresh() {
+        this.isAutoRefreshEnabled = !this.isAutoRefreshEnabled;
+        
+        const toggleBtn = document.getElementById('auto-refresh-toggle');
+        if (toggleBtn) {
+            if (this.isAutoRefreshEnabled) {
+                toggleBtn.innerHTML = '⏸️ Pause Auto-refresh';
+                this.startRealTimeUpdates();
+                Utils.showMessage('Auto-refresh enabled', 'success');
+            } else {
+                toggleBtn.innerHTML = '▶️ Resume Auto-refresh';
+                this.updateAutoRefreshIndicator(false);
+                Utils.showMessage('Auto-refresh paused', 'warning');
+            }
+        }
+    },
+
+    // Enhanced target name resolution with fallback logic
+    getTargetName(scan) {
+        // Try multiple ways to get the target name
+        if (scan.target_domain) return scan.target_domain;
+        if (scan.domain) return scan.domain;
+        if (scan.target?.domain) return scan.target.domain;
+        
+        // Try to get from targets cache
+        if (scan.target_id && this.targetsCache[scan.target_id]) {
+            return this.targetsCache[scan.target_id].domain;
+        }
+        
+        // Fallback to target ID
+        if (scan.target_id) return `Target ID: ${scan.target_id}`;
+        
+        return 'Unknown Target';
+    },
+
+    // Load targets and build cache
     async loadTargets() {
         try {
             const response = await API.targets.getAll();
@@ -606,23 +531,11 @@ const PortScanning = {
             const data = await response.json();
             const targets = data.success ? data.data : [];
             
-            // Update filter dropdown
-            const targetSelect = document.getElementById('port-target-filter');
-            if (targetSelect) {
-                const currentValue = targetSelect.value;
-                targetSelect.innerHTML = '<option value="">All Targets</option>';
-                
-                targets.forEach(target => {
-                    const option = document.createElement('option');
-                    option.value = target.id;
-                    option.textContent = target.domain;
-                    targetSelect.appendChild(option);
-                });
-
-                if (currentValue && targets.find(t => t.id == currentValue)) {
-                    targetSelect.value = currentValue;
-                }
-            }
+            // Build targets cache for quick lookup
+            this.targetsCache = {};
+            targets.forEach(target => {
+                this.targetsCache[target.id] = target;
+            });
 
             // Update scan target dropdown
             const scanTargetSelect = document.getElementById('port-scan-target');
@@ -644,65 +557,9 @@ const PortScanning = {
             }
 
             console.log(`Loaded ${targets.length} targets for port scanning`);
-            await this.loadSubdomains();
             
         } catch (error) {
             console.error('Failed to load targets for port scanning:', error);
-        }
-    },
-
-    // Load subdomains for filtering
-    async loadSubdomains() {
-        try {
-            const targetId = document.getElementById('port-target-filter')?.value;
-            const subdomainSelect = document.getElementById('port-subdomain-filter');
-            
-            if (!subdomainSelect) return;
-
-            const currentValue = subdomainSelect.value;
-            subdomainSelect.innerHTML = '<option value="">All Subdomains</option>';
-            
-            if (!targetId) {
-                const response = await API.subdomains.getAll({ limit: 1000 });
-                if (response && response.ok) {
-                    const data = await response.json();
-                    const subdomains = data.success ? data.data : [];
-                    
-                    subdomains.forEach(subdomain => {
-                        const option = document.createElement('option');
-                        option.value = subdomain.id;
-                        option.textContent = `${subdomain.subdomain} (${subdomain.target_domain})`;
-                        subdomainSelect.appendChild(option);
-                    });
-                }
-            } else {
-                const response = await API.subdomains.getAll({ 
-                    target_id: targetId,
-                    limit: 1000
-                });
-                
-                if (response && response.ok) {
-                    const data = await response.json();
-                    const subdomains = data.success ? data.data : [];
-                    
-                    subdomains.forEach(subdomain => {
-                        const option = document.createElement('option');
-                        option.value = subdomain.id;
-                        option.textContent = subdomain.subdomain;
-                        subdomainSelect.appendChild(option);
-                    });
-                }
-            }
-            
-            if (currentValue) {
-                const optionExists = Array.from(subdomainSelect.options).some(option => option.value === currentValue);
-                if (optionExists) {
-                    subdomainSelect.value = currentValue;
-                }
-            }
-            
-        } catch (error) {
-            console.error('Failed to load subdomains for port filter:', error);
         }
     },
 
@@ -749,146 +606,89 @@ const PortScanning = {
         }
     },
 
-    async load(page = 1) {
+    async load() {
         try {
-            const targetId = document.getElementById('port-target-filter')?.value;
-            const subdomainId = document.getElementById('port-subdomain-filter')?.value;
-            const subdomainStatus = document.getElementById('subdomain-status-filter')?.value;
-            const portState = document.getElementById('port-state-filter')?.value;
-            const serviceSearch = document.getElementById('service-search')?.value;
-            
-            const params = {
-                page: page,
-                limit: CONFIG.DEFAULT_PAGE_SIZE
-            };
-            
-            if (targetId) params.target_id = targetId;
-            if (subdomainId) params.subdomain_id = subdomainId;
-            if (subdomainStatus) params.subdomain_status = subdomainStatus;
-            if (portState) params.state = portState;
-            if (serviceSearch && serviceSearch.trim()) params.service_search = serviceSearch.trim();
-
-            const response = await API.ports.getAll(params);
+            // Only load port_scan jobs
+            const response = await API.scans.getJobs({ job_type: 'port_scan' });
             if (!response) return;
             
             const data = await response.json();
+            const scans = data.success ? data.data : [];
             
-            if (data.success) {
-                const ports = data.data;
-                AppState.currentPageData.ports = { page, total: data.pagination.total };
-                
-                this.renderPortsList(ports);
-                this.updatePortStats(ports);
-                
-                // Show search result messages
-                if (serviceSearch && serviceSearch.trim()) {
-                    const resultMessage = `Found ${ports.length} ports with service "${serviceSearch.trim()}"`;
-                    if (ports.length === 0) {
-                        Utils.showMessage('No ports found matching your search criteria', 'warning', 'port-scan-messages');
-                    } else {
-                        Utils.showMessage(resultMessage, 'success', 'port-scan-messages');
-                    }
-                }
-                
-                if (data.pagination.pages > 1) {
-                    Utils.updatePagination('ports', data.pagination);
-                } else {
-                    document.getElementById('ports-pagination').innerHTML = '';
-                }
-            }
+            console.log('🔌 Loaded port scanning jobs data:', scans); // Debug log
+            
+            this.renderScansList(scans);
+            this.updateScanStatus(scans, scans.filter(scan => 
+                scan.status === 'running' || scan.status === 'pending'
+            ));
+            this.updateLastUpdateTime();
         } catch (error) {
-            console.error('Failed to load ports:', error);
-            document.getElementById('ports-list').innerHTML = 
-                '<tr><td colspan="9" style="text-align: center; color: #dc2626;">Failed to load ports</td></tr>';
+            console.error('Failed to load port scanning jobs:', error);
+            document.getElementById('port-scans-list').innerHTML = 
+                '<tr><td colspan="8" style="text-align: center; color: #dc2626;">Failed to load port scanning jobs</td></tr>';
         }
     },
 
-    renderPortsList(ports) {
-        const portsList = document.getElementById('ports-list');
+    renderScansList(scans) {
+        const scansList = document.getElementById('port-scans-list');
         
-        if (ports.length > 0) {
-            portsList.innerHTML = ports.map(port => `
-                <tr>
-                    <td style="font-weight: 600; color: #7c3aed;">${port.subdomain || port.hostname}</td>
-                    <td style="font-family: 'Courier New', monospace; color: #9a4dff; font-weight: bold;">${port.port}</td>
-                    <td>${port.protocol?.toUpperCase() || 'TCP'}</td>
-                    <td><span class="status ${this.getStateColor(port.state)}">${port.state?.toUpperCase()}</span></td>
-                    <td style="color: #9a4dff;">${port.service || '-'}</td>
-                    <td style="font-size: 12px; color: #666;">${port.version || '-'}</td>
-                    <td><span class="status ${this.getRiskColor(port.port, port.service)}">${this.getRiskLevel(port.port, port.service)}</span></td>
-                    <td style="font-size: 12px; color: #666;">${new Date(port.created_at).toLocaleDateString()}</td>
-                    <td>
-                        <button onclick="PortScanning.viewPortDetails(${port.id})" class="btn btn-secondary btn-small">Details</button>
-                        ${port.service && port.service !== 'unknown' ? 
-                            `<button onclick="PortScanning.testService('${port.subdomain}', ${port.port}, '${port.service}')" class="btn btn-success btn-small">Test</button>` : 
-                            ''
-                        }
-                    </td>
-                </tr>
-            `).join('');
-        } else if (this.isScanning) {
-            portsList.innerHTML = `
-                <tr>
-                    <td colspan="9" style="text-align: center; color: #a855f7; padding: 20px;">
-                        <div style="display: inline-flex; align-items: center; gap: 10px;">
-                            <div class="spinner" style="margin: 0;"></div>
-                            <span>🔍 Port scan in progress... Services will appear here as they are discovered.</span>
-                        </div>
-                    </td>
-                </tr>
-            `;
+        if (scans.length > 0) {
+            scansList.innerHTML = scans.map(scan => {
+                // Enhanced target name resolution
+                const targetName = this.getTargetName(scan);
+                const isRunning = scan.status === 'running' || scan.status === 'pending';
+                
+                console.log(`🎯 Port Scan ${scan.id}: target_domain="${scan.target_domain}", domain="${scan.domain}", target_id="${scan.target_id}", resolved="${targetName}"`); // Debug log
+                
+                // Extract ports count from results
+                let portsCount = '-';
+                if (scan.status === 'completed' && scan.results) {
+                    try {
+                        const results = typeof scan.results === 'string' ? JSON.parse(scan.results) : scan.results;
+                        portsCount = results.open_ports_count || results.ports_found || results.open_ports?.length || 0;
+                    } catch (error) {
+                        console.warn('Failed to parse scan results:', error);
+                    }
+                } else if (isRunning) {
+                    portsCount = '🔄 Scanning...';
+                }
+                
+                return `
+                    <tr class="${isRunning ? 'progress-row' : ''}">
+                        <td style="font-family: 'Courier New', monospace;">${scan.id}</td>
+                        <td style="color: #7c3aed; font-weight: bold;" title="Target ID: ${scan.target_id}">${targetName}</td>
+                        <td>Port Scan</td>
+                        <td><span class="status status-${scan.status} ${isRunning ? 'status-updating' : ''}">${scan.status.toUpperCase()}</span></td>
+                        <td>
+                            <div style="background-color: #2d1b69; border: 1px solid #7c3aed; height: 8px; width: 100px;">
+                                <div style="background: linear-gradient(90deg, #7c3aed, #9a4dff); height: 100%; width: ${scan.progress_percentage || 0}%; transition: width 0.3s ease;"></div>
+                            </div>
+                            <span style="font-size: 13px; color: #6b46c1;">${scan.progress_percentage || 0}%</span>
+                        </td>
+                        <td style="font-weight: bold; color: ${scan.status === 'completed' ? '#7c3aed' : '#666'};">
+                            ${portsCount}
+                        </td>
+                        <td style="font-size: 12px; color: #666;">${new Date(scan.created_at).toLocaleDateString()}</td>
+                        <td>
+                            ${scan.status === 'completed' ? 
+                                `<div style="position: relative; display: inline-block;">
+                                    <button onclick="PortScanning.toggleExportMenu(${scan.id})" class="btn btn-secondary btn-small" id="export-btn-${scan.id}">📤 Export Ports</button>
+                                    <div id="export-menu-${scan.id}" class="export-menu" style="display: none; position: absolute; top: 100%; left: 0; background: #000; border: 2px solid #7c3aed; min-width: 120px; z-index: 1000;">
+                                        <button onclick="PortScanning.exportResults(${scan.id}, 'csv')" class="btn btn-secondary btn-small" style="width: 100%; border: none; border-bottom: 1px solid #2d1b69;">📊 CSV</button>
+                                        <button onclick="PortScanning.exportResults(${scan.id}, 'json')" class="btn btn-secondary btn-small" style="width: 100%; border: none; border-bottom: 1px solid #2d1b69;">📋 JSON</button>
+                                        <button onclick="PortScanning.exportResults(${scan.id}, 'xml')" class="btn btn-secondary btn-small" style="width: 100%; border: none;">📄 XML</button>
+                                    </div>
+                                </div>` :
+                                scan.status === 'running' ? 
+                                `<button onclick="PortScanning.stopScan(${scan.id})" class="btn btn-danger btn-small">Stop</button>` :
+                                '-'
+                            }
+                        </td>
+                    </tr>
+                `;
+            }).join('');
         } else {
-            portsList.innerHTML = '<tr><td colspan="9" style="text-align: center; color: #6b46c1;">No ports discovered yet. Run a port scan to discover open ports and services!</td></tr>';
-        }
-    },
-
-    updatePortStats(ports) {
-        const totalPorts = ports.length;
-        const openPorts = ports.filter(p => p.state === 'open').length;
-        const uniqueServices = new Set(ports.filter(p => p.service && p.service !== 'unknown').map(p => p.service)).size;
-        const highRiskPorts = ports.filter(p => this.getRiskLevel(p.port, p.service) === 'HIGH').length;
-
-        document.getElementById('total-ports').textContent = totalPorts;
-        document.getElementById('open-ports').textContent = openPorts;
-        document.getElementById('unique-services').textContent = uniqueServices;
-        document.getElementById('high-risk-ports').textContent = highRiskPorts;
-    },
-
-    getStateColor(state) {
-        switch(state?.toLowerCase()) {
-            case 'open': return 'status-completed';
-            case 'closed': return 'status-failed';
-            case 'filtered': return 'status-pending';
-            default: return 'status-inactive';
-        }
-    },
-
-    getRiskLevel(port, service) {
-        const highRiskPorts = [21, 22, 23, 25, 53, 135, 139, 445, 1433, 1521, 3389, 5432, 5900, 6379];
-        const mediumRiskPorts = [80, 443, 993, 995, 110, 143, 993, 995, 8080, 8443];
-        
-        if (highRiskPorts.includes(parseInt(port))) return 'HIGH';
-        if (mediumRiskPorts.includes(parseInt(port))) return 'MEDIUM';
-        
-        // Service-based risk assessment
-        if (service) {
-            const highRiskServices = ['ssh', 'telnet', 'ftp', 'smb', 'rdp', 'mysql', 'postgresql', 'redis'];
-            const mediumRiskServices = ['http', 'https', 'smtp', 'imap', 'pop3'];
-            
-            if (highRiskServices.some(s => service.toLowerCase().includes(s))) return 'HIGH';
-            if (mediumRiskServices.some(s => service.toLowerCase().includes(s))) return 'MEDIUM';
-        }
-        
-        return 'LOW';
-    },
-
-    getRiskColor(port, service) {
-        const risk = this.getRiskLevel(port, service);
-        switch(risk) {
-            case 'HIGH': return 'severity-high';
-            case 'MEDIUM': return 'severity-medium';
-            case 'LOW': return 'severity-low';
-            default: return 'status-inactive';
+            scansList.innerHTML = '<tr><td colspan="8" style="text-align: center; color: #6b46c1;">No port scans yet. Start your first scan above!</td></tr>';
         }
     },
 
@@ -970,11 +770,6 @@ const PortScanning = {
                 const data = await response.json();
                 console.log('Port scan started:', data);
                 
-                // Show services loading immediately
-                this.showServicesLoading(true);
-                this.isScanning = true;
-                this.updateScanningStatus();
-                
                 let successMessage = '';
                 if (profile === 'custom') {
                     const portCount = this.countCustomPorts(customPorts);
@@ -982,7 +777,7 @@ const PortScanning = {
                 } else {
                     successMessage = `🔌 Port scan started successfully! Scanning ${profile} ports${subdomainId ? ' on selected subdomain' : ' on all active subdomains'}.`;
                 }
-                successMessage += ' Services will appear below as they are discovered.';
+                successMessage += ' Results will appear below as they are discovered.';
                 
                 Utils.showMessage(successMessage, 'success', 'port-scan-messages');
                 
@@ -992,10 +787,9 @@ const PortScanning = {
                     document.getElementById('port-scan-profile').value = 'top-1000';
                 }
                 
-                // Start checking for active scans immediately
-                setTimeout(() => {
-                    this.checkActiveScanJobs();
-                }, 1000);
+                // Immediately refresh and enable aggressive updates
+                await this.load();
+                this.startRealTimeUpdates();
                 
             } else {
                 const errorData = await response.json();
@@ -1031,364 +825,6 @@ const PortScanning = {
         return total;
     },
 
-    async viewPortDetails(portId) {
-        try {
-            // Show loading in modal
-            const modal = document.getElementById('port-details-modal');
-            const content = document.getElementById('port-details-content');
-            
-            if (!modal || !content) return;
-            
-            content.innerHTML = `
-                <div style="text-align: center; padding: 40px;">
-                    <div class="spinner" style="margin: 0 auto 15px;"></div>
-                    <div style="color: #7c3aed; font-family: 'Courier New', monospace;">Loading port details...</div>
-                </div>
-            `;
-            
-            modal.style.display = 'flex';
-            
-            // Fetch port details
-            const response = await API.ports.get(portId);
-            if (!response || !response.ok) {
-                throw new Error('Failed to fetch port details');
-            }
-            
-            const data = await response.json();
-            const port = data.success ? data.data : null;
-            
-            if (!port) {
-                throw new Error('Port not found');
-            }
-            
-            // Render port details
-            this.renderPortDetails(port);
-            
-        } catch (error) {
-            console.error('Failed to load port details:', error);
-            
-            const content = document.getElementById('port-details-content');
-            if (content) {
-                content.innerHTML = `
-                    <div style="text-align: center; padding: 40px;">
-                        <div style="color: #dc2626; font-size: 18px; margin-bottom: 10px;">❌ Error</div>
-                        <div style="color: #9a4dff;">Failed to load port details: ${error.message}</div>
-                        <button onclick="PortScanning.closePortDetails()" class="btn btn-secondary" style="margin-top: 20px;">Close</button>
-                    </div>
-                `;
-            }
-        }
-    },
-
-    renderPortDetails(port) {
-        const content = document.getElementById('port-details-content');
-        if (!content) return;
-        
-        const riskLevel = this.getRiskLevel(port.port, port.service);
-        const riskColor = this.getRiskColor(port.port, port.service);
-        
-        // Get service recommendations and security notes
-        const serviceInfo = this.getServiceInfo(port.service, port.port);
-        
-        content.innerHTML = `
-            <h2 style="color: #7c3aed; margin-bottom: 20px; text-align: center; text-transform: uppercase; letter-spacing: 2px;">
-                🔌 Port ${port.port} Details
-            </h2>
-            
-            <!-- Basic Information -->
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 25px;">
-                <div style="background: linear-gradient(135deg, #1a0a2e, #2d1b69); padding: 15px; border: 1px solid #7c3aed;">
-                    <h3 style="color: #7c3aed; margin-bottom: 10px; font-size: 14px;">🎯 Target Information</h3>
-                    <div style="color: #9a4dff; font-family: 'Courier New', monospace; font-size: 13px;">
-                        <div><strong>Hostname:</strong> ${port.subdomain || port.hostname || 'N/A'}</div>
-                        <div style="margin-top: 5px;"><strong>IP Address:</strong> ${port.ip_address || 'N/A'}</div>
-                        <div style="margin-top: 5px;"><strong>Target Domain:</strong> ${port.target_domain || 'N/A'}</div>
-                    </div>
-                </div>
-                
-                <div style="background: linear-gradient(135deg, #1a0a2e, #2d1b69); padding: 15px; border: 1px solid #7c3aed;">
-                    <h3 style="color: #7c3aed; margin-bottom: 10px; font-size: 14px;">🔌 Port Information</h3>
-                    <div style="color: #9a4dff; font-family: 'Courier New', monospace; font-size: 13px;">
-                        <div><strong>Port:</strong> ${port.port}</div>
-                        <div style="margin-top: 5px;"><strong>Protocol:</strong> ${(port.protocol || 'TCP').toUpperCase()}</div>
-                        <div style="margin-top: 5px;"><strong>State:</strong> <span class="status ${this.getStateColor(port.state)}" style="margin-left: 5px;">${(port.state || '').toUpperCase()}</span></div>
-                    </div>
-                </div>
-            </div>
-            
-            <!-- Service Information -->
-            <div style="background: linear-gradient(135deg, #1a0a2e, #2d1b69); padding: 20px; border: 1px solid #7c3aed; margin-bottom: 25px;">
-                <h3 style="color: #7c3aed; margin-bottom: 15px; font-size: 16px;">🛠️ Service Details</h3>
-                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px;">
-                    <div>
-                        <div style="color: #6b46c1; font-size: 12px; margin-bottom: 5px;">SERVICE</div>
-                        <div style="color: #9a4dff; font-weight: bold;">${port.service || 'Unknown'}</div>
-                    </div>
-                    <div>
-                        <div style="color: #6b46c1; font-size: 12px; margin-bottom: 5px;">VERSION</div>
-                        <div style="color: #9a4dff; font-weight: bold;">${port.version || 'Not detected'}</div>
-                    </div>
-                    <div>
-                        <div style="color: #6b46c1; font-size: 12px; margin-bottom: 5px;">RISK LEVEL</div>
-                        <div><span class="status ${riskColor}" style="font-weight: bold;">${riskLevel}</span></div>
-                    </div>
-                </div>
-                
-                ${port.service_fingerprint ? `
-                    <div style="margin-top: 15px;">
-                        <div style="color: #6b46c1; font-size: 12px; margin-bottom: 5px;">SERVICE FINGERPRINT</div>
-                        <div style="color: #9a4dff; font-family: 'Courier New', monospace; font-size: 12px; background: rgba(0,0,0,0.3); padding: 8px; border-radius: 3px;">
-                            ${port.service_fingerprint}
-                        </div>
-                    </div>
-                ` : ''}
-            </div>
-            
-            <!-- Security Assessment -->
-            <div style="background: linear-gradient(135deg, #1a0a2e, #2d1b69); padding: 20px; border: 1px solid #7c3aed; margin-bottom: 25px;">
-                <h3 style="color: #7c3aed; margin-bottom: 15px; font-size: 16px;">🔒 Security Assessment</h3>
-                
-                <div style="margin-bottom: 15px;">
-                    <h4 style="color: #a855f7; margin-bottom: 8px; font-size: 14px;">Risk Analysis:</h4>
-                    <div style="color: #9a4dff; font-size: 13px; line-height: 1.5;">
-                        ${this.getRiskAnalysis(port.port, port.service)}
-                    </div>
-                </div>
-                
-                ${serviceInfo.recommendations ? `
-                    <div style="margin-bottom: 15px;">
-                        <h4 style="color: #a855f7; margin-bottom: 8px; font-size: 14px;">Security Recommendations:</h4>
-                        <ul style="color: #9a4dff; font-size: 13px; line-height: 1.5; margin-left: 20px;">
-                            ${serviceInfo.recommendations.map(rec => `<li style="margin-bottom: 5px;">${rec}</li>`).join('')}
-                        </ul>
-                    </div>
-                ` : ''}
-                
-                ${serviceInfo.common_vulnerabilities ? `
-                    <div>
-                        <h4 style="color: #ea580c; margin-bottom: 8px; font-size: 14px;">Common Vulnerabilities:</h4>
-                        <div style="color: #9a4dff; font-size: 13px; line-height: 1.5;">
-                            ${serviceInfo.common_vulnerabilities}
-                        </div>
-                    </div>
-                ` : ''}
-            </div>
-            
-            <!-- Discovery Information -->
-            <div style="background: linear-gradient(135deg, #1a0a2e, #2d1b69); padding: 20px; border: 1px solid #7c3aed; margin-bottom: 25px;">
-                <h3 style="color: #7c3aed; margin-bottom: 15px; font-size: 16px;">📊 Discovery Information</h3>
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
-                    <div>
-                        <div style="color: #6b46c1; font-size: 12px; margin-bottom: 5px;">DISCOVERED</div>
-                        <div style="color: #9a4dff;">${new Date(port.created_at).toLocaleString()}</div>
-                    </div>
-                    <div>
-                        <div style="color: #6b46c1; font-size: 12px; margin-bottom: 5px;">LAST UPDATED</div>
-                        <div style="color: #9a4dff;">${new Date(port.updated_at || port.created_at).toLocaleString()}</div>
-                    </div>
-                </div>
-                
-                ${port.scan_method ? `
-                    <div style="margin-top: 15px;">
-                        <div style="color: #6b46c1; font-size: 12px; margin-bottom: 5px;">SCAN METHOD</div>
-                        <div style="color: #9a4dff;">${port.scan_method}</div>
-                    </div>
-                ` : ''}
-            </div>
-            
-            <!-- Actions -->
-            <div style="text-align: center; margin-top: 30px;">
-                <div style="display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;">
-                    ${port.service && this.buildServiceUrl(port.subdomain || port.hostname, port.port, port.service) ? 
-                        `<button onclick="window.open('${this.buildServiceUrl(port.subdomain || port.hostname, port.port, port.service)}', '_blank')" class="btn btn-primary">🌐 Open Service</button>` : 
-                        ''
-                    }
-                    <button onclick="PortScanning.copyPortInfo(${port.id})" class="btn btn-secondary">📋 Copy Info</button>
-                    <button onclick="PortScanning.closePortDetails()" class="btn btn-secondary">✖️ Close</button>
-                </div>
-            </div>
-        `;
-    },
-
-    getServiceInfo(service, port) {
-        const serviceDB = {
-            'ssh': {
-                recommendations: [
-                    'Disable root login',
-                    'Use key-based authentication',
-                    'Change default port if possible',
-                    'Implement fail2ban or similar protection',
-                    'Use strong passwords or disable password auth'
-                ],
-                common_vulnerabilities: 'SSH brute force attacks, weak credentials, outdated SSH versions with known CVEs'
-            },
-            'http': {
-                recommendations: [
-                    'Implement HTTPS instead of HTTP',
-                    'Use security headers (HSTS, CSP, etc.)',
-                    'Keep web server updated',
-                    'Implement proper access controls',
-                    'Disable server signature/version disclosure'
-                ],
-                common_vulnerabilities: 'Unencrypted traffic, web application vulnerabilities, information disclosure'
-            },
-            'https': {
-                recommendations: [
-                    'Use strong SSL/TLS configuration',
-                    'Implement security headers',
-                    'Keep certificates updated',
-                    'Use proper cipher suites',
-                    'Implement HSTS'
-                ],
-                common_vulnerabilities: 'Weak SSL/TLS configuration, certificate issues, web application vulnerabilities'
-            },
-            'ftp': {
-                recommendations: [
-                    'Use SFTP or FTPS instead',
-                    'Disable anonymous access',
-                    'Use strong authentication',
-                    'Restrict access by IP',
-                    'Consider removing if not needed'
-                ],
-                common_vulnerabilities: 'Unencrypted credentials, anonymous access, brute force attacks'
-            },
-            'mysql': {
-                recommendations: [
-                    'Bind to localhost only if possible',
-                    'Use strong passwords',
-                    'Disable remote root access',
-                    'Keep MySQL updated',
-                    'Use SSL connections'
-                ],
-                common_vulnerabilities: 'Weak credentials, remote access abuse, SQL injection through applications'
-            },
-            'rdp': {
-                recommendations: [
-                    'Use Network Level Authentication',
-                    'Implement account lockout policies',
-                    'Use VPN for remote access',
-                    'Change default port',
-                    'Use strong passwords'
-                ],
-                common_vulnerabilities: 'BlueKeep and related CVEs, brute force attacks, weak credentials'
-            }
-        };
-        
-        const lowerService = service?.toLowerCase() || '';
-        for (const [key, info] of Object.entries(serviceDB)) {
-            if (lowerService.includes(key)) {
-                return info;
-            }
-        }
-        
-        return {
-            recommendations: [
-                'Keep service updated to latest version',
-                'Implement proper access controls',
-                'Monitor for unusual activity',
-                'Use strong authentication',
-                'Consider if service is necessary'
-            ]
-        };
-    },
-
-    getRiskAnalysis(port, service) {
-        const portNum = parseInt(port);
-        const riskLevel = this.getRiskLevel(port, service);
-        
-        let analysis = '';
-        
-        if (riskLevel === 'HIGH') {
-            analysis = `⚠️ <strong>High Risk:</strong> Port ${port} running ${service || 'unknown service'} is considered high risk. `;
-        } else if (riskLevel === 'MEDIUM') {
-            analysis = `⚡ <strong>Medium Risk:</strong> Port ${port} running ${service || 'unknown service'} requires attention. `;
-        } else {
-            analysis = `✅ <strong>Low Risk:</strong> Port ${port} running ${service || 'unknown service'} is relatively safe. `;
-        }
-        
-        // Add specific port analysis
-        if (portNum === 22) {
-            analysis += 'SSH access should be properly secured with key-based authentication and restricted access.';
-        } else if (portNum === 80) {
-            analysis += 'HTTP traffic is unencrypted. Consider redirecting to HTTPS.';
-        } else if (portNum === 443) {
-            analysis += 'HTTPS is good for security. Ensure proper SSL/TLS configuration.';
-        } else if (portNum === 21) {
-            analysis += 'FTP transmits credentials in plaintext. Consider using SFTP or FTPS.';
-        } else if (portNum === 3389) {
-            analysis += 'RDP is often targeted for attacks. Ensure strong authentication and consider VPN access.';
-        } else if ([3306, 5432, 1433].includes(portNum)) {
-            analysis += 'Database port exposed. Should only be accessible from authorized sources.';
-        } else {
-            analysis += 'Review if this service needs to be publicly accessible.';
-        }
-        
-        return analysis;
-    },
-
-    copyPortInfo(portId) {
-        const content = document.getElementById('port-details-content');
-        if (!content) return;
-        
-        // Extract text content for copying
-        const textContent = content.innerText;
-        
-        if (navigator.clipboard) {
-            navigator.clipboard.writeText(textContent).then(() => {
-                Utils.showMessage('Port details copied to clipboard!', 'success', 'port-scan-messages');
-            }).catch(() => {
-                this.fallbackCopyText(textContent);
-            });
-        } else {
-            this.fallbackCopyText(textContent);
-        }
-    },
-
-    fallbackCopyText(text) {
-        const textArea = document.createElement('textarea');
-        textArea.value = text;
-        document.body.appendChild(textArea);
-        textArea.select();
-        try {
-            document.execCommand('copy');
-            Utils.showMessage('Port details copied to clipboard!', 'success', 'port-scan-messages');
-        } catch (err) {
-            Utils.showMessage('Failed to copy to clipboard', 'error', 'port-scan-messages');
-        }
-        document.body.removeChild(textArea);
-    },
-
-    closePortDetails() {
-        const modal = document.getElementById('port-details-modal');
-        if (modal) {
-            modal.style.display = 'none';
-        }
-    },
-
-    testService(hostname, port, service) {
-        // This would test connectivity to the service
-        const url = this.buildServiceUrl(hostname, port, service);
-        if (url) {
-            window.open(url, '_blank');
-        } else {
-            Utils.showMessage(`Testing connectivity to ${service} on ${hostname}:${port}`, 'info');
-        }
-    },
-
-    buildServiceUrl(hostname, port, service) {
-        const serviceLower = service.toLowerCase();
-        
-        if (serviceLower.includes('http') && !serviceLower.includes('https')) {
-            return `http://${hostname}:${port}`;
-        } else if (serviceLower.includes('https') || port == 443) {
-            return `https://${hostname}:${port}`;
-        } else if (port == 80) {
-            return `http://${hostname}`;
-        }
-        
-        return null; // For non-web services, we can't build a URL
-    },
-
     // Validate custom ports input
     validateCustomPorts(portsString) {
         if (!portsString || !portsString.trim()) {
@@ -1420,197 +856,143 @@ const PortScanning = {
         return true;
     },
 
-    // Get example ports for different profiles
-    getPortExamples(profile) {
-        const examples = {
-            'top-100': 'Top 100 most common ports',
-            'top-1000': 'Top 1000 most common ports', 
-            'common-tcp': 'TCP ports 1-1024',
-            'common-udp': 'Common UDP ports (53,67,68,69,123,161,162)',
-            'all-tcp': 'All TCP ports 1-65535',
-            'custom': 'Examples: 22,80,443 or 8000-8100 or 22,80,443,8080-8090,9000-9100'
-        };
-        return examples[profile] || '';
+    // Cleanup method for tab switching
+    cleanup() {
+        console.log('🧹 Cleaning up port scanning module intervals');
+        
+        if (this.refreshInterval) {
+            clearInterval(this.refreshInterval);
+            this.refreshInterval = null;
+        }
+        
+        this.isAutoRefreshEnabled = false;
     },
 
-    // Export functionality methods
-    toggleExportMenu() {
-        const menu = document.getElementById('export-ports-menu');
+    toggleExportMenu(scanId) {
+        // Close all other export menus first
+        document.querySelectorAll('.export-menu').forEach(menu => {
+            if (menu.id !== `export-menu-${scanId}`) {
+                menu.style.display = 'none';
+            }
+        });
+        
+        // Toggle the clicked menu
+        const menu = document.getElementById(`export-menu-${scanId}`);
         if (menu) {
             menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
         }
     },
 
-    async exportPorts(format) {
+    async exportResults(scanId, format) {
         try {
             // Hide the export menu
-            const menu = document.getElementById('export-ports-menu');
+            const menu = document.getElementById(`export-menu-${scanId}`);
             if (menu) menu.style.display = 'none';
             
             // Show loading message
-            Utils.showMessage(`📤 Exporting port scan results as ${format.toUpperCase()}...`, 'info', 'port-scan-messages');
+            Utils.showMessage(`Exporting port scan results as ${format.toUpperCase()}...`, 'info', 'port-scan-messages');
             
-            // Get current filter values to export filtered data
-            const targetId = document.getElementById('port-target-filter')?.value;
-            const subdomainId = document.getElementById('port-subdomain-filter')?.value;
-            const subdomainStatus = document.getElementById('subdomain-status-filter')?.value;
-            const portState = document.getElementById('port-state-filter')?.value;
-            const serviceSearch = document.getElementById('service-search')?.value;
-            
-            const params = {
-                page: 1,
-                limit: 10000 // Get all matching ports for export
-            };
-            
-            if (targetId) params.target_id = targetId;
-            if (subdomainId) params.subdomain_id = subdomainId;
-            if (subdomainStatus) params.subdomain_status = subdomainStatus;
-            if (portState) params.state = portState;
-            if (serviceSearch && serviceSearch.trim()) params.service_search = serviceSearch.trim();
-
-            const response = await API.ports.getAll(params);
-            if (!response || !response.ok) {
-                throw new Error('Failed to fetch ports for export');
-            }
+            const response = await API.scans.get(scanId);
+            if (!response) return;
             
             const data = await response.json();
-            const ports = data.success ? data.data : [];
             
-            if (ports.length === 0) {
-                Utils.showMessage('No ports to export with current filters', 'warning', 'port-scan-messages');
-                return;
+            if (data.success && data.data) {
+                const scanData = data.data;
+                const results = scanData.results || {};
+                
+                // Get target name for export
+                const targetName = this.getTargetName(scanData);
+                
+                // Prepare export data
+                const exportData = {
+                    scan_id: scanId,
+                    target: targetName,
+                    scan_type: 'Port Scan',
+                    status: scanData.status,
+                    created_at: scanData.created_at,
+                    completed_at: scanData.completed_at,
+                    results: results
+                };
+                
+                // Generate and download file based on format
+                switch (format.toLowerCase()) {
+                    case 'csv':
+                        this.downloadCSV(exportData, scanId);
+                        break;
+                    case 'json':
+                        this.downloadJSON(exportData, scanId);
+                        break;
+                    case 'xml':
+                        this.downloadXML(exportData, scanId);
+                        break;
+                    default:
+                        throw new Error('Unsupported export format');
+                }
+                
+                Utils.showMessage(`Port scan results exported successfully as ${format.toUpperCase()}!`, 'success', 'port-scan-messages');
+                
+            } else {
+                Utils.showMessage('No results available for export.', 'warning', 'port-scan-messages');
             }
-            
-            // Prepare export data
-            const exportData = {
-                export_timestamp: new Date().toISOString(),
-                total_ports: ports.length,
-                filters_applied: {
-                    target_id: targetId || 'all',
-                    subdomain_id: subdomainId || 'all',
-                    subdomain_status: subdomainStatus || 'all',
-                    port_state: portState || 'all',
-                    service_search: serviceSearch || 'none'
-                },
-                stats: {
-                    total_ports: ports.length,
-                    open_ports: ports.filter(p => p.state === 'open').length,
-                    closed_ports: ports.filter(p => p.state === 'closed').length,
-                    filtered_ports: ports.filter(p => p.state === 'filtered').length,
-                    unique_services: new Set(ports.filter(p => p.service && p.service !== 'unknown').map(p => p.service)).size,
-                    high_risk_ports: ports.filter(p => this.getRiskLevel(p.port, p.service) === 'HIGH').length,
-                    medium_risk_ports: ports.filter(p => this.getRiskLevel(p.port, p.service) === 'MEDIUM').length,
-                    low_risk_ports: ports.filter(p => this.getRiskLevel(p.port, p.service) === 'LOW').length
-                },
-                ports: ports
-            };
-            
-            // Generate and download file based on format
-            switch (format.toLowerCase()) {
-                case 'csv':
-                    this.downloadCSV(exportData);
-                    break;
-                case 'json':
-                    this.downloadJSON(exportData);
-                    break;
-                case 'xml':
-                    this.downloadXML(exportData);
-                    break;
-                default:
-                    throw new Error('Unsupported export format');
-            }
-            
-            Utils.showMessage(`✅ Successfully exported ${ports.length} port scan results as ${format.toUpperCase()}!`, 'success', 'port-scan-messages');
-            
         } catch (error) {
-            Utils.showMessage('❌ Failed to export port scan results: ' + error.message, 'error', 'port-scan-messages');
+            Utils.showMessage('Failed to export results: ' + error.message, 'error', 'port-scan-messages');
         }
     },
 
-    downloadCSV(data) {
-        const timestamp = new Date().toISOString().split('T')[0];
-        let csvContent = 'Export Summary\n';
-        csvContent += `Export Date,${data.export_timestamp}\n`;
-        csvContent += `Total Ports,${data.total_ports}\n`;
-        csvContent += `Open Ports,${data.stats.open_ports}\n`;
-        csvContent += `Closed Ports,${data.stats.closed_ports}\n`;
-        csvContent += `Filtered Ports,${data.stats.filtered_ports}\n`;
-        csvContent += `Unique Services,${data.stats.unique_services}\n`;
-        csvContent += `High Risk Ports,${data.stats.high_risk_ports}\n`;
-        csvContent += `Medium Risk Ports,${data.stats.medium_risk_ports}\n`;
-        csvContent += `Low Risk Ports,${data.stats.low_risk_ports}\n\n`;
+    downloadCSV(data, scanId) {
+        let csvContent = 'Scan ID,Target,Scan Type,Status,Created,Completed,Open Ports Count\n';
+        csvContent += `${data.scan_id},"${data.target}","${data.scan_type}","${data.status}","${data.created_at}","${data.completed_at || 'N/A'}","${data.results.open_ports_count || data.results.ports_found || 0}"\n\n`;
         
-        csvContent += 'Subdomain,Port,Protocol,State,Service,Version,Risk Level,Discovered Date,Hostname/IP\n';
+        // Add open ports if available
+        if (data.results.open_ports && data.results.open_ports.length > 0) {
+            csvContent += 'Open Ports Found\n';
+            csvContent += 'Port,Protocol,Service,Version,State,Hostname\n';
+            data.results.open_ports.forEach(port => {
+                csvContent += `"${port.port || 'N/A'}","${port.protocol || 'TCP'}","${port.service || 'N/A'}","${port.version || 'N/A'}","${port.state || 'open'}","${port.hostname || 'N/A'}"\n`;
+            });
+        }
         
-        data.ports.forEach(port => {
-            const row = [
-                `"${port.subdomain || port.hostname || ''}"`,
-                `"${port.port || ''}"`,
-                `"${(port.protocol || 'TCP').toUpperCase()}"`,
-                `"${(port.state || '').toUpperCase()}"`,
-                `"${port.service || ''}"`,
-                `"${port.version || ''}"`,
-                `"${this.getRiskLevel(port.port, port.service)}"`,
-                `"${port.created_at || ''}"`,
-                `"${port.ip_address || port.hostname || ''}"`
-            ].join(',');
-            csvContent += row + '\n';
-        });
-        
-        this.downloadFile(csvContent, `port_scan_${timestamp}.csv`, 'text/csv');
+        this.downloadFile(csvContent, `port_scan_${scanId}_results.csv`, 'text/csv');
     },
 
-    downloadJSON(data) {
-        const timestamp = new Date().toISOString().split('T')[0];
+    downloadJSON(data, scanId) {
         const jsonContent = JSON.stringify(data, null, 2);
-        this.downloadFile(jsonContent, `port_scan_${timestamp}.json`, 'application/json');
+        this.downloadFile(jsonContent, `port_scan_${scanId}_results.json`, 'application/json');
     },
 
-    downloadXML(data) {
-        const timestamp = new Date().toISOString().split('T')[0];
+    downloadXML(data, scanId) {
         let xmlContent = '<?xml version="1.0" encoding="UTF-8"?>\n';
-        xmlContent += '<port_scan_export>\n';
-        xmlContent += '  <export_info>\n';
-        xmlContent += `    <timestamp>${this.escapeXml(data.export_timestamp)}</timestamp>\n`;
-        xmlContent += `    <total_ports>${data.total_ports}</total_ports>\n`;
-        xmlContent += '    <filters>\n';
-        xmlContent += `      <target_id>${this.escapeXml(data.filters_applied.target_id)}</target_id>\n`;
-        xmlContent += `      <subdomain_id>${this.escapeXml(data.filters_applied.subdomain_id)}</subdomain_id>\n`;
-        xmlContent += `      <subdomain_status>${this.escapeXml(data.filters_applied.subdomain_status)}</subdomain_status>\n`;
-        xmlContent += `      <port_state>${this.escapeXml(data.filters_applied.port_state)}</port_state>\n`;
-        xmlContent += `      <service_search>${this.escapeXml(data.filters_applied.service_search)}</service_search>\n`;
-        xmlContent += '    </filters>\n';
-        xmlContent += '    <stats>\n';
-        xmlContent += `      <total_ports>${data.stats.total_ports}</total_ports>\n`;
-        xmlContent += `      <open_ports>${data.stats.open_ports}</open_ports>\n`;
-        xmlContent += `      <closed_ports>${data.stats.closed_ports}</closed_ports>\n`;
-        xmlContent += `      <filtered_ports>${data.stats.filtered_ports}</filtered_ports>\n`;
-        xmlContent += `      <unique_services>${data.stats.unique_services}</unique_services>\n`;
-        xmlContent += `      <high_risk_ports>${data.stats.high_risk_ports}</high_risk_ports>\n`;
-        xmlContent += `      <medium_risk_ports>${data.stats.medium_risk_ports}</medium_risk_ports>\n`;
-        xmlContent += `      <low_risk_ports>${data.stats.low_risk_ports}</low_risk_ports>\n`;
-        xmlContent += '    </stats>\n';
-        xmlContent += '  </export_info>\n';
-        xmlContent += '  <ports>\n';
+        xmlContent += '<port_scan_results>\n';
+        xmlContent += `  <scan_id>${data.scan_id}</scan_id>\n`;
+        xmlContent += `  <target>${this.escapeXml(data.target)}</target>\n`;
+        xmlContent += `  <scan_type>${this.escapeXml(data.scan_type)}</scan_type>\n`;
+        xmlContent += `  <status>${this.escapeXml(data.status)}</status>\n`;
+        xmlContent += `  <created_at>${this.escapeXml(data.created_at)}</created_at>\n`;
+        xmlContent += `  <completed_at>${this.escapeXml(data.completed_at || 'N/A')}</completed_at>\n`;
+        xmlContent += `  <open_ports_count>${data.results.open_ports_count || data.results.ports_found || 0}</open_ports_count>\n`;
+        xmlContent += '  <results>\n';
         
-        data.ports.forEach(port => {
-            xmlContent += '    <port>\n';
-            xmlContent += `      <subdomain>${this.escapeXml(port.subdomain || port.hostname || '')}</subdomain>\n`;
-            xmlContent += `      <port_number>${this.escapeXml(port.port || '')}</port_number>\n`;
-            xmlContent += `      <protocol>${this.escapeXml((port.protocol || 'TCP').toUpperCase())}</protocol>\n`;
-            xmlContent += `      <state>${this.escapeXml((port.state || '').toUpperCase())}</state>\n`;
-            xmlContent += `      <service>${this.escapeXml(port.service || '')}</service>\n`;
-            xmlContent += `      <version>${this.escapeXml(port.version || '')}</version>\n`;
-            xmlContent += `      <risk_level>${this.escapeXml(this.getRiskLevel(port.port, port.service))}</risk_level>\n`;
-            xmlContent += `      <discovered_date>${this.escapeXml(port.created_at || '')}</discovered_date>\n`;
-            xmlContent += `      <ip_address>${this.escapeXml(port.ip_address || port.hostname || '')}</ip_address>\n`;
-            xmlContent += '    </port>\n';
-        });
+        // Add open ports
+        if (data.results.open_ports && data.results.open_ports.length > 0) {
+            xmlContent += '    <open_ports>\n';
+            data.results.open_ports.forEach(port => {
+                xmlContent += `      <port>\n`;
+                xmlContent += `        <port_number>${this.escapeXml(port.port || 'N/A')}</port_number>\n`;
+                xmlContent += `        <protocol>${this.escapeXml(port.protocol || 'TCP')}</protocol>\n`;
+                xmlContent += `        <service>${this.escapeXml(port.service || 'N/A')}</service>\n`;
+                xmlContent += `        <version>${this.escapeXml(port.version || 'N/A')}</version>\n`;
+                xmlContent += `        <state>${this.escapeXml(port.state || 'open')}</state>\n`;
+                xmlContent += `        <hostname>${this.escapeXml(port.hostname || 'N/A')}</hostname>\n`;
+                xmlContent += `      </port>\n`;
+            });
+            xmlContent += '    </open_ports>\n';
+        }
         
-        xmlContent += '  </ports>\n';
-        xmlContent += '</port_scan_export>';
+        xmlContent += '  </results>\n';
+        xmlContent += '</port_scan_results>';
         
-        this.downloadFile(xmlContent, `port_scan_${timestamp}.xml`, 'application/xml');
+        this.downloadFile(xmlContent, `port_scan_${scanId}_results.xml`, 'application/xml');
     },
 
     escapeXml(text) {
@@ -1634,12 +1016,25 @@ const PortScanning = {
         window.URL.revokeObjectURL(url);
     },
 
-    // Cleanup method
-    cleanup() {
-        this.stopAutoRefresh();
-        this.hideScanProgress();
-        this.showServicesLoading(false);
-        this.isScanning = false;
+    async stopScan(scanId) {
+        if (confirm('Are you sure you want to stop this port scan?')) {
+            try {
+                const response = await API.scans.stop(scanId);
+                if (response && response.ok) {
+                    await this.load();
+                    Utils.showMessage('Port scan stopped successfully!', 'success');
+                } else {
+                    Utils.showMessage('Failed to stop scan', 'error');
+                }
+            } catch (error) {
+                Utils.showMessage('Failed to stop scan: ' + error.message, 'error');
+            }
+        }
+    },
+
+    // Method to refresh targets (useful when called from other modules)
+    async refreshTargets() {
+        await this.loadTargets();
     }
 };
 
