@@ -1,4 +1,4 @@
-// frontend/assets/js/modules/js-analysis.js - REDESIGNED TO MIMIC SCANS STYLE WITH SECURITY FOCUS
+// frontend/assets/js/modules/js-analysis.js - Enhanced for production integration
 
 const JSAnalysis = {
     refreshInterval: null,
@@ -6,7 +6,7 @@ const JSAnalysis = {
     progressUpdateInterval: null,
     isAutoRefreshEnabled: true,
     progressCheckInterval: null,
-    targetsCache: {}, // Cache for target information
+    targetsCache: {},
 
     async init() {
         this.renderHTML();
@@ -14,7 +14,7 @@ const JSAnalysis = {
         await this.loadTargets();
         await this.load();
         
-        // Start real-time updates like scans
+        // Start real-time updates
         this.startRealTimeUpdates();
     },
 
@@ -34,7 +34,7 @@ const JSAnalysis = {
                 }
                 
                 .scrollable-table-container {
-                    max-height: 500px;
+                    max-height: 600px;
                     overflow-y: auto;
                     overflow-x: auto;
                     border: 2px solid #7c3aed;
@@ -55,9 +55,6 @@ const JSAnalysis = {
                 }
                 .scrollable-table-container::-webkit-scrollbar-thumb:hover {
                     background: linear-gradient(180deg, #9a4dff, #a855f7);
-                }
-                .scrollable-table-container::-webkit-scrollbar-corner {
-                    background: #000000;
                 }
                 
                 .spinner {
@@ -110,6 +107,66 @@ const JSAnalysis = {
                 .vulnerability-medium { color: #d97706; }
                 .vulnerability-low { color: #eab308; }
                 .vulnerability-info { color: #06b6d4; }
+
+                .results-panel {
+                    background: linear-gradient(135deg, #1a0a2e, #2d1b69);
+                    border: 2px solid #7c3aed;
+                    border-radius: 8px;
+                    padding: 20px;
+                    margin: 15px 0;
+                }
+
+                .finding-item {
+                    background: rgba(0, 0, 0, 0.3);
+                    border: 1px solid #2d1b69;
+                    border-radius: 4px;
+                    padding: 12px;
+                    margin: 8px 0;
+                }
+
+                .finding-title {
+                    font-weight: bold;
+                    font-size: 14px;
+                    margin-bottom: 8px;
+                }
+
+                .finding-details {
+                    font-size: 12px;
+                    color: #9a4dff;
+                    font-family: 'Courier New', monospace;
+                }
+
+                .collapsible {
+                    cursor: pointer;
+                    user-select: none;
+                }
+
+                .collapsible:hover {
+                    background-color: rgba(124, 58, 237, 0.1);
+                }
+
+                .collapsible-content {
+                    display: none;
+                    margin-top: 10px;
+                }
+
+                .collapsible.active .collapsible-content {
+                    display: block;
+                }
+
+                .code-snippet {
+                    background: #000;
+                    border: 1px solid #333;
+                    padding: 8px;
+                    border-radius: 4px;
+                    font-family: 'Courier New', monospace;
+                    font-size: 12px;
+                    color: #a855f7;
+                    white-space: pre-wrap;
+                    word-break: break-all;
+                    max-height: 100px;
+                    overflow-y: auto;
+                }
             </style>
 
             <!-- Enhanced Progress Bar with Real-time Updates -->
@@ -199,6 +256,43 @@ const JSAnalysis = {
                         </div>
                         <button type="submit" class="btn btn-primary" id="start-js-analysis-btn">📄 Start JS Analysis</button>
                     </div>
+                    
+                    <!-- Advanced Configuration -->
+                    <div class="form-group" style="margin-top: 15px;">
+                        <label>
+                            <input type="checkbox" id="enable-advanced-config" style="margin-right: 8px;">
+                            Show Advanced Configuration
+                        </label>
+                    </div>
+                    
+                    <div id="advanced-config" style="display: none; margin-top: 15px; padding: 15px; border: 1px solid #2d1b69; border-radius: 6px; background: rgba(0, 0, 0, 0.2);">
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                            <div class="form-group">
+                                <label for="analysis-depth">Analysis Depth</label>
+                                <select id="analysis-depth">
+                                    <option value="basic">Basic</option>
+                                    <option value="comprehensive" selected>Comprehensive</option>
+                                    <option value="deep">Deep Analysis</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="max-files">Max Files per Subdomain</label>
+                                <input type="number" id="max-files" value="50" min="10" max="200">
+                            </div>
+                        </div>
+                        
+                        <div style="margin-top: 15px;">
+                            <label style="font-weight: bold; margin-bottom: 10px; display: block;">Security Analysis Options:</label>
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                                <label><input type="checkbox" id="vuln-scanning" checked> Vulnerability Scanning</label>
+                                <label><input type="checkbox" id="secret-detection" checked> Secret Detection</label>
+                                <label><input type="checkbox" id="sink-detection" checked> DOM Sink Detection</label>
+                                <label><input type="checkbox" id="prototype-pollution" checked> Prototype Pollution</label>
+                                <label><input type="checkbox" id="library-analysis" checked> Library Analysis</label>
+                                <label><input type="checkbox" id="security-analysis" checked> General Security Analysis</label>
+                            </div>
+                        </div>
+                    </div>
                 </form>
             </div>
 
@@ -250,6 +344,11 @@ const JSAnalysis = {
                     </table>
                 </div>
             </div>
+            
+            <!-- Results Panel (shown when viewing scan results) -->
+            <div id="scan-results-panel" style="display: none;">
+                <!-- Results will be dynamically populated -->
+            </div>
         `;
     },
 
@@ -268,6 +367,17 @@ const JSAnalysis = {
         if (jsTargetFilter) {
             jsTargetFilter.addEventListener('change', async () => {
                 await this.loadJSAnalysisSubdomains();
+            });
+        }
+
+        // Advanced configuration toggle
+        const advancedToggle = document.getElementById('enable-advanced-config');
+        if (advancedToggle) {
+            advancedToggle.addEventListener('change', (e) => {
+                const advancedPanel = document.getElementById('advanced-config');
+                if (advancedPanel) {
+                    advancedPanel.style.display = e.target.checked ? 'block' : 'none';
+                }
             });
         }
 
@@ -300,7 +410,7 @@ const JSAnalysis = {
                     console.error('Real-time JS analysis scans update failed:', error);
                 }
             }
-        }, 2000); // Update every 2 seconds like scans
+        }, 2000); // Update every 2 seconds
         
         this.updateAutoRefreshIndicator(true);
     },
@@ -503,7 +613,7 @@ const JSAnalysis = {
             const data = await response.json();
             const scans = data.success ? data.data : [];
             
-            console.log('📄 Loaded JS analysis scans data:', scans); // Debug log
+            console.log('📄 Loaded JS analysis scans data:', scans);
             
             this.renderScansList(scans);
             this.updateScanStatus(scans, scans.filter(scan => 
@@ -526,19 +636,32 @@ const JSAnalysis = {
                 const targetName = this.getTargetName(scan);
                 const isRunning = scan.status === 'running' || scan.status === 'pending';
                 
-                console.log(`🎯 JS Analysis Scan ${scan.id}: target_domain="${scan.target_domain}", domain="${scan.domain}", target_id="${scan.target_id}", resolved="${targetName}"`); // Debug log
+                console.log(`🎯 JS Analysis Scan ${scan.id}: target_domain="${scan.target_domain}", domain="${scan.domain}", target_id="${scan.target_id}", resolved="${targetName}"`);
                 
-                // Extract vulnerability count from results
+                // Extract vulnerability count and results summary from results
                 let vulnerabilityCount = '-';
+                let resultsSummary = '';
+                
                 if (scan.status === 'completed' && scan.results) {
                     try {
                         const results = typeof scan.results === 'string' ? JSON.parse(scan.results) : scan.results;
                         vulnerabilityCount = results.vulnerabilities?.length || results.total_vulnerabilities || 0;
+                        
+                        // Build results summary
+                        const secretsCount = results.secrets?.length || results.total_secrets || 0;
+                        const sinksCount = results.sinks?.length || results.total_sinks || 0;
+                        const prototypePollutionCount = results.prototype_pollution?.length || results.total_prototype_pollution || 0;
+                        const librariesCount = results.libraries?.length || results.total_libraries || 0;
+                        const jsFilesCount = results.analyzed_files?.length || results.total_js_files_analyzed || 0;
+                        
+                        resultsSummary = `📄 ${jsFilesCount} JS files | ⚠️ ${vulnerabilityCount} vulns | 🔐 ${secretsCount} secrets | 🕳️ ${sinksCount} sinks | 🧬 ${prototypePollutionCount} prototype | 📚 ${librariesCount} libs`;
                     } catch (error) {
                         console.warn('Failed to parse scan results:', error);
+                        vulnerabilityCount = 'Parse Error';
                     }
                 } else if (isRunning) {
                     vulnerabilityCount = '🔄 Analyzing...';
+                    resultsSummary = 'Analysis in progress...';
                 }
                 
                 return `
@@ -552,6 +675,7 @@ const JSAnalysis = {
                                 <div style="background: linear-gradient(90deg, #7c3aed, #9a4dff); height: 100%; width: ${scan.progress_percentage || 0}%; transition: width 0.3s ease;"></div>
                             </div>
                             <span style="font-size: 13px; color: #6b46c1;">${scan.progress_percentage || 0}%</span>
+                            ${resultsSummary ? `<div style="font-size: 11px; color: #9a4dff; margin-top: 4px;" title="${resultsSummary}">${resultsSummary.length > 60 ? resultsSummary.substring(0, 60) + '...' : resultsSummary}</div>` : ''}
                         </td>
                         <td style="font-weight: bold; color: ${scan.status === 'completed' ? (vulnerabilityCount > 0 ? '#dc2626' : '#7c3aed') : '#666'};">
                             ${vulnerabilityCount}
@@ -560,7 +684,8 @@ const JSAnalysis = {
                         <td>
                             ${scan.status === 'completed' ? 
                                 `<div style="position: relative; display: inline-block;">
-                                    <button onclick="JSAnalysis.toggleExportMenu(${scan.id})" class="btn btn-secondary btn-small" id="export-btn-${scan.id}">📤 Export Results</button>
+                                    <button onclick="JSAnalysis.viewResults(${scan.id})" class="btn btn-primary btn-small" style="margin-right: 5px;">👁️ View</button>
+                                    <button onclick="JSAnalysis.toggleExportMenu(${scan.id})" class="btn btn-secondary btn-small" id="export-btn-${scan.id}">📤 Export</button>
                                     <div id="export-menu-${scan.id}" class="export-menu" style="display: none; position: absolute; top: 100%; left: 0; background: #000; border: 2px solid #7c3aed; min-width: 120px; z-index: 1000;">
                                         <button onclick="JSAnalysis.exportResults(${scan.id}, 'csv')" class="btn btn-secondary btn-small" style="width: 100%; border: none; border-bottom: 1px solid #2d1b69;">📊 CSV</button>
                                         <button onclick="JSAnalysis.exportResults(${scan.id}, 'json')" class="btn btn-secondary btn-small" style="width: 100%; border: none; border-bottom: 1px solid #2d1b69;">📋 JSON</button>
@@ -592,16 +717,28 @@ const JSAnalysis = {
         try {
             Utils.setButtonLoading('start-js-analysis-btn', true, '📄 Starting JS Analysis...');
             
-            // Start js_files_scan type
+            // Get advanced configuration
+            const analysisDepth = document.getElementById('analysis-depth')?.value || 'comprehensive';
+            const maxFiles = parseInt(document.getElementById('max-files')?.value) || 50;
+            const vulnerabilityScanning = document.getElementById('vuln-scanning')?.checked !== false;
+            const secretDetection = document.getElementById('secret-detection')?.checked !== false;
+            const sinkDetection = document.getElementById('sink-detection')?.checked !== false;
+            const prototypePollutionDetection = document.getElementById('prototype-pollution')?.checked !== false;
+            const libraryAnalysis = document.getElementById('library-analysis')?.checked !== false;
+            const securityAnalysis = document.getElementById('security-analysis')?.checked !== false;
+            
+            // Start js_files_scan type with enhanced configuration
             const response = await API.scans.start(targetId, ['js_files_scan'], 'medium', {
                 subdomain_id: subdomainId || null,
-                analysis_depth: 'comprehensive',
-                security_analysis: true,
-                vulnerability_scanning: true,
-                prototype_pollution_detection: true,
-                sink_detection: true,
-                secret_detection: true,
-                library_analysis: true
+                analysis_depth: analysisDepth,
+                security_analysis: securityAnalysis,
+                vulnerability_scanning: vulnerabilityScanning,
+                prototype_pollution_detection: prototypePollutionDetection,
+                sink_detection: sinkDetection,
+                secret_detection: secretDetection,
+                library_analysis: libraryAnalysis,
+                max_files_per_subdomain: maxFiles,
+                max_file_size_mb: 5
             });
             
             if (response && response.ok) {
@@ -622,6 +759,259 @@ const JSAnalysis = {
             Utils.showMessage('Failed to start JS analysis: ' + error.message, 'error', 'js-analysis-messages');
         } finally {
             Utils.setButtonLoading('start-js-analysis-btn', false, '📄 Start JS Analysis');
+        }
+    },
+
+    // View detailed results
+    async viewResults(scanId) {
+        try {
+            const response = await API.scans.get(scanId);
+            if (!response) return;
+            
+            const data = await response.json();
+            
+            if (data.success && data.data) {
+                this.showResultsPanel(data.data);
+            } else {
+                Utils.showMessage('No results available to view.', 'warning', 'js-analysis-messages');
+            }
+        } catch (error) {
+            Utils.showMessage('Failed to load results: ' + error.message, 'error', 'js-analysis-messages');
+        }
+    },
+
+    // Show detailed results panel
+    showResultsPanel(scanData) {
+        const panel = document.getElementById('scan-results-panel');
+        if (!panel) return;
+        
+        const results = typeof scanData.results === 'string' ? JSON.parse(scanData.results) : scanData.results;
+        const targetName = this.getTargetName(scanData);
+        
+        let panelHTML = `
+            <div class="results-panel">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                    <h3 style="color: #7c3aed; margin: 0;">📄 JavaScript Security Analysis Results: ${targetName}</h3>
+                    <button onclick="document.getElementById('scan-results-panel').style.display='none'" class="btn btn-secondary btn-small">✖️ Close</button>
+                </div>
+                
+                <!-- Security Summary -->
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; margin-bottom: 20px;">
+                    <div style="background: rgba(124, 58, 237, 0.1); padding: 15px; border-radius: 6px; text-align: center; border: 1px solid rgba(124, 58, 237, 0.3);">
+                        <div style="font-size: 24px; font-weight: bold; color: #7c3aed; margin-bottom: 5px;">${results.total_js_files_analyzed || 0}</div>
+                        <div style="font-size: 12px; color: #9a4dff;">📄 JS Files Analyzed</div>
+                    </div>
+                    <div style="background: rgba(220, 38, 38, 0.1); padding: 15px; border-radius: 6px; text-align: center; border: 1px solid rgba(220, 38, 38, 0.3);">
+                        <div style="font-size: 24px; font-weight: bold; color: #dc2626; margin-bottom: 5px;">${results.total_vulnerabilities || 0}</div>
+                        <div style="font-size: 12px; color: #9a4dff;">⚠️ Vulnerabilities</div>
+                    </div>
+                    <div style="background: rgba(234, 88, 12, 0.1); padding: 15px; border-radius: 6px; text-align: center; border: 1px solid rgba(234, 88, 12, 0.3);">
+                        <div style="font-size: 24px; font-weight: bold; color: #ea580c; margin-bottom: 5px;">${results.total_secrets || 0}</div>
+                        <div style="font-size: 12px; color: #9a4dff;">🔐 Secrets Found</div>
+                    </div>
+                    <div style="background: rgba(168, 85, 247, 0.1); padding: 15px; border-radius: 6px; text-align: center; border: 1px solid rgba(168, 85, 247, 0.3);">
+                        <div style="font-size: 24px; font-weight: bold; color: #a855f7; margin-bottom: 5px;">${results.total_sinks || 0}</div>
+                        <div style="font-size: 12px; color: #9a4dff;">🕳️ DOM Sinks</div>
+                    </div>
+                    <div style="background: rgba(6, 182, 212, 0.1); padding: 15px; border-radius: 6px; text-align: center; border: 1px solid rgba(6, 182, 212, 0.3);">
+                        <div style="font-size: 24px; font-weight: bold; color: #06b6d4; margin-bottom: 5px;">${results.total_libraries || 0}</div>
+                        <div style="font-size: 12px; color: #9a4dff;">📚 Libraries</div>
+                    </div>
+                    <div style="background: rgba(147, 51, 234, 0.1); padding: 15px; border-radius: 6px; text-align: center; border: 1px solid rgba(147, 51, 234, 0.3);">
+                        <div style="font-size: 24px; font-weight: bold; color: #9333ea; margin-bottom: 5px;">${results.total_prototype_pollution || 0}</div>
+                        <div style="font-size: 12px; color: #9a4dff;">🧬 Prototype Pollution</div>
+                    </div>
+                </div>
+        `;
+        
+        // Vulnerabilities Section
+        if (results.vulnerabilities && results.vulnerabilities.length > 0) {
+            panelHTML += `
+                <div class="collapsible" onclick="this.classList.toggle('active')">
+                    <h4 style="color: #dc2626; margin: 20px 0 10px 0; cursor: pointer;">⚠️ Vulnerabilities Found (${results.vulnerabilities.length})</h4>
+                    <div class="collapsible-content">
+            `;
+            
+            results.vulnerabilities.forEach((vuln, index) => {
+                panelHTML += `
+                    <div class="finding-item">
+                        <div class="finding-title vulnerability-${vuln.severity || 'info'}">${vuln.type || 'Unknown'} - ${vuln.severity?.toUpperCase() || 'INFO'}</div>
+                        <div class="finding-details">
+                            <div><strong>File:</strong> ${vuln.file || 'Unknown'}</div>
+                            <div><strong>Description:</strong> ${vuln.description || 'No description'}</div>
+                            ${vuln.line_estimate ? `<div><strong>Line:</strong> ~${vuln.line_estimate}</div>` : ''}
+                            ${vuln.code_snippet ? `<div><strong>Code:</strong><div class="code-snippet">${vuln.code_snippet}</div></div>` : ''}
+                        </div>
+                    </div>
+                `;
+            });
+            
+            panelHTML += `
+                    </div>
+                </div>
+            `;
+        }
+        
+        // Secrets Section
+        if (results.secrets && results.secrets.length > 0) {
+            panelHTML += `
+                <div class="collapsible" onclick="this.classList.toggle('active')">
+                    <h4 style="color: #ea580c; margin: 20px 0 10px 0; cursor: pointer;">🔐 Secrets Found (${results.secrets.length})</h4>
+                    <div class="collapsible-content">
+            `;
+            
+            results.secrets.forEach((secret, index) => {
+                panelHTML += `
+                    <div class="finding-item">
+                        <div class="finding-title vulnerability-${secret.severity || 'high'}">${secret.type || 'Unknown Secret'}</div>
+                        <div class="finding-details">
+                            <div><strong>File:</strong> ${secret.file || 'Unknown'}</div>
+                            <div><strong>Description:</strong> ${secret.description || 'No description'}</div>
+                            <div><strong>Preview:</strong> ${secret.value_preview || 'Hidden'}</div>
+                            ${secret.line_estimate ? `<div><strong>Line:</strong> ~${secret.line_estimate}</div>` : ''}
+                        </div>
+                    </div>
+                `;
+            });
+            
+            panelHTML += `
+                    </div>
+                </div>
+            `;
+        }
+        
+        // DOM Sinks Section
+        if (results.sinks && results.sinks.length > 0) {
+            panelHTML += `
+                <div class="collapsible" onclick="this.classList.toggle('active')">
+                    <h4 style="color: #a855f7; margin: 20px 0 10px 0; cursor: pointer;">🕳️ DOM Sinks (${results.sinks.length})</h4>
+                    <div class="collapsible-content">
+            `;
+            
+            results.sinks.forEach((sink, index) => {
+                panelHTML += `
+                    <div class="finding-item">
+                        <div class="finding-title vulnerability-${sink.risk_level || 'medium'}">${sink.sink_type || 'Unknown Sink'}</div>
+                        <div class="finding-details">
+                            <div><strong>File:</strong> ${sink.file || 'Unknown'}</div>
+                            <div><strong>Occurrences:</strong> ${sink.occurrences || 1}</div>
+                            <div><strong>Risk Level:</strong> ${sink.risk_level || 'Unknown'}</div>
+                            <div><strong>Description:</strong> ${sink.description || 'No description'}</div>
+                        </div>
+                    </div>
+                `;
+            });
+            
+            panelHTML += `
+                    </div>
+                </div>
+            `;
+        }
+        
+        // Libraries Section
+        if (results.libraries && results.libraries.length > 0) {
+            panelHTML += `
+                <div class="collapsible" onclick="this.classList.toggle('active')">
+                    <h4 style="color: #06b6d4; margin: 20px 0 10px 0; cursor: pointer;">📚 Libraries Detected (${results.libraries.length})</h4>
+                    <div class="collapsible-content">
+            `;
+            
+            results.libraries.forEach((lib, index) => {
+                panelHTML += `
+                    <div class="finding-item">
+                        <div class="finding-title">${lib.library_name || 'Unknown Library'} ${lib.version ? `v${lib.version}` : ''}</div>
+                        <div class="finding-details">
+                            <div><strong>File:</strong> ${lib.file || 'Unknown'}</div>
+                            <div><strong>Description:</strong> ${lib.description || 'No description'}</div>
+                        </div>
+                    </div>
+                `;
+            });
+            
+            panelHTML += `
+                    </div>
+                </div>
+            `;
+        }
+        
+        // Prototype Pollution Section
+        if (results.prototype_pollution && results.prototype_pollution.length > 0) {
+            panelHTML += `
+                <div class="collapsible" onclick="this.classList.toggle('active')">
+                    <h4 style="color: #9333ea; margin: 20px 0 10px 0; cursor: pointer;">🧬 Prototype Pollution (${results.prototype_pollution.length})</h4>
+                    <div class="collapsible-content">
+            `;
+            
+            results.prototype_pollution.forEach((finding, index) => {
+                panelHTML += `
+                    <div class="finding-item">
+                        <div class="finding-title vulnerability-${finding.severity || 'high'}">${finding.vulnerability_type || 'Unknown'}</div>
+                        <div class="finding-details">
+                            <div><strong>File:</strong> ${finding.file || 'Unknown'}</div>
+                            <div><strong>Description:</strong> ${finding.description || 'No description'}</div>
+                            <div><strong>Occurrences:</strong> ${finding.occurrences || 1}</div>
+                            ${finding.line_estimate ? `<div><strong>Line:</strong> ~${finding.line_estimate}</div>` : ''}
+                        </div>
+                    </div>
+                `;
+            });
+            
+            panelHTML += `
+                    </div>
+                </div>
+            `;
+        }
+        
+        panelHTML += `</div>`;
+        
+        panel.innerHTML = panelHTML;
+        panel.style.display = 'block';
+        
+        // Scroll to results panel
+        panel.scrollIntoView({ behavior: 'smooth' });
+    },
+
+    // Load subdomains for JS analysis form
+    async loadJSAnalysisSubdomains() {
+        try {
+            const targetId = document.getElementById('js-analysis-target')?.value;
+            const subdomainSelect = document.getElementById('js-analysis-subdomain');
+            
+            if (!subdomainSelect) return;
+
+            const currentValue = subdomainSelect.value;
+            subdomainSelect.innerHTML = '<option value="">All subdomains</option>';
+            
+            if (!targetId) return;
+
+            const response = await API.subdomains.getAll({ 
+                target_id: targetId,
+                limit: 1000
+            });
+            
+            if (response && response.ok) {
+                const data = await response.json();
+                const subdomains = data.success ? data.data : [];
+                
+                subdomains.forEach(subdomain => {
+                    const option = document.createElement('option');
+                    option.value = subdomain.id;
+                    option.textContent = subdomain.subdomain;
+                    subdomainSelect.appendChild(option);
+                });
+                
+                console.log(`Loaded ${subdomains.length} subdomains for JS analysis form`);
+            }
+            
+            if (currentValue) {
+                const optionExists = Array.from(subdomainSelect.options).some(option => option.value === currentValue);
+                if (optionExists) {
+                    subdomainSelect.value = currentValue;
+                }
+            }
+            
+        } catch (error) {
+            console.error('Failed to load subdomains for JS analysis form:', error);
         }
     },
 
@@ -824,50 +1214,6 @@ const JSAnalysis = {
         }
     },
 
-    // Load subdomains for JS analysis form
-    async loadJSAnalysisSubdomains() {
-        try {
-            const targetId = document.getElementById('js-analysis-target')?.value;
-            const subdomainSelect = document.getElementById('js-analysis-subdomain');
-            
-            if (!subdomainSelect) return;
-
-            const currentValue = subdomainSelect.value;
-            subdomainSelect.innerHTML = '<option value="">All subdomains</option>';
-            
-            if (!targetId) return;
-
-            const response = await API.subdomains.getAll({ 
-                target_id: targetId,
-                limit: 1000
-            });
-            
-            if (response && response.ok) {
-                const data = await response.json();
-                const subdomains = data.success ? data.data : [];
-                
-                subdomains.forEach(subdomain => {
-                    const option = document.createElement('option');
-                    option.value = subdomain.id;
-                    option.textContent = subdomain.subdomain;
-                    subdomainSelect.appendChild(option);
-                });
-                
-                console.log(`Loaded ${subdomains.length} subdomains for JS analysis form`);
-            }
-            
-            if (currentValue) {
-                const optionExists = Array.from(subdomainSelect.options).some(option => option.value === currentValue);
-                if (optionExists) {
-                    subdomainSelect.value = currentValue;
-                }
-            }
-            
-        } catch (error) {
-            console.error('Failed to load subdomains for JS analysis form:', error);
-        }
-    },
-
     // Cleanup method for tab switching
     cleanup() {
         console.log('🧹 Cleaning up JS analysis module intervals');
@@ -967,7 +1313,7 @@ const JSAnalysis = {
             csvContent += 'JavaScript Vulnerabilities\n';
             csvContent += 'File,Vulnerability Type,Severity,Description,Line\n';
             data.results.vulnerabilities.forEach(vuln => {
-                csvContent += `"${vuln.file || 'N/A'}","${vuln.type || 'N/A'}","${vuln.severity || 'N/A'}","${vuln.description || 'N/A'}","${vuln.line || 'N/A'}"\n`;
+                csvContent += `"${vuln.file || 'N/A'}","${vuln.type || 'N/A'}","${vuln.severity || 'N/A'}","${vuln.description || 'N/A'}","${vuln.line_estimate || 'N/A'}"\n`;
             });
         }
         
@@ -976,7 +1322,7 @@ const JSAnalysis = {
             csvContent += '\nDiscovered Secrets\n';
             csvContent += 'File,Secret Type,Value Preview\n';
             data.results.secrets.forEach(secret => {
-                csvContent += `"${secret.file || 'N/A'}","${secret.type || 'N/A'}","${(secret.preview || 'N/A').substring(0, 50)}..."\n`;
+                csvContent += `"${secret.file || 'N/A'}","${secret.type || 'N/A'}","${(secret.value_preview || 'N/A').substring(0, 50)}..."\n`;
             });
         }
         
@@ -1009,7 +1355,7 @@ const JSAnalysis = {
                 xmlContent += `        <type>${this.escapeXml(vuln.type || 'N/A')}</type>\n`;
                 xmlContent += `        <severity>${this.escapeXml(vuln.severity || 'N/A')}</severity>\n`;
                 xmlContent += `        <description>${this.escapeXml(vuln.description || 'N/A')}</description>\n`;
-                xmlContent += `        <line>${this.escapeXml(vuln.line || 'N/A')}</line>\n`;
+                xmlContent += `        <line>${this.escapeXml(vuln.line_estimate || 'N/A')}</line>\n`;
                 xmlContent += `      </vulnerability>\n`;
             });
             xmlContent += '    </vulnerabilities>\n';
@@ -1022,7 +1368,7 @@ const JSAnalysis = {
                 xmlContent += `      <secret>\n`;
                 xmlContent += `        <file>${this.escapeXml(secret.file || 'N/A')}</file>\n`;
                 xmlContent += `        <type>${this.escapeXml(secret.type || 'N/A')}</type>\n`;
-                xmlContent += `        <preview>${this.escapeXml((secret.preview || 'N/A').substring(0, 50))}...</preview>\n`;
+                xmlContent += `        <preview>${this.escapeXml((secret.value_preview || 'N/A').substring(0, 50))}...</preview>\n`;
                 xmlContent += `      </secret>\n`;
             });
             xmlContent += '    </secrets>\n';
