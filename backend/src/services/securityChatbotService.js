@@ -1,6 +1,5 @@
-// backend/src/services/securityChatbotService.js
+// backend/src/services/securityChatbotService.js - CLEAN VERSION (SERVICE ONLY)
 const axios = require('axios');
-const knex = require('../../knexfile'); // Adjust to your knex config path
 
 class SecurityChatbotService {
   constructor() {
@@ -14,7 +13,7 @@ class SecurityChatbotService {
 
   async analyzeFindings(organizationId, findingsContext, userMessage, userId) {
     try {
-      console.log(`🤖 [FREE] Processing security analysis with local AI`);
+      console.log(`🤖 Processing security analysis with AI provider: ${this.aiProvider}`);
       
       const sanitizedContext = this.sanitizeFindingsData(findingsContext);
       const context = await this.buildSecurityContext(organizationId, sanitizedContext);
@@ -99,21 +98,24 @@ class SecurityChatbotService {
         context.summary.low_count = findings.vulnerabilities.filter(v => v.severity === 'low').length;
       }
       
-      // Use your existing knex setup
-      const knexInstance = require('knex')(knex[process.env.NODE_ENV || 'development']);
+      // Database context building (optional - might not have knex available)
+      try {
+        const knex = require('../config/database');
+        const recentScans = await knex('scan_jobs')
+          .where('organization_id', organizationId)
+          .where('created_at', '>=', knex.raw("NOW() - INTERVAL '24 hours'"))
+          .count('* as count')
+          .first();
+          
+        context.recent_activity = {
+          scans_last_24h: parseInt(recentScans?.count || 0)
+        };
+      } catch (dbError) {
+        console.warn('Could not build database context:', dbError.message);
+      }
       
-      const recentScans = await knexInstance('scan_jobs')
-        .where('organization_id', organizationId)
-        .where('created_at', '>=', knexInstance.raw("NOW() - INTERVAL '24 hours'"))
-        .count('* as count')
-        .first();
-        
-      context.recent_activity = {
-        scans_last_24h: parseInt(recentScans?.count || 0)
-      };
-      
-    } catch (dbError) {
-      console.warn('Context building partially failed:', dbError.message);
+    } catch (error) {
+      console.warn('Context building partially failed:', error.message);
     }
     
     return context;
@@ -285,18 +287,7 @@ What would you like help with?`;
   async logInteraction(organizationId, userId, userMessage, provider) {
     try {
       // Optional: Log to database if you want analytics
-      // You can uncomment this when you add the chatbot_interactions table
-      /*
-      const knexInstance = require('knex')(knex[process.env.NODE_ENV || 'development']);
-      await knexInstance('chatbot_interactions').insert({
-        organization_id: organizationId,
-        user_id: userId,
-        message_type: 'security_analysis',
-        provider: provider,
-        cost: 0,
-        created_at: new Date()
-      });
-      */
+      console.log(`Chatbot interaction: User ${userId}, Provider: ${provider}`);
     } catch (error) {
       console.warn('Interaction logging failed:', error.message);
     }
@@ -315,116 +306,3 @@ What would you like help with?`;
 }
 
 module.exports = new SecurityChatbotService();
-
-// ==========================================
-// backend/src/controllers/chatbot.js
-// ==========================================
-
-const SecurityChatbotService = require('../services/securityChatbotService');
-
-const chatWithBot = async (req, res) => {
-  try {
-    const { message, context } = req.body;
-    const user = req.user; // From your authenticateToken middleware
-
-    if (!message || message.trim().length === 0) {
-      return res.status(400).json({
-        success: false,
-        error: 'Message is required'
-      });
-    }
-
-    console.log(`🤖 Chatbot request from user ${user.id}: "${message.substring(0, 50)}..."`);
-
-    const result = await SecurityChatbotService.analyzeFindings(
-      user.organization_id,
-      context || {},
-      message,
-      user.id
-    );
-
-    console.log(`✅ Chatbot response generated (${result.provider || 'unknown'})`);
-    
-    res.json(result);
-
-  } catch (error) {
-    console.error('Chatbot controller error:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Chatbot service temporarily unavailable',
-      fallback_response: 'I apologize, but I\'m having technical difficulties right now. Please try again in a moment.'
-    });
-  }
-};
-
-const getChatbotStatus = async (req, res) => {
-  try {
-    const setupResult = await SecurityChatbotService.setupLocalAI();
-    
-    res.json({
-      success: true,
-      available: setupResult,
-      provider: setupResult ? 'local_ollama' : 'fallback_rules',
-      model: setupResult ? (process.env.SECURITY_AI_MODEL || 'codellama:7b-instruct') : null,
-      cost: 0,
-      message: setupResult ? 'Local AI ready' : 'Using intelligent fallback responses'
-    });
-
-  } catch (error) {
-    console.error('Chatbot status check failed:', error);
-    res.json({
-      success: true,
-      available: false,
-      provider: 'fallback_rules',
-      model: null,
-      cost: 0,
-      message: 'AI unavailable - using rule-based responses'
-    });
-  }
-};
-
-const getChatHistory = async (req, res) => {
-  try {
-    const user = req.user;
-    const history = SecurityChatbotService.getConversationHistory(user.id);
-    
-    res.json({
-      success: true,
-      history: history,
-      count: history.length
-    });
-
-  } catch (error) {
-    console.error('Chat history error:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to retrieve chat history'
-    });
-  }
-};
-
-const clearChatHistory = async (req, res) => {
-  try {
-    const user = req.user;
-    SecurityChatbotService.conversationHistory.delete(user.id);
-    
-    res.json({
-      success: true,
-      message: 'Chat history cleared'
-    });
-
-  } catch (error) {
-    console.error('Clear history error:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to clear chat history'
-    });
-  }
-};
-
-module.exports = {
-  chatWithBot,
-  getChatbotStatus,
-  getChatHistory,
-  clearChatHistory
-};

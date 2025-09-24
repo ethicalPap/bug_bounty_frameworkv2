@@ -1,10 +1,13 @@
-// backend/src/controllers/chatbot.js
-const FreeSecurityChatbot = require('../services/securityChatbotService');
+// backend/src/controllers/chatbot.js - CLEAN VERSION
+const SecurityChatbotService = require('../services/securityChatbotService');
 
+/**
+ * Chat with the AI security bot
+ */
 const chatWithBot = async (req, res) => {
   try {
     const { message, context } = req.body;
-    const { user } = req;
+    const user = req.user; // From authenticateToken middleware
 
     if (!message || message.trim().length === 0) {
       return res.status(400).json({
@@ -15,7 +18,7 @@ const chatWithBot = async (req, res) => {
 
     console.log(`🤖 Chatbot request from user ${user.id}: "${message.substring(0, 50)}..."`);
 
-    const result = await FreeSecurityChatbot.analyzeFindings(
+    const result = await SecurityChatbotService.analyzeFindings(
       user.organization_id,
       context || {},
       message,
@@ -31,15 +34,17 @@ const chatWithBot = async (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Chatbot service temporarily unavailable',
-      fallback_response: 'I apologize, but I\'m having technical difficulties right now. Please try again in a moment, or feel free to ask specific questions about your security findings.'
+      fallback_response: 'I apologize, but I\'m having technical difficulties right now. Please try again in a moment.'
     });
   }
 };
 
+/**
+ * Get chatbot status and availability
+ */
 const getChatbotStatus = async (req, res) => {
   try {
-    // Check if local AI is available
-    const setupResult = await FreeSecurityChatbot.setupLocalAI();
+    const setupResult = await SecurityChatbotService.setupLocalAI();
     
     res.json({
       success: true,
@@ -63,10 +68,13 @@ const getChatbotStatus = async (req, res) => {
   }
 };
 
+/**
+ * Get conversation history for the current user
+ */
 const getChatHistory = async (req, res) => {
   try {
-    const { user } = req;
-    const history = FreeSecurityChatbot.getConversationHistory(user.id);
+    const user = req.user;
+    const history = SecurityChatbotService.getConversationHistory(user.id);
     
     res.json({
       success: true,
@@ -83,10 +91,13 @@ const getChatHistory = async (req, res) => {
   }
 };
 
+/**
+ * Clear conversation history for the current user
+ */
 const clearChatHistory = async (req, res) => {
   try {
-    const { user } = req;
-    FreeSecurityChatbot.conversationHistory.delete(user.id);
+    const user = req.user;
+    SecurityChatbotService.conversationHistory.delete(user.id);
     
     res.json({
       success: true,
@@ -108,27 +119,3 @@ module.exports = {
   getChatHistory,
   clearChatHistory
 };
-
-// backend/src/routes/chatbot.js
-const express = require('express');
-const router = express.Router();
-const auth = require('../middleware/auth');
-const { chatWithBot, getChatbotStatus, getChatHistory, clearChatHistory } = require('../controllers/chatbot');
-
-// All chatbot routes require authentication
-router.use(auth);
-
-// Main chat endpoint
-router.post('/chat', chatWithBot);
-
-// Status check endpoint
-router.get('/status', getChatbotStatus);
-
-// Chat history management
-router.get('/history', getChatHistory);
-router.delete('/history', clearChatHistory);
-
-module.exports = router;
-
-// Add to your main app.js or routes/index.js:
-// app.use('/api/chatbot', require('./routes/chatbot'));
