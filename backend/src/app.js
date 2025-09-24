@@ -67,6 +67,7 @@ app.get('/health', (req, res) => {
 
 // API routes
 app.use('/api/v1', routes);
+app.use('/api/chatbot', require('./routes/chatbot'));
 
 // Error handling
 app.use((error, req, res, next) => {

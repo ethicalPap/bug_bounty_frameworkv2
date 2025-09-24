@@ -1,4 +1,4 @@
-// backend/src/services/scanService.js - COMPLETE UPDATED VERSION with Fixed Live Hosts Scan
+// backend/src/services/scanService.js - FIXED VERSION with proper JS Analysis integration
 const { exec } = require('child_process');
 const path = require('path');
 const fs = require('fs').promises;
@@ -10,11 +10,12 @@ const knex = require('../config/database');
 const dns = require('dns').promises;
 const axios = require('axios');
 
-// Import enhanced port scanning service
+// Import enhanced services
 const { runEnhancedPortScan } = require('./portScanningService');
-
-// Import enhanced content discovery service
 const { runEnhancedContentDiscovery } = require('./contentDiscoveryService');
+
+// FIXED: Import the JavaScript analysis service
+const jsAnalysisService = require('./jsService');
 
 // Import models with proper error handling
 let Subdomain, Directory, Vulnerability, Port;
@@ -111,11 +112,11 @@ class ScanService {
           results = await this.runPortScan(scan, target);
           break;
         case 'content_discovery':
-          // Use the enhanced content discovery service
           results = await runEnhancedContentDiscovery(scan, target);
           break;
         case 'js_files_scan':
-          results = await this.runJSFilesScan(scan, target);
+          // FIXED: Use the comprehensive JavaScript analysis service
+          results = await this.runJavaScriptSecurityAnalysis(scan, target);
           break;
         case 'api_discovery':
           results = await this.runAPIDiscovery(scan, target);
@@ -142,6 +143,35 @@ class ScanService {
       throw error;
     } finally {
       this.activeScanJobs.delete(scan.id);
+    }
+  }
+
+  /**
+   * FIXED: JavaScript Security Analysis - Now uses the comprehensive service
+   */
+  async runJavaScriptSecurityAnalysis(scan, target) {
+    console.log(`📄 Starting comprehensive JavaScript security analysis for: ${target.domain}`);
+    
+    try {
+      // Create a progress update function that updates the scan job
+      const updateProgress = async (scanId, percentage) => {
+        await ScanJob.updateProgress(scanId, percentage);
+        console.log(`📄 JS Analysis progress: ${percentage}% for scan ${scanId}`);
+      };
+
+      // FIXED: Call the comprehensive JavaScript analysis service
+      const results = await jsAnalysisService.runJavaScriptSecurityAnalysis(
+        scan, 
+        target, 
+        updateProgress
+      );
+
+      console.log(`✅ JavaScript security analysis completed for ${target.domain}`);
+      return results;
+
+    } catch (error) {
+      console.error(`❌ JavaScript security analysis failed for ${target.domain}:`, error);
+      throw new Error(`JavaScript security analysis failed: ${error.message}`);
     }
   }
 
@@ -492,6 +522,134 @@ class ScanService {
     }
   }
 
+  // ... [Rest of the methods remain the same - subdomain scan, port scan, etc.]
+  // I'm keeping the original implementations for brevity, but the key fix is the JS analysis method
+
+  /**
+   * Update target statistics based on scan results - FIXED VERSION
+   */
+  async updateTargetStats(target, scanType, results) {
+    try {
+      // Handle target.stats - it might be a string or already parsed object
+      let currentStats = {};
+      if (target.stats) {
+        if (typeof target.stats === 'string') {
+          try {
+            currentStats = JSON.parse(target.stats);
+          } catch (parseError) {
+            console.warn('Failed to parse target stats, using empty object:', parseError.message);
+            currentStats = {};
+          }
+        } else if (typeof target.stats === 'object') {
+          currentStats = target.stats;
+        }
+      }
+      
+      switch (scanType) {
+        case 'subdomain_scan':
+          currentStats.subdomains = results.total_count || 0;
+          currentStats.alive_subdomains = results.alive_count || 0;
+          break;
+        case 'live_hosts_scan':
+        case 'live_host_check':
+          console.log(`🔄 Updating live hosts stats from results:`, {
+            live_hosts: results.live_hosts,
+            total_checked: results.total_checked,
+            newly_discovered: results.newly_discovered?.length
+          });
+          currentStats.live_hosts = results.live_hosts || 0;
+          currentStats.total_subdomains_checked = results.total_checked || 0;
+          currentStats.newly_discovered_live = results.newly_discovered?.length || 0;
+          currentStats.last_live_check = new Date().toISOString();
+          // IMPORTANT: Also update alive_subdomains for frontend compatibility
+          currentStats.alive_subdomains = results.live_hosts || 0;
+          break;
+        case 'port_scan':
+          currentStats.open_ports = results.total_ports || 0;
+          break;
+        case 'content_discovery':
+          currentStats.discovered_content = results.total_items || 0;
+          currentStats.xss_sinks = results.xss_sinks || 0;
+          currentStats.endpoints = results.endpoints || 0;
+          currentStats.parameters = results.parameters || 0;
+          break;
+        case 'js_files_scan':
+          // FIXED: Add JavaScript analysis stats
+          currentStats.js_files_analyzed = results.total_js_files_analyzed || 0;
+          currentStats.js_vulnerabilities = results.total_vulnerabilities || 0;
+          currentStats.js_secrets = results.total_secrets || 0;
+          currentStats.js_sinks = results.total_sinks || 0;
+          currentStats.js_prototype_pollution = results.total_prototype_pollution || 0;
+          currentStats.js_libraries = results.total_libraries || 0;
+          currentStats.js_risk_score = results.security_summary?.risk_score || 0;
+          break;
+        case 'vulnerability_scan':
+          currentStats.vulnerabilities = results.total_vulnerabilities || 0;
+          currentStats.risk_score = results.risk_score || 0;
+          break;
+        case 'full_scan':
+          if (results.summary) {
+            Object.assign(currentStats, results.summary);
+          }
+          break;
+      }
+
+      currentStats.last_updated = new Date().toISOString();
+      currentStats.last_scan_type = scanType;
+      
+      // Update target using Target model static method
+      await Target.update(target.id, target.organization_id, { 
+        stats: JSON.stringify(currentStats),
+        last_scan_at: new Date()
+      });
+      
+      console.log(`✅ Updated target stats for ${target.domain}:`, currentStats);
+      
+    } catch (error) {
+      console.error('Error updating target stats:', error);
+      // Don't throw - this shouldn't fail the scan
+    }
+  }
+  
+  /**
+   * Stop a running scan job
+   */
+  async stopScanJob(scan) {
+    const job = this.activeScanJobs.get(scan.id);
+    if (job && job.kill) {
+      job.kill('SIGTERM');
+      this.activeScanJobs.delete(scan.id);
+      console.log(`Stopped scan job ${scan.id}`);
+    }
+  }
+
+  /**
+   * Get active scan jobs count
+   */
+  getActiveScanCount() {
+    return this.activeScanJobs.size;
+  }
+
+  /**
+   * Check tool availability
+   */
+  async checkToolAvailability() {
+    const tools = ['subfinder', 'amass', 'nmap', 'httpx', 'ffuf'];
+    const availability = {};
+    
+    for (const tool of tools) {
+      try {
+        await execAsync(`which ${tool}`, { timeout: 5000 });
+        availability[tool] = true;
+      } catch {
+        availability[tool] = false;
+      }
+    }
+    
+    console.log('Tool availability:', availability);
+    return availability;
+  }
+
   /**
    * Subdomain enumeration scan 
    */
@@ -681,62 +839,6 @@ class ScanService {
     } catch (error) {
       console.error(`❌ Enhanced port scan failed for ${target.domain}:`, error);
       throw error;
-    }
-  }
-
-  /**
-   * JavaScript files scan
-   */
-  async runJSFilesScan(scan, target) {
-    console.log(`Running JS files scan for: ${target.domain}`);
-    
-    await ScanJob.updateProgress(scan.id, 20);
-
-    try {
-      // Basic implementation - in production you'd crawl and analyze JS files
-      const commonJSPaths = [
-        '/js/app.js', '/js/main.js', '/assets/app.js', '/static/js/main.js',
-        '/js/config.js', '/js/bundle.js', '/dist/main.js'
-      ];
-      
-      const foundFiles = [];
-      
-      for (let i = 0; i < commonJSPaths.length; i++) {
-        const jsPath = commonJSPaths[i];
-        try {
-          const { stdout } = await execAsync(`curl -s -o /dev/null -w "%{http_code}" -m 10 http://${target.domain}${jsPath}`, {
-            timeout: 15000
-          });
-          
-          const statusCode = parseInt(stdout.trim());
-          if (statusCode === 200) {
-            foundFiles.push({
-              path: jsPath,
-              url: `http://${target.domain}${jsPath}`,
-              status_code: statusCode
-            });
-          }
-        } catch {
-          // File not found, continue
-        }
-        
-        await ScanJob.updateProgress(scan.id, 20 + (i / commonJSPaths.length) * 60);
-      }
-
-      const results = {
-        js_files: foundFiles,
-        total_files: foundFiles.length,
-        apis_found: [], // Would be populated by JS analysis
-        secrets_found: [], // Would be populated by secret scanning
-        scan_timestamp: new Date().toISOString(),
-        note: 'Basic JS file discovery - full implementation would analyze file contents'
-      };
-
-      await ScanJob.updateProgress(scan.id, 100);
-      return results;
-      
-    } catch (error) {
-      throw new Error(`JS files scan failed: ${error.message}`);
     }
   }
 
@@ -1339,9 +1441,6 @@ class ScanService {
       return vulnerabilities;
   }
 
-
-
-
   /**
    * Full comprehensive scan
    */
@@ -1394,121 +1493,6 @@ class ScanService {
     } catch (error) {
       throw new Error(`Full scan failed: ${error.message}`);
     }
-  }
-
-  /**
-   * Update target statistics based on scan results - FIXED VERSION
-   */
-  async updateTargetStats(target, scanType, results) {
-    try {
-      // Handle target.stats - it might be a string or already parsed object
-      let currentStats = {};
-      if (target.stats) {
-        if (typeof target.stats === 'string') {
-          try {
-            currentStats = JSON.parse(target.stats);
-          } catch (parseError) {
-            console.warn('Failed to parse target stats, using empty object:', parseError.message);
-            currentStats = {};
-          }
-        } else if (typeof target.stats === 'object') {
-          currentStats = target.stats;
-        }
-      }
-      
-      switch (scanType) {
-        case 'subdomain_scan':
-          currentStats.subdomains = results.total_count || 0;
-          currentStats.alive_subdomains = results.alive_count || 0;
-          break;
-        case 'live_hosts_scan':
-        case 'live_host_check':  // FIXED: Handle both scan type names
-          console.log(`🔄 Updating live hosts stats from results:`, {
-            live_hosts: results.live_hosts,
-            total_checked: results.total_checked,
-            newly_discovered: results.newly_discovered?.length
-          });
-          currentStats.live_hosts = results.live_hosts || 0;
-          currentStats.total_subdomains_checked = results.total_checked || 0;
-          currentStats.newly_discovered_live = results.newly_discovered?.length || 0;
-          currentStats.last_live_check = new Date().toISOString();
-          // IMPORTANT: Also update alive_subdomains for frontend compatibility
-          currentStats.alive_subdomains = results.live_hosts || 0;
-          break;
-        case 'port_scan':
-          currentStats.open_ports = results.total_ports || 0;
-          break;
-        case 'content_discovery':
-          currentStats.discovered_content = results.total_items || 0;
-          currentStats.xss_sinks = results.xss_sinks || 0;
-          currentStats.endpoints = results.endpoints || 0;
-          currentStats.parameters = results.parameters || 0;
-          break;
-        case 'vulnerability_scan':
-          currentStats.vulnerabilities = results.total_vulnerabilities || 0;
-          currentStats.risk_score = results.risk_score || 0;
-          break;
-        case 'full_scan':
-          if (results.summary) {
-            Object.assign(currentStats, results.summary);
-          }
-          break;
-      }
-
-      currentStats.last_updated = new Date().toISOString();
-      currentStats.last_scan_type = scanType;
-      
-      // Update target using Target model static method
-      await Target.update(target.id, target.organization_id, { 
-        stats: JSON.stringify(currentStats),
-        last_scan_at: new Date()
-      });
-      
-      console.log(`✅ Updated target stats for ${target.domain}:`, currentStats);
-      
-    } catch (error) {
-      console.error('Error updating target stats:', error);
-      // Don't throw - this shouldn't fail the scan
-    }
-  }
-  
-  /**
-   * Stop a running scan job
-   */
-  async stopScanJob(scan) {
-    const job = this.activeScanJobs.get(scan.id);
-    if (job && job.kill) {
-      job.kill('SIGTERM');
-      this.activeScanJobs.delete(scan.id);
-      console.log(`Stopped scan job ${scan.id}`);
-    }
-  }
-
-  /**
-   * Get active scan jobs count
-   */
-  getActiveScanCount() {
-    return this.activeScanJobs.size;
-  }
-
-  /**
-   * Check tool availability
-   */
-  async checkToolAvailability() {
-    const tools = ['subfinder', 'amass', 'nmap', 'httpx', 'ffuf'];
-    const availability = {};
-    
-    for (const tool of tools) {
-      try {
-        await execAsync(`which ${tool}`, { timeout: 5000 });
-        availability[tool] = true;
-      } catch {
-        availability[tool] = false;
-      }
-    }
-    
-    console.log('Tool availability:', availability);
-    return availability;
   }
 }
 

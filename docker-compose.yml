@@ -40,6 +40,35 @@ services:
     networks:
       - framework_network
 
+  # 🤖 Ollama AI Service (Free Local AI for Security Analysis)
+  ollama:
+    image: ollama/ollama:latest
+    container_name: framework_ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    networks:
+      - framework_network
+    environment:
+      - OLLAMA_HOST=0.0.0.0
+      - OLLAMA_ORIGINS=*
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    # Uncomment for GPU support (if you have NVIDIA GPU)
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
   # Backend API
   backend:
     build:
@@ -72,11 +101,25 @@ services:
      
       # Run database initialization
       RUN_SEEDS: "false"
+
+      # 🤖 AI Configuration (Free Local AI)
+      AI_PROVIDER: local
+      OLLAMA_ENDPOINT: http://ollama:11434
+      SECURITY_AI_MODEL: codellama:7b-instruct
+      
+      # Alternative: Cloud AI (costs money - uncomment to use)
+      # AI_PROVIDER: openai
+      # AI_API_KEY: your_openai_api_key_here
+      # or
+      # AI_PROVIDER: claude
+      # AI_API_KEY: your_anthropic_api_key_here
      
     depends_on:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      ollama:
         condition: service_healthy
     volumes:
       - scan_data:/app/scan_data
@@ -94,9 +137,6 @@ services:
     cap_add:
       - NET_RAW        # Allows raw socket creation for nmap SYN scans
       - NET_ADMIN      # Allows network administration tasks
-    # Optional: Additional security options if needed
-    # security_opt:
-    #   - apparmor:unconfined
 
   # Frontend (nginx serving the frontend directory)
   frontend:
@@ -114,12 +154,49 @@ services:
     depends_on:
       - backend
 
+  # 🚀 AI Model Setup (runs once to download security analysis models)
+  ollama-setup:
+    image: ollama/ollama:latest
+    container_name: framework_ollama_setup
+    volumes:
+      - ollama_data:/root/.ollama
+    networks:
+      - framework_network
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      - OLLAMA_HOST=ollama:11434
+    restart: "no"  # Run once only
+    command: >
+      sh -c "
+        echo '🚀 Setting up AI models for security analysis...' &&
+        echo 'This will take 5-10 minutes depending on your internet speed.' &&
+        ollama pull codellama:7b-instruct &&
+        echo '✅ CodeLlama 7B model downloaded successfully!' &&
+        echo '📚 This model is optimized for security analysis and code review.' &&
+        ollama pull mistral:7b &&
+        echo '✅ Mistral 7B model downloaded successfully!' &&
+        echo '⚡ This model provides fast general security assistance.' &&
+        echo '' &&
+        echo '🎉 AI setup complete! Your security assistant is ready.' &&
+        echo '💡 The AI runs 100% locally - no data leaves your server.' &&
+        echo '💰 Total cost: $0 - unlimited security analysis at no charge!' &&
+        echo '' &&
+        echo '🔍 Available models:' &&
+        ollama list &&
+        echo '' &&
+        echo '✅ Navigate to http://localhost:3000 and click \"🤖 AI Assistant\" to start!'
+      "
+
 volumes:
   postgres_data:
     driver: local
   redis_data:
     driver: local
   scan_data:
+    driver: local
+  ollama_data:  # 🤖 Storage for AI models (~4GB)
     driver: local
 
 networks:

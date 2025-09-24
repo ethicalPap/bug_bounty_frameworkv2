@@ -1,4 +1,4 @@
-// backend/src/routes/index.js
+// backend/src/routes/index.js - UPDATED with chatbot routes
 const express = require('express');
 const authController = require('../controllers/auth');
 const targetsController = require('../controllers/targets');
@@ -7,6 +7,7 @@ const subdomainsController = require('../controllers/subdomains');
 const directoriesController = require('../controllers/directories');
 const vulnerabilitiesController = require('../controllers/vulnerabilities');
 const portsController = require('../controllers/ports');
+const chatbotController = require('../controllers/chatbot'); // 🤖 NEW: Add chatbot controller
 const { authenticateToken, requireRole } = require('../middleware/auth');
 
 const router = express.Router();
@@ -51,5 +52,11 @@ router.get('/scans/jobs', scansController.getJobs);
 router.get('/scans/:id', scansController.getScan);
 router.get('/scans/:id/results', scansController.getScanResults);
 router.post('/scans/stop/:id', scansController.stopScan);
+
+// 🤖 AI Security Chatbot Routes (NEW)
+router.post('/chatbot/chat', chatbotController.chatWithBot);
+router.get('/chatbot/status', chatbotController.getChatbotStatus);
+router.get('/chatbot/history', chatbotController.getChatHistory);
+router.delete('/chatbot/history', chatbotController.clearChatHistory);
 
 module.exports = router;
