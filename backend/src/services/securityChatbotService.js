@@ -6,7 +6,7 @@ class SecurityChatbotService {
     this.aiProvider = process.env.AI_PROVIDER || 'local';
     this.apiKey = process.env.AI_API_KEY;
     this.ollamaEndpoint = process.env.OLLAMA_ENDPOINT || 'http://ollama:11434';
-    this.model = process.env.SECURITY_AI_MODEL || 'mistral:7b-instruct';
+    this.model = process.env.SECURITY_AI_MODEL || 'codellama:13b-instruct';
     this.conversationHistory = new Map();
     this.maxHistoryLength = 4;
     this.modelCheckCache = null;
