@@ -202,13 +202,8 @@ const Navigation = {
                     } else {
                         this.showModuleNotAvailable('Vulnerabilities');
                     }
-                    break;
-                
-                case 'security-chatbot':
-                    document.getElementById('page-title').textContent = 'AI Security Assistant';
-                    await SecurityChatbot.init();
-                    break;
-                    
+                    break;                
+                  
                 case 'settings':
                     content.innerHTML = this.getSettingsContent();
                     break;
