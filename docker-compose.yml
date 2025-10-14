@@ -40,73 +40,6 @@ services:
     networks:
       - framework_network
 
-  # 🤖 Ollama AI Service
-  ollama:
-    image: ollama/ollama:0.3.12
-    container_name: framework_ollama
-    ports:
-      - "11434:11434"
-    volumes:
-      - ollama_data:/root/.ollama
-    networks:
-      - framework_network
-    environment:
-      - OLLAMA_HOST=0.0.0.0
-      - OLLAMA_ORIGINS=*
-      - OLLAMA_NUM_PARALLEL=1
-      - OLLAMA_MAX_LOADED_MODELS=1
-    restart: unless-stopped
-    mem_limit: 6g  # Increased for Mistral
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 60s
-
-  # 🚀 AI Model Setup - Downloads Mistral 7B for Better Bug Bounty Advice
-  ollama-setup:
-    image: ollama/ollama:0.3.12
-    container_name: framework_ollama_setup
-    volumes:
-      - ollama_data:/root/.ollama
-    networks:
-      - framework_network
-    depends_on:
-      ollama:
-        condition: service_healthy
-    environment:
-      - OLLAMA_HOST=ollama:11434
-    restart: "no"
-    command: |
-      sh -c "
-      echo '🚀 Bug Bounty AI Assistant Setup';
-      echo '================================';
-      sleep 15;
-      echo '📋 Current models:';
-      ollama list || echo 'No models yet';
-      echo '⚡ Downloading Mistral 7B for advanced bug bounty advice...';
-      if ollama pull mistral:7b; then
-        echo '✅ Mistral 7B downloaded successfully!';
-      else
-        echo '❌ Mistral failed, trying CodeLlama...';
-        if ollama pull codellama:7b; then
-          echo '✅ CodeLlama 7B downloaded successfully!';
-        else
-          echo '❌ Large models failed, trying TinyLlama as fallback...';
-          if ollama pull tinyllama; then
-            echo '✅ TinyLlama downloaded as fallback';
-          else
-            echo '❌ All model downloads failed - will use rule-based fallback';
-          fi;
-        fi;
-      fi;
-      echo '📋 Final model list:';
-      ollama list;
-      echo '🎉 Bug Bounty AI model setup complete!';
-      echo '💡 Model priority: Mistral > CodeLlama > TinyLlama > Fallback';
-      "
-
   # Backend API - Updated with Mistral for Better Bug Bounty Advice
   backend:
     build:
@@ -140,30 +73,6 @@ services:
       # Run database initialization
       RUN_SEEDS: "false"
 
-      # 🤖 AI Configuration - UPGRADED TO MISTRAL 7B
-      AI_PROVIDER: local
-      OLLAMA_ENDPOINT: http://ollama:11434
-      SECURITY_AI_MODEL: mistral:7b  # CHANGED: Much better for complex bug bounty instructions
-      
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      ollama:
-        condition: service_healthy
-      ollama-setup:
-        condition: service_completed_successfully
-    volumes:
-      - scan_data:/app/scan_data
-      - ./backend/tools:/app/tools
-    restart: unless-stopped
-    networks:
-      - framework_network
-    cap_add:
-      - NET_RAW
-      - NET_ADMIN
-
   # Frontend
   frontend:
     image: nginx:alpine
@@ -185,8 +94,6 @@ volumes:
   redis_data:
     driver: local
   scan_data:
-    driver: local
-  ollama_data:
     driver: local
 
 networks:
