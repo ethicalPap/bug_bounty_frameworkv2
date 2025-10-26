@@ -41,17 +41,19 @@ services:
       timeout: 5s
       retries: 5
 
-  # Main Application
-  app:
+  # Backend API
+  backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: subdomain_scanner_app
+    container_name: subdomain_scanner_backend
     environment:
       - DATABASE_URL=postgresql://postgres:password@db:5432/subdomain_scanner
       - REDIS_URL=redis://redis:6379/0
       - DEBUG=false
       - LOG_LEVEL=INFO
+      # Frontend URL for CORS (update when frontend is added)
+      - FRONTEND_URL=http://localhost:3000
     volumes:
       - ./backend/src:/app/src
       - ./output:/app/output
@@ -73,80 +75,52 @@ services:
       timeout: 10s
       retries: 3
 
-  # Celery Worker for background tasks
-  worker:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    container_name: subdomain_scanner_worker
-    command: celery -A src.celery_app worker --loglevel=info --concurrency=4
-    environment:
-      - DATABASE_URL=postgresql://postgres:password@db:5432/subdomain_scanner
-      - REDIS_URL=redis://redis:6379/0
-      - CELERY_BROKER_URL=redis://redis:6379/0
-      - CELERY_RESULT_BACKEND=redis://redis:6379/0
-    volumes:
-      - ./backend/src:/app/src
-      - ./output:/app/output
-      - ./logs:/app/logs
-      - tool_configs:/root/.config
-    depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    networks:
-      - subdomain_network
-    restart: unless-stopped
+  # Frontend (Uncomment when you add the frontend)
+  # frontend:
+  #   build:
+  #     context: ./frontend
+  #     dockerfile: Dockerfile
+  #     target: development  # Use 'production' for prod builds
+  #   container_name: subdomain_scanner_frontend
+  #   environment:
+  #     - VITE_API_URL=http://localhost:8000
+  #     - NODE_ENV=development
+  #   volumes:
+  #     - ./frontend:/app
+  #     - /app/node_modules  # Prevent overwriting node_modules
+  #   ports:
+  #     - "3000:3000"
+  #   depends_on:
+  #     - backend
+  #   networks:
+  #     - subdomain_network
+  #   restart: unless-stopped
+  #   command: npm run dev -- --host
 
-  # Celery Beat for scheduled tasks
-  beat:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    container_name: subdomain_scanner_beat
-    command: celery -A src.celery_app beat --loglevel=info --scheduler django_celery_beat.schedulers:DatabaseScheduler
-    environment:
-      - DATABASE_URL=postgresql://postgres:password@db:5432/subdomain_scanner
-      - REDIS_URL=redis://redis:6379/0
-      - CELERY_BROKER_URL=redis://redis:6379/0
-      - CELERY_RESULT_BACKEND=redis://redis:6379/0
-    volumes:
-      - ./backend/src:/app/src
-      - ./logs:/app/logs
-    depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    networks:
-      - subdomain_network
-    restart: unless-stopped
-
-  # Flower for monitoring Celery tasks
-  flower:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    container_name: subdomain_scanner_flower
-    command: celery -A src.celery_app flower --port=5555
-    environment:
-      - CELERY_BROKER_URL=redis://redis:6379/0
-      - CELERY_RESULT_BACKEND=redis://redis:6379/0
-    ports:
-      - "5555:5555"
-    depends_on:
-      - redis
-    networks:
-      - subdomain_network
-    restart: unless-stopped
+  # Nginx Reverse Proxy (Production - Uncomment when ready)
+  # nginx:
+  #   image: nginx:alpine
+  #   container_name: subdomain_scanner_nginx
+  #   volumes:
+  #     - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+  #     - ./nginx/ssl:/etc/nginx/ssl:ro  # SSL certificates
+  #     - frontend_build:/usr/share/nginx/html  # Static frontend files
+  #   ports:
+  #     - "80:80"
+  #     - "443:443"
+  #   depends_on:
+  #     - backend
+  #     - frontend
+  #   networks:
+  #     - subdomain_network
+  #   restart: unless-stopped
 
   # pgAdmin for database management
   pgadmin:
     image: dpage/pgadmin4:latest
     container_name: subdomain_scanner_pgadmin
     environment:
-      PGADMIN_DEFAULT_EMAIL: admin@subdomain.local
+      PGADMIN_DEFAULT_EMAIL: admin@example.com
       PGADMIN_DEFAULT_PASSWORD: admin
       PGADMIN_CONFIG_SERVER_MODE: 'False'
     volumes:
@@ -158,6 +132,74 @@ services:
     networks:
       - subdomain_network
     restart: unless-stopped
+
+  # Celery Worker (Uncomment if using background tasks)
+  # worker:
+  #   build:
+  #     context: ./backend
+  #     dockerfile: Dockerfile
+  #   container_name: subdomain_scanner_worker
+  #   command: celery -A src.celery_app worker --loglevel=info --concurrency=4
+  #   environment:
+  #     - DATABASE_URL=postgresql://postgres:password@db:5432/subdomain_scanner
+  #     - REDIS_URL=redis://redis:6379/0
+  #     - CELERY_BROKER_URL=redis://redis:6379/0
+  #     - CELERY_RESULT_BACKEND=redis://redis:6379/0
+  #   volumes:
+  #     - ./backend/src:/app/src
+  #     - ./output:/app/output
+  #     - ./logs:/app/logs
+  #     - tool_configs:/root/.config
+  #   depends_on:
+  #     db:
+  #       condition: service_healthy
+  #     redis:
+  #       condition: service_healthy
+  #   networks:
+  #     - subdomain_network
+  #   restart: unless-stopped
+
+  # Celery Beat (Uncomment if using scheduled tasks)
+  # beat:
+  #   build:
+  #     context: ./backend
+  #     dockerfile: Dockerfile
+  #   container_name: subdomain_scanner_beat
+  #   command: celery -A src.celery_app beat --loglevel=info
+  #   environment:
+  #     - DATABASE_URL=postgresql://postgres:password@db:5432/subdomain_scanner
+  #     - REDIS_URL=redis://redis:6379/0
+  #     - CELERY_BROKER_URL=redis://redis:6379/0
+  #     - CELERY_RESULT_BACKEND=redis://redis:6379/0
+  #   volumes:
+  #     - ./backend/src:/app/src
+  #     - ./logs:/app/logs
+  #   depends_on:
+  #     db:
+  #       condition: service_healthy
+  #     redis:
+  #       condition: service_healthy
+  #   networks:
+  #     - subdomain_network
+  #   restart: unless-stopped
+
+  # Flower for monitoring Celery (Uncomment if using Celery)
+  # flower:
+  #   build:
+  #     context: ./backend
+  #     dockerfile: Dockerfile
+  #   container_name: subdomain_scanner_flower
+  #   command: celery -A src.celery_app flower --port=5555
+  #   environment:
+  #     - CELERY_BROKER_URL=redis://redis:6379/0
+  #     - CELERY_RESULT_BACKEND=redis://redis:6379/0
+  #   ports:
+  #     - "5555:5555"
+  #   depends_on:
+  #     - redis
+  #   networks:
+  #     - subdomain_network
+  #   restart: unless-stopped
 
 networks:
   subdomain_network:
@@ -174,4 +216,6 @@ volumes:
   pgadmin_data:
     driver: local
   tool_configs:
+    driver: local
+  frontend_build:  # For production frontend builds
     driver: local
