@@ -46,11 +46,14 @@ def init_db():
     Creates all tables defined in models.
     """
     from src.models.Subdomain import Base as SubdomainBase
+    from src.models.ContentDiscovery import Base as ContentDiscoveryBase
     
     # Import all models here to ensure they're registered
     # This ensures all tables are created
     SubdomainBase.metadata.create_all(bind=engine)
+    ContentDiscoveryBase.metadata.create_all(bind=engine)
     print("Database tables created successfully!")
+    print("Tables: subdomains, content_discovery, js_endpoints, api_parameters")
 
 def drop_db():
     """
@@ -58,6 +61,8 @@ def drop_db():
     WARNING: This will delete all data!
     """
     from src.models.Subdomain import Base as SubdomainBase
+    from src.models.ContentDiscovery import Base as ContentDiscoveryBase
     
     SubdomainBase.metadata.drop_all(bind=engine)
+    ContentDiscoveryBase.metadata.drop_all(bind=engine)
     print("Database tables dropped!")

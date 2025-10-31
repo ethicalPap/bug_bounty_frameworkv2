@@ -11,6 +11,8 @@ RUN apt-get update && apt-get install -y \
     unzip \
     build-essential \
     golang-go \
+    chromium \
+    chromium-driver \
     && rm -rf /var/lib/apt/lists/*
 
 # Set up Go environment
@@ -18,7 +20,8 @@ ENV GOPATH=/go
 ENV PATH=$GOPATH/bin:$PATH
 RUN mkdir -p $GOPATH/bin
 
-# Install subdomain enumeration tools
+# ==================== SUBDOMAIN ENUMERATION TOOLS ====================
+
 # Install Subfinder
 RUN go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
 
@@ -54,8 +57,92 @@ RUN go install -v github.com/projectdiscovery/nuclei/v2/cmd/nuclei@latest
 # Install dnsx for DNS enumeration
 RUN go install -v github.com/projectdiscovery/dnsx/cmd/dnsx@latest
 
+# ==================== CONTENT DISCOVERY TOOLS ====================
+
+# Active Fuzzing Tools
+# Install ffuf
+RUN go install github.com/ffuf/ffuf/v2@latest
+
+# Install feroxbuster
+RUN wget https://github.com/epi052/feroxbuster/releases/latest/download/x86_64-linux-feroxbuster.zip \
+    && unzip x86_64-linux-feroxbuster.zip \
+    && chmod +x feroxbuster \
+    && mv feroxbuster /usr/local/bin/ \
+    && rm x86_64-linux-feroxbuster.zip
+
+# Passive/Archive Discovery Tools
+# Install waymore
+RUN pip install waymore
+
+# Install gau (getallurls)
+RUN go install github.com/lc/gau/v2/cmd/gau@latest
+
+# Crawling & Spidering Tools
+# Install katana
+RUN go install github.com/projectdiscovery/katana/cmd/katana@latest
+
+# Install gospider
+RUN go install github.com/jaeles-project/gospider@latest
+
+# JavaScript Analysis Tools
+# Install LinkFinder
+RUN git clone https://github.com/GerbenJavado/LinkFinder.git /opt/LinkFinder \
+    && cd /opt/LinkFinder \
+    && pip install -r requirements.txt \
+    && chmod +x linkfinder.py
+
+# API Discovery Tools
+# Install Arjun
+RUN pip install arjun
+
+# Install kiterunner (optional - very large)
+# RUN wget https://github.com/assetnote/kiterunner/releases/latest/download/kiterunner_linux_amd64.tar.gz \
+#     && tar -xzf kiterunner_linux_amd64.tar.gz \
+#     && mv kr /usr/local/bin/ \
+#     && rm kiterunner_linux_amd64.tar.gz
+
+# Specialized Discovery Tools
+# Install unfurl
+RUN go install github.com/tomnomnom/unfurl@latest
+
+# Install uro
+RUN pip install uro
+
+# Install anew (for deduplication)
+RUN go install github.com/tomnomnom/anew@latest
+
+# Install qsreplace (for parameter manipulation)
+RUN go install github.com/tomnomnom/qsreplace@latest
+
 # Copy Go binaries to system PATH
 RUN cp $GOPATH/bin/* /usr/local/bin/ 2>/dev/null || true
+
+# ==================== WORDLISTS ====================
+
+# Create wordlists directory
+RUN mkdir -p /opt/wordlists
+
+# Download SecLists (comprehensive wordlist collection)
+RUN git clone --depth 1 https://github.com/danielmiessler/SecLists.git /opt/SecLists \
+    && ln -s /opt/SecLists/Discovery/Web-Content/common.txt /opt/wordlists/common.txt \
+    && ln -s /opt/SecLists/Discovery/Web-Content/directory-list-2.3-medium.txt /opt/wordlists/medium.txt \
+    && ln -s /opt/SecLists/Discovery/Web-Content/big.txt /opt/wordlists/big.txt \
+    && ln -s /opt/SecLists/Discovery/Web-Content/raft-large-files.txt /opt/wordlists/files.txt \
+    && ln -s /opt/SecLists/Discovery/Web-Content/raft-large-directories.txt /opt/wordlists/directories.txt
+
+# Download Assetnote wordlists (high quality, targeted)
+RUN mkdir -p /opt/assetnote-wordlists \
+    && cd /opt/assetnote-wordlists \
+    && wget https://wordlists-cdn.assetnote.io/data/manual/best-dns-wordlist.txt \
+    && wget https://wordlists-cdn.assetnote.io/data/manual/2m-subdomains.txt \
+    && ln -s /opt/assetnote-wordlists/best-dns-wordlist.txt /opt/wordlists/dns-best.txt
+
+# ==================== NUCLEI TEMPLATES ====================
+
+# Update nuclei templates
+RUN nuclei -update-templates
+
+# ==================== PYTHON DEPENDENCIES ====================
 
 # Copy Python requirements
 COPY requirements.txt .
@@ -63,11 +150,13 @@ COPY requirements.txt .
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
+# ==================== APPLICATION SETUP ====================
+
 # Copy application code
 COPY src/ ./src/
 
 # Create directories for output and logs
-RUN mkdir -p /app/output /app/logs
+RUN mkdir -p /app/output /app/logs /tmp
 
 # Set environment variables
 ENV PYTHONPATH=/app
