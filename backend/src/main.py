@@ -21,6 +21,16 @@ from src.controllers.content_discovery import (
     get_js_endpoints,
     get_api_parameters
 )
+from src.controllers.port_scanner import (
+    start_port_scan,
+    get_ports_by_target,
+    get_ports_by_subdomain,
+    get_ports_by_scan,
+    get_scan_summary,
+    get_open_ports,
+    get_vulnerable_services,
+    get_ports_by_service
+)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -29,7 +39,7 @@ logger = logging.getLogger(__name__)
 # Create FastAPI app
 app = FastAPI(
     title="Bug Bounty Hunter Platform API",
-    description="Advanced subdomain enumeration, content discovery, and vulnerability scanning tool",
+    description="Advanced subdomain enumeration, content discovery, port scanning, and vulnerability scanning tool",
     version="2.0.0"
 )
 
@@ -151,6 +161,89 @@ class APIParameterResponse(BaseModel):
     scan_id: str
     created_at: Optional[str]
 
+# Port Scanning Models
+class PortScanRequest(BaseModel):
+    targets: List[str] = Field(..., description="List of IPs or domains to scan", example=["example.com", "192.168.1.1"])
+    ports: str = Field("top-100", description="Port range (top-100, top-1000, common-web, common-db, common-admin, all-tcp, or custom like 1-1000 or 80,443,8080)")
+    scan_type: str = Field("quick", description="Scan type: quick, full, stealth, udp, comprehensive")
+    
+    # Tool selection
+    use_nmap: bool = Field(True, description="Use nmap scanner")
+    use_masscan: bool = Field(False, description="Use masscan scanner (requires root)")
+    use_naabu: bool = Field(True, description="Use naabu scanner")
+    
+    # Nmap options
+    nmap_scan_type: str = Field("-sS", description="Nmap scan type: -sS (SYN), -sT (Connect), -sU (UDP), -sV (Version)")
+    nmap_timing: str = Field("T4", description="Nmap timing template: T0-T5")
+    nmap_scripts: Optional[str] = Field(None, description="Nmap scripts to run (e.g., 'default', 'vuln')")
+    service_detection: bool = Field(True, description="Enable service/version detection")
+    os_detection: bool = Field(False, description="Enable OS detection")
+    version_intensity: int = Field(5, description="Version detection intensity (0-9)", ge=0, le=9)
+    
+    # Performance options
+    masscan_rate: int = Field(10000, description="Masscan packets per second", ge=100, le=100000)
+    naabu_rate: int = Field(1000, description="Naabu packets per second", ge=100, le=10000)
+    naabu_retries: int = Field(3, description="Naabu retry attempts", ge=1, le=5)
+    
+    # General options
+    timeout: int = Field(600, description="Timeout per tool in seconds", ge=60, le=1800)
+    threads: int = Field(10, description="Number of threads", ge=1, le=50)
+    exclude_closed: bool = Field(True, description="Don't save closed ports to database")
+    subdomain_ids: Optional[List[int]] = Field(None, description="Link results to subdomain IDs")
+
+class PortScanResponse(BaseModel):
+    scan_id: str
+    targets: List[str]
+    target_count: int
+    scan_type: str
+    ports_scanned: str
+    total_results: int
+    unique_ports: int
+    new_results_saved: int
+    open_ports: int
+    tool_results: Dict[str, int]
+    duration_seconds: int
+    timestamp: str
+
+class PortResultResponse(BaseModel):
+    id: int
+    subdomain_id: Optional[int]
+    target: str
+    port: int
+    protocol: str
+    state: str
+    service: Optional[str]
+    version: Optional[str]
+    banner: Optional[str]
+    cpe: Optional[str]
+    script_output: Optional[str]
+    tool_name: str
+    scan_type: Optional[str]
+    response_time: Optional[int]
+    is_common_port: bool
+    is_vulnerable: bool
+    notes: Optional[str]
+    scan_id: str
+    created_at: Optional[str]
+    updated_at: Optional[str]
+
+class PortScanSummaryResponse(BaseModel):
+    id: int
+    scan_id: str
+    target_count: int
+    total_ports_scanned: int
+    open_ports: int
+    closed_ports: int
+    filtered_ports: int
+    scan_type: Optional[str]
+    port_range: Optional[str]
+    tools_used: Optional[str]
+    scan_duration: Optional[int]
+    status: str
+    error_message: Optional[str]
+    created_at: Optional[str]
+    completed_at: Optional[str]
+
 # ==================== Startup Events ====================
 
 @app.on_event("startup")
@@ -180,13 +273,22 @@ async def root():
     return {
         "message": "Bug Bounty Hunter Platform API",
         "version": "2.0.0",
-        "features": ["subdomain_enumeration", "content_discovery", "vulnerability_scanning"],
+        "features": [
+            "subdomain_enumeration",
+            "content_discovery",
+            "port_scanning",
+            "vulnerability_scanning"
+        ],
         "endpoints": {
             "health": "/health",
             "subdomain_scan": "/api/v1/scan",
             "content_discovery": "/api/v1/content/scan",
+            "port_scan": "/api/v1/ports/scan",
+            "scan_subdomains_ports": "/api/v1/ports/scan/subdomains",
             "subdomains": "/api/v1/subdomains/{domain}",
             "discovered_content": "/api/v1/content/{target_url}",
+            "discovered_ports": "/api/v1/ports/target/{target}",
+            "open_ports": "/api/v1/ports/open",
             "docs": "/docs"
         }
     }
@@ -427,6 +529,257 @@ async def get_api_parameter_discoveries(
         logger.error(f"Failed to retrieve API parameters: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to retrieve API parameters: {str(e)}")
 
+# ==================== PORT SCANNING ENDPOINTS ====================
+
+@app.post("/api/v1/ports/scan", response_model=PortScanResponse)
+async def create_port_scan(
+    scan_request: PortScanRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db)
+):
+    """
+    Start a new port scan
+    
+    Scans target hosts/IPs for open ports using multiple tools:
+    - nmap: Full-featured scanner with service detection and version scanning
+    - masscan: High-speed scanner for large-scale scans (requires root)
+    - naabu: Fast port scanner from ProjectDiscovery
+    
+    Port presets:
+    - top-100: Most common 100 ports
+    - top-1000: Most common 1000 ports
+    - common-web: Web service ports (80, 443, 8080, etc.)
+    - common-db: Database ports (3306, 5432, 27017, etc.)
+    - common-admin: Remote admin ports (22, 3389, 5900, etc.)
+    - all-tcp: All TCP ports (1-65535)
+    - Custom: Specify ports like "1-1000" or "80,443,8080,8443"
+    """
+    try:
+        logger.info(f"Starting port scan for targets: {scan_request.targets}")
+        
+        result = start_port_scan(
+            targets=scan_request.targets,
+            ports=scan_request.ports,
+            scan_type=scan_request.scan_type,
+            use_nmap=scan_request.use_nmap,
+            use_masscan=scan_request.use_masscan,
+            use_naabu=scan_request.use_naabu,
+            nmap_scan_type=scan_request.nmap_scan_type,
+            nmap_timing=scan_request.nmap_timing,
+            nmap_scripts=scan_request.nmap_scripts,
+            service_detection=scan_request.service_detection,
+            os_detection=scan_request.os_detection,
+            version_intensity=scan_request.version_intensity,
+            masscan_rate=scan_request.masscan_rate,
+            naabu_rate=scan_request.naabu_rate,
+            naabu_retries=scan_request.naabu_retries,
+            timeout=scan_request.timeout,
+            threads=scan_request.threads,
+            exclude_closed=scan_request.exclude_closed,
+            subdomain_ids=scan_request.subdomain_ids
+        )
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"Port scan failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Port scan failed: {str(e)}")
+
+@app.get("/api/v1/ports/target/{target}", response_model=List[PortResultResponse])
+async def get_ports_for_target(
+    target: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Get all discovered ports for a specific target
+    
+    Returns all ports found across all scans for the specified IP or domain.
+    """
+    try:
+        ports = get_ports_by_target(target, db)
+        return ports
+    except Exception as e:
+        logger.error(f"Failed to retrieve ports: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve ports: {str(e)}")
+
+@app.get("/api/v1/ports/subdomain/{subdomain_id}", response_model=List[PortResultResponse])
+async def get_ports_for_subdomain(
+    subdomain_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    Get all ports for a specific subdomain
+    
+    Returns all discovered ports linked to the specified subdomain ID.
+    """
+    try:
+        ports = get_ports_by_subdomain(subdomain_id, db)
+        if not ports:
+            raise HTTPException(status_code=404, detail="No ports found for this subdomain")
+        return ports
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to retrieve ports: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve ports: {str(e)}")
+
+@app.get("/api/v1/ports/scan/{scan_id}", response_model=List[PortResultResponse])
+async def get_port_scan_results(
+    scan_id: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Get results for a specific port scan
+    
+    Returns all ports discovered in a particular scan session.
+    """
+    try:
+        results = get_ports_by_scan(scan_id, db)
+        if not results:
+            raise HTTPException(status_code=404, detail="Scan not found")
+        return results
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to retrieve scan results: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve scan results: {str(e)}")
+
+@app.get("/api/v1/ports/scan/{scan_id}/summary", response_model=PortScanSummaryResponse)
+async def get_port_scan_summary_endpoint(
+    scan_id: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Get summary statistics for a specific port scan
+    
+    Returns aggregated information about the scan including:
+    - Number of targets scanned
+    - Total ports found (open/closed/filtered)
+    - Tools used
+    - Scan duration
+    """
+    try:
+        summary = get_scan_summary(scan_id, db)
+        if not summary:
+            raise HTTPException(status_code=404, detail="Scan summary not found")
+        return summary
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to retrieve scan summary: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve scan summary: {str(e)}")
+
+@app.get("/api/v1/ports/open", response_model=List[PortResultResponse])
+async def get_all_open_ports(
+    limit: int = Query(100, description="Maximum number of results", ge=1, le=1000),
+    db: Session = Depends(get_db)
+):
+    """
+    Get all open ports across all scans
+    
+    Returns the most recently discovered open ports.
+    """
+    try:
+        ports = get_open_ports(db, limit)
+        return ports
+    except Exception as e:
+        logger.error(f"Failed to retrieve open ports: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve open ports: {str(e)}")
+
+@app.get("/api/v1/ports/vulnerable", response_model=List[PortResultResponse])
+async def get_vulnerable_ports(
+    db: Session = Depends(get_db)
+):
+    """
+    Get ports flagged as potentially vulnerable
+    
+    Returns ports with services that may have known vulnerabilities.
+    """
+    try:
+        ports = get_vulnerable_services(db)
+        return ports
+    except Exception as e:
+        logger.error(f"Failed to retrieve vulnerable ports: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve vulnerable ports: {str(e)}")
+
+@app.get("/api/v1/ports/service/{service}", response_model=List[PortResultResponse])
+async def get_ports_by_service_name(
+    service: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Get all ports running a specific service
+    
+    Search for ports by service name (e.g., 'http', 'ssh', 'mysql').
+    Performs a case-insensitive partial match.
+    """
+    try:
+        ports = get_ports_by_service(service, db)
+        return ports
+    except Exception as e:
+        logger.error(f"Failed to retrieve ports by service: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve ports by service: {str(e)}")
+
+@app.post("/api/v1/ports/scan/subdomains")
+async def scan_subdomain_ports(
+    domain: str = Query(..., description="Domain to scan subdomains for"),
+    ports: str = Query("top-100", description="Port range to scan"),
+    scan_type: str = Query("quick", description="Scan type"),
+    use_nmap: bool = Query(True, description="Use nmap"),
+    use_naabu: bool = Query(True, description="Use naabu"),
+    service_detection: bool = Query(True, description="Enable service detection"),
+    db: Session = Depends(get_db)
+):
+    """
+    Scan ports for all subdomains of a domain
+    
+    Convenience endpoint that:
+    1. Retrieves all subdomains for the specified domain
+    2. Filters for active subdomains only
+    3. Initiates a port scan on all active subdomains
+    """
+    try:
+        from src.models.Subdomain import Subdomain
+        
+        # Get all active subdomains for the domain
+        subdomains = db.query(Subdomain).filter(
+            Subdomain.domain == domain,
+            Subdomain.is_active == True
+        ).all()
+        
+        if not subdomains:
+            raise HTTPException(status_code=404, detail=f"No active subdomains found for domain: {domain}")
+        
+        # Extract targets
+        targets = [sub.full_domain for sub in subdomains]
+        subdomain_ids = [sub.id for sub in subdomains]
+        
+        logger.info(f"Scanning {len(targets)} subdomains for domain: {domain}")
+        
+        # Start port scan
+        result = start_port_scan(
+            targets=targets,
+            ports=ports,
+            scan_type=scan_type,
+            use_nmap=use_nmap,
+            use_masscan=False,  # Don't use masscan for subdomain scans
+            use_naabu=use_naabu,
+            service_detection=service_detection,
+            subdomain_ids=subdomain_ids
+        )
+        
+        return {
+            "message": f"Port scan initiated for {len(targets)} subdomains",
+            "domain": domain,
+            "scan_result": result
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to scan subdomain ports: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to scan subdomain ports: {str(e)}")
+
 # ==================== Statistics Endpoints ====================
 
 @app.get("/api/v1/stats")
@@ -437,12 +790,14 @@ async def get_statistics(db: Session = Depends(get_db)):
     Returns statistics about:
     - Total domains and subdomains
     - Content discoveries
+    - Port scans
     - Scans performed
     - Interesting findings
     """
     try:
         from src.models.Subdomain import Subdomain
         from src.models.ContentDiscovery import ContentDiscovery
+        from src.models.PortScan import PortScan, PortScanSummary
         from sqlalchemy import func
         
         # Subdomain stats
@@ -466,6 +821,25 @@ async def get_statistics(db: Session = Depends(get_db)):
         
         discovery_breakdown = {dtype: count for dtype, count in discovery_types}
         
+        # Port scan stats
+        total_ports = db.query(PortScan).count()
+        open_ports = db.query(PortScan).filter(PortScan.state == 'open').count()
+        unique_targets = db.query(PortScan.target).distinct().count()
+        unique_port_scans = db.query(PortScan.scan_id).distinct().count()
+        vulnerable_services = db.query(PortScan).filter(PortScan.is_vulnerable == True).count()
+        
+        # Service breakdown
+        services = db.query(
+            PortScan.service,
+            func.count(PortScan.id)
+        ).filter(
+            PortScan.service != '',
+            PortScan.service.isnot(None),
+            PortScan.state == 'open'
+        ).group_by(PortScan.service).order_by(func.count(PortScan.id).desc()).limit(10).all()
+        
+        service_breakdown = {service: count for service, count in services}
+        
         return {
             "subdomain_stats": {
                 "total_subdomains": total_subdomains,
@@ -478,6 +852,14 @@ async def get_statistics(db: Session = Depends(get_db)):
                 "interesting_discoveries": interesting_discoveries,
                 "total_scans": unique_content_scans,
                 "discovery_breakdown": discovery_breakdown
+            },
+            "port_scan_stats": {
+                "total_ports_discovered": total_ports,
+                "open_ports": open_ports,
+                "unique_targets": unique_targets,
+                "total_scans": unique_port_scans,
+                "vulnerable_services": vulnerable_services,
+                "top_services": service_breakdown
             }
         }
     except Exception as e:

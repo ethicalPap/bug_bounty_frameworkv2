@@ -47,13 +47,15 @@ def init_db():
     """
     from src.models.Subdomain import Base as SubdomainBase
     from src.models.ContentDiscovery import Base as ContentDiscoveryBase
+    from src.models.PortScan import Base as PortScanBase
     
     # Import all models here to ensure they're registered
     # This ensures all tables are created
     SubdomainBase.metadata.create_all(bind=engine)
     ContentDiscoveryBase.metadata.create_all(bind=engine)
+    PortScanBase.metadata.create_all(bind=engine)
     print("Database tables created successfully!")
-    print("Tables: subdomains, content_discovery, js_endpoints, api_parameters")
+    print("Tables: subdomains, content_discovery, js_endpoints, api_parameters, port_scans, port_scan_summaries")
 
 def drop_db():
     """
@@ -62,7 +64,9 @@ def drop_db():
     """
     from src.models.Subdomain import Base as SubdomainBase
     from src.models.ContentDiscovery import Base as ContentDiscoveryBase
+    from src.models.PortScan import Base as PortScanBase
     
     SubdomainBase.metadata.drop_all(bind=engine)
     ContentDiscoveryBase.metadata.drop_all(bind=engine)
+    PortScanBase.metadata.drop_all(bind=engine)
     print("Database tables dropped!")

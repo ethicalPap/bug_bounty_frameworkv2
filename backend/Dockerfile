@@ -13,6 +13,7 @@ RUN apt-get update && apt-get install -y \
     golang-go \
     chromium \
     chromium-driver \
+    nmap \
     && rm -rf /var/lib/apt/lists/*
 
 # Set up Go environment
@@ -56,6 +57,21 @@ RUN go install -v github.com/projectdiscovery/nuclei/v2/cmd/nuclei@latest
 
 # Install dnsx for DNS enumeration
 RUN go install -v github.com/projectdiscovery/dnsx/cmd/dnsx@latest
+
+# ==================== PORT SCANNING TOOLS ====================
+
+# Nmap is already installed from system dependencies above
+
+# Install masscan
+RUN git clone https://github.com/robertdavidgraham/masscan /opt/masscan \
+    && cd /opt/masscan \
+    && make \
+    && make install \
+    && cd / \
+    && rm -rf /opt/masscan
+
+# Install naabu
+RUN go install -v github.com/projectdiscovery/naabu/v2/cmd/naabu@latest
 
 # ==================== CONTENT DISCOVERY TOOLS ====================
 
