@@ -11,8 +11,8 @@ class ContentDiscovery(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     subdomain_id = Column(Integer, nullable=True, index=True)  # Reference to subdomains table
     target_url = Column(String(1024), nullable=False, index=True)  # Full URL of target
-    discovered_url = Column(String(2048), nullable=False)  # Full discovered URL
-    path = Column(String(2048), nullable=False)  # Just the path part
+    discovered_url = Column(Text, nullable=False)  # Full discovered URL - TEXT type for long URLs
+    path = Column(Text, nullable=False)  # Just the path part - TEXT type for long paths
     status_code = Column(Integer)
     content_length = Column(Integer)
     content_type = Column(String(255))
@@ -39,7 +39,7 @@ class ContentDiscovery(Base):
     )
     
     def __repr__(self):
-        return f"<ContentDiscovery(url='{self.discovered_url}', status={self.status_code}, tool='{self.tool_name}')>"
+        return f"<ContentDiscovery(url='{self.discovered_url[:100]}...', status={self.status_code}, tool='{self.tool_name}')>"
     
     def to_dict(self):
         return {
@@ -74,8 +74,8 @@ class JSEndpoint(Base):
     
     id = Column(Integer, primary_key=True, autoincrement=True)
     content_discovery_id = Column(Integer, ForeignKey('content_discovery.id'), nullable=True)
-    source_url = Column(String(2048), nullable=False, index=True)  # JS file URL
-    endpoint = Column(String(2048), nullable=False)  # Discovered endpoint/API path
+    source_url = Column(Text, nullable=False, index=False)  # JS file URL - changed to TEXT
+    endpoint = Column(Text, nullable=False)  # Discovered endpoint/API path - changed to TEXT
     endpoint_type = Column(String(50))  # api, path, parameter, etc.
     method = Column(String(10))  # GET, POST, etc. if detectable
     confidence = Column(String(20))  # high, medium, low
@@ -84,7 +84,7 @@ class JSEndpoint(Base):
     created_at = Column(DateTime, default=func.now())
     
     def __repr__(self):
-        return f"<JSEndpoint(endpoint='{self.endpoint}', source='{self.source_url}')>"
+        return f"<JSEndpoint(endpoint='{self.endpoint[:100]}...', source='{self.source_url[:100]}...')>"
     
     def to_dict(self):
         return {
@@ -107,7 +107,7 @@ class APIParameter(Base):
     
     id = Column(Integer, primary_key=True, autoincrement=True)
     content_discovery_id = Column(Integer, ForeignKey('content_discovery.id'), nullable=True)
-    target_url = Column(String(2048), nullable=False, index=True)
+    target_url = Column(Text, nullable=False, index=False)  # Changed to TEXT for long URLs
     parameter_name = Column(String(255), nullable=False)
     parameter_type = Column(String(50))  # query, post, json, header, cookie
     example_value = Column(String(512))
@@ -117,7 +117,8 @@ class APIParameter(Base):
     created_at = Column(DateTime, default=func.now())
     
     __table_args__ = (
-        Index('idx_target_param', 'target_url', 'parameter_name'),
+        # Removed index on target_url since TEXT fields can't be indexed efficiently in PostgreSQL
+        Index('idx_param_name_type', 'parameter_name', 'parameter_type'),
     )
     
     def __repr__(self):
