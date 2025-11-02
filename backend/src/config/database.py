@@ -43,19 +43,28 @@ def get_db() -> Generator[Session, None, None]:
 def init_db():
     """
     Initialize database tables.
-    Creates all tables defined in models.
+    Creates all tables defined in models in correct order to handle foreign keys.
     """
-    from src.models.Subdomain import Base as SubdomainBase
-    from src.models.ContentDiscovery import Base as ContentDiscoveryBase
-    from src.models.PortScan import Base as PortScanBase
+    # Import all models to register them with their Base classes
+    from src.models.Subdomain import Base as SubdomainBase, Subdomain
+    from src.models.ContentDiscovery import Base as ContentDiscoveryBase, ContentDiscovery, JSEndpoint, APIParameter
+    from src.models.PortScan import Base as PortScanBase, PortScan, PortScanSummary
     
-    # Import all models here to ensure they're registered
-    # This ensures all tables are created
+    # Create tables in dependency order
+    # 1. First create independent tables (no foreign keys)
     SubdomainBase.metadata.create_all(bind=engine)
+    print("✓ Created: subdomains table")
+    
+    # 2. Then create tables that depend on subdomains
     ContentDiscoveryBase.metadata.create_all(bind=engine)
+    print("✓ Created: content_discovery, js_endpoints, api_parameters tables")
+    
+    # 3. Finally create port scan tables (depends on subdomains)
     PortScanBase.metadata.create_all(bind=engine)
-    print("Database tables created successfully!")
-    print("Tables: subdomains, content_discovery, js_endpoints, api_parameters, port_scans, port_scan_summaries")
+    print("✓ Created: port_scans, port_scan_summaries tables")
+    
+    print("\n✅ Database initialized successfully!")
+    print("Tables created: subdomains, content_discovery, js_endpoints, api_parameters, port_scans, port_scan_summaries")
 
 def drop_db():
     """

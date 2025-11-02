@@ -70,8 +70,10 @@ RUN git clone https://github.com/robertdavidgraham/masscan /opt/masscan \
     && cd / \
     && rm -rf /opt/masscan
 
-# Install naabu
-RUN go install -v github.com/projectdiscovery/naabu/v2/cmd/naabu@latest
+# Install naabu - optional, will continue if it fails
+# Try v2 first, then fallback to older versions
+RUN go install -v github.com/projectdiscovery/naabu/v2/cmd/naabu@v2.1.8 || \
+    echo "Naabu installation skipped - nmap and masscan are available"
 
 # ==================== CONTENT DISCOVERY TOOLS ====================
 

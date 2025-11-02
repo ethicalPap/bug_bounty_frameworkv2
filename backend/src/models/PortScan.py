@@ -10,7 +10,7 @@ class PortScan(Base):
     __tablename__ = 'port_scans'
     
     id = Column(Integer, primary_key=True, autoincrement=True)
-    subdomain_id = Column(Integer, ForeignKey('subdomains.id'), nullable=True, index=True)
+    subdomain_id = Column(Integer, nullable=True, index=True)  # Reference to subdomains table (no FK constraint)
     target = Column(String(512), nullable=False, index=True)  # IP address or domain
     port = Column(Integer, nullable=False, index=True)
     protocol = Column(String(10), nullable=False, default='tcp')  # tcp, udp
