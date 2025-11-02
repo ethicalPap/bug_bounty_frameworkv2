@@ -26,7 +26,8 @@ SessionLocal = sessionmaker(
     bind=engine
 )
 
-# Base class for models
+# SHARED Base class for ALL models
+# This must be imported in all model files instead of creating separate bases
 Base = declarative_base()
 
 def get_db() -> Generator[Session, None, None]:
@@ -43,39 +44,24 @@ def get_db() -> Generator[Session, None, None]:
 def init_db():
     """
     Initialize database tables.
-    Creates all tables defined in models in correct order to handle foreign keys.
+    Creates all tables defined in models using the shared Base.
     """
-    # Import all models to register them with their Base classes
-    from src.models.Subdomain import Base as SubdomainBase, Subdomain
-    from src.models.ContentDiscovery import Base as ContentDiscoveryBase, ContentDiscovery, JSEndpoint, APIParameter
-    from src.models.PortScan import Base as PortScanBase, PortScan, PortScanSummary
+    # Import all models to register them with the shared Base
+    # This ensures all tables are created
+    from src.models import Subdomain, ContentDiscovery, PortScan
     
-    # Create tables in dependency order
-    # 1. First create independent tables (no foreign keys)
-    SubdomainBase.metadata.create_all(bind=engine)
-    print("✓ Created: subdomains table")
-    
-    # 2. Then create tables that depend on subdomains
-    ContentDiscoveryBase.metadata.create_all(bind=engine)
-    print("✓ Created: content_discovery, js_endpoints, api_parameters tables")
-    
-    # 3. Finally create port scan tables (depends on subdomains)
-    PortScanBase.metadata.create_all(bind=engine)
-    print("✓ Created: port_scans, port_scan_summaries tables")
+    # Now create all tables at once using the shared Base
+    Base.metadata.create_all(bind=engine)
     
     print("\n✅ Database initialized successfully!")
-    print("Tables created: subdomains, content_discovery, js_endpoints, api_parameters, port_scans, port_scan_summaries")
+    print("Tables created:")
+    for table_name in Base.metadata.tables.keys():
+        print(f"  ✓ {table_name}")
 
 def drop_db():
     """
     Drop all database tables.
     WARNING: This will delete all data!
     """
-    from src.models.Subdomain import Base as SubdomainBase
-    from src.models.ContentDiscovery import Base as ContentDiscoveryBase
-    from src.models.PortScan import Base as PortScanBase
-    
-    SubdomainBase.metadata.drop_all(bind=engine)
-    ContentDiscoveryBase.metadata.drop_all(bind=engine)
-    PortScanBase.metadata.drop_all(bind=engine)
+    Base.metadata.drop_all(bind=engine)
     print("Database tables dropped!")

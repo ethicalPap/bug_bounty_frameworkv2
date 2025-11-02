@@ -1,9 +1,9 @@
 from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, ForeignKey, Index
-from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.sql import func
 from datetime import datetime
 
-Base = declarative_base()
+# Import the SHARED Base from database config
+from src.config.database import Base
 
 class PortScan(Base):
     """Store port scanning results for subdomains"""
