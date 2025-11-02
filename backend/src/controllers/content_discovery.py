@@ -16,8 +16,8 @@ from requests.packages.urllib3.exceptions import InsecureRequestWarning
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
 
-from src.config.database import get_db, SessionLocal
-from src.models.ContentDiscovery import ContentDiscovery, JSEndpoint, APIParameter
+from database import get_db, SessionLocal
+from ContentDiscovery import ContentDiscovery, JSEndpoint, APIParameter
 
 # Disable SSL warnings
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)

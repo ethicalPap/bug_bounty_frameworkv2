@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 import logging
 import os
 
-from src.config.database import get_db, init_db
+from database import get_db, init_db
 from src.controllers.subdomains import (
     start_subdomain_scan,
     get_subdomains_by_domain,
@@ -739,7 +739,7 @@ async def scan_subdomain_ports(
     3. Initiates a port scan on all active subdomains
     """
     try:
-        from src.models.Subdomain import Subdomain
+        from Subdomain import Subdomain
         
         # Get all active subdomains for the domain
         subdomains = db.query(Subdomain).filter(
@@ -795,9 +795,9 @@ async def get_statistics(db: Session = Depends(get_db)):
     - Interesting findings
     """
     try:
-        from src.models.Subdomain import Subdomain
-        from src.models.ContentDiscovery import ContentDiscovery
-        from src.models.PortScan import PortScan, PortScanSummary
+        from Subdomain import Subdomain
+        from ContentDiscovery import ContentDiscovery
+        from PortScan import PortScan, PortScanSummary
         from sqlalchemy import func
         
         # Subdomain stats

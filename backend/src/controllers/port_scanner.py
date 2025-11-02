@@ -15,9 +15,9 @@ import socket
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
 
-from src.config.database import get_db, SessionLocal
-from src.models.PortScan import PortScan, PortScanSummary
-from src.models.Subdomain import Subdomain
+from database import get_db, SessionLocal
+from PortScan import PortScan, PortScanSummary
+from Subdomain import Subdomain
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)

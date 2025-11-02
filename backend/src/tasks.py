@@ -2,7 +2,7 @@ from celery import shared_task
 import logging
 from typing import Dict
 from src.controllers.subdomains import start_subdomain_scan
-from src.config.database import SessionLocal
+from database import SessionLocal
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +47,7 @@ def check_http(subdomain_id: int) -> Dict:
         Dict with HTTP check results
     """
     import requests
-    from src.models.Subdomain import Subdomain
+    from Subdomain import Subdomain
     
     db = SessionLocal()
     try:
@@ -124,7 +124,7 @@ def cleanup_old_scans(days: int = 30) -> Dict:
         Dict with cleanup results
     """
     from datetime import datetime, timedelta
-    from src.models.Subdomain import Subdomain
+    from Subdomain import Subdomain
     
     db = SessionLocal()
     try:

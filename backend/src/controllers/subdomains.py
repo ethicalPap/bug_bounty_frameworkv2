@@ -15,8 +15,8 @@ from requests.packages.urllib3.exceptions import InsecureRequestWarning
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
 
-from src.config.database import get_db, SessionLocal
-from src.models.Subdomain import Subdomain
+from database import get_db, SessionLocal
+from Subdomain import Subdomain
 
 # Disable SSL warnings
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
