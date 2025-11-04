@@ -1,8 +1,11 @@
 import os
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text, inspect
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 from typing import Generator
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Get database URL from environment variable
 DATABASE_URL = os.getenv(
@@ -44,24 +47,99 @@ def get_db() -> Generator[Session, None, None]:
 def init_db():
     """
     Initialize database tables.
+    Handles fresh builds and recovers from inconsistent states automatically.
     Creates all tables defined in models using the shared Base.
     """
-    # Import all models to register them with the shared Base
-    # This ensures all tables are created
-    from src.models import Subdomain, ContentDiscovery, PortScan
-    
-    # Now create all tables at once using the shared Base
-    Base.metadata.create_all(bind=engine)
-    
-    print("\n✅ Database initialized successfully!")
-    print("Tables created:")
-    for table_name in Base.metadata.tables.keys():
-        print(f"  ✓ {table_name}")
+    try:
+        # Import all models to register them with the shared Base
+        from src.models import Subdomain, ContentDiscovery, JSEndpoint, APIParameter, PortScan
+        
+        logger.info("📦 Importing models...")
+        logger.info("✓ Models imported successfully")
+        
+        # Show registered models
+        logger.info("📋 Registered models:")
+        for table_name in Base.metadata.tables.keys():
+            logger.info(f"  • {table_name}")
+        
+        # Try to create tables
+        logger.info("🏗️  Creating tables...")
+        
+        try:
+            Base.metadata.create_all(bind=engine)
+            
+            # Verify tables were created
+            inspector = inspect(engine)
+            created_tables = inspector.get_table_names()
+            
+            print("\n✅ Database initialized successfully!")
+            print(f"Tables created: {len(created_tables)}")
+            for table_name in created_tables:
+                print(f"  ✓ {table_name}")
+            
+            return True
+            
+        except Exception as create_error:
+            # If creation fails (e.g., orphaned indexes), clean and retry
+            error_str = str(create_error)
+            
+            if "already exists" in error_str or "DuplicateTable" in error_str:
+                logger.warning("⚠️  Found orphaned database objects, cleaning up...")
+                
+                # Drop everything and recreate
+                with engine.connect() as conn:
+                    inspector = inspect(engine)
+                    tables = inspector.get_table_names()
+                    
+                    if tables:
+                        logger.info(f"Dropping {len(tables)} existing tables with CASCADE...")
+                        for table in tables:
+                            conn.execute(text(f'DROP TABLE IF EXISTS "{table}" CASCADE'))
+                            conn.commit()
+                        logger.info("✓ Tables dropped")
+                
+                # Now create fresh tables
+                logger.info("🏗️  Creating fresh tables...")
+                Base.metadata.create_all(bind=engine)
+                
+                # Verify
+                inspector = inspect(engine)
+                created_tables = inspector.get_table_names()
+                
+                print("\n✅ Database initialized successfully (after cleanup)!")
+                print(f"Tables created: {len(created_tables)}")
+                for table_name in created_tables:
+                    print(f"  ✓ {table_name}")
+                
+                return True
+            else:
+                # Different error, re-raise
+                raise
+        
+    except Exception as e:
+        logger.error(f"❌ Error initializing database: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
 
 def drop_db():
     """
     Drop all database tables.
     WARNING: This will delete all data!
     """
-    Base.metadata.drop_all(bind=engine)
-    print("Database tables dropped!")
+    try:
+        logger.info("Dropping all tables...")
+        
+        # Drop with CASCADE to remove all dependencies
+        with engine.connect() as conn:
+            inspector = inspect(engine)
+            tables = inspector.get_table_names()
+            
+            for table in tables:
+                conn.execute(text(f'DROP TABLE IF EXISTS "{table}" CASCADE'))
+                conn.commit()
+        
+        print("✓ Database tables dropped!")
+    except Exception as e:
+        logger.error(f"Error dropping tables: {e}")
+        raise
