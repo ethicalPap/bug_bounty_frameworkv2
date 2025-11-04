@@ -7,8 +7,8 @@ import httpx
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
 
-from database import SessionLocal
-from Subdomain import Subdomain
+from src.config.database import SessionLocal
+from src.models.Subdomain import Subdomain
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)

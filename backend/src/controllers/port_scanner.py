@@ -15,9 +15,9 @@ import socket
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
 
-from database import get_db, SessionLocal
-from PortScan import PortScan, PortScanSummary
-from Subdomain import Subdomain
+from src.config.database import get_db, SessionLocal
+from src.models.PortScan import PortScan
+from src.models.Subdomain import Subdomain
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -36,7 +36,7 @@ COMMON_PORTS = {
 @dataclass
 class PortScanConfig:
     targets: List[str]  # List of IPs or domains to scan
-    ports: str = 'top-100'  # Port range or preset (top-100, top-1000, common-web, etc.)
+    ports: str = 'top-100'  # Port range or preset
     scan_type: str = 'quick'  # quick, full, stealth, udp, comprehensive
     
     # Tool selection
@@ -47,7 +47,7 @@ class PortScanConfig:
     # Nmap options
     nmap_scan_type: str = '-sS'  # -sS (SYN), -sT (Connect), -sU (UDP), -sV (Version)
     nmap_timing: str = 'T4'  # T0-T5 (paranoid to insane)
-    nmap_scripts: Optional[str] = None  # Nmap scripts to run (e.g., 'default', 'vuln')
+    nmap_scripts: Optional[str] = None  # Nmap scripts to run
     service_detection: bool = True
     os_detection: bool = False
     version_intensity: int = 5  # 0-9
@@ -489,49 +489,6 @@ class PortScanner:
         
         return saved_count
     
-    def save_scan_summary(self, tool_results: Dict, status: str = 'completed', 
-                         error_message: Optional[str] = None):
-        """Save scan summary to database"""
-        db = SessionLocal()
-        
-        try:
-            # Calculate statistics
-            open_ports = len([p for p in self.found_ports if p[2] == 'open'])
-            filtered_ports = len([p for p in self.found_ports if p[2] == 'filtered'])
-            closed_ports = len([p for p in self.found_ports if p[2] == 'closed'])
-            
-            # Calculate duration
-            duration = None
-            if self.scan_start_time and self.scan_end_time:
-                duration = int((self.scan_end_time - self.scan_start_time).total_seconds())
-            
-            summary = PortScanSummary(
-                scan_id=self.scan_id,
-                target_count=len(self.config.targets),
-                total_ports_scanned=len(self.found_ports),
-                open_ports=open_ports,
-                closed_ports=closed_ports,
-                filtered_ports=filtered_ports,
-                scan_type=self.config.scan_type,
-                port_range=self.config.ports,
-                tools_used=','.join(tool_results.keys()),
-                scan_duration=duration,
-                status=status,
-                error_message=error_message,
-                completed_at=self.scan_end_time
-            )
-            
-            db.add(summary)
-            db.commit()
-            
-            logger.info(f"Saved scan summary for scan_id: {self.scan_id}")
-            
-        except Exception as e:
-            logger.error(f"Failed to save scan summary: {e}")
-            db.rollback()
-        finally:
-            db.close()
-    
     # ==================== MAIN SCAN ORCHESTRATION ====================
     
     def run_scan(self) -> Dict:
@@ -584,9 +541,6 @@ class PortScanner:
             # Save results to database
             saved_count = self.save_to_database(all_results)
             
-            # Save summary
-            self.save_scan_summary(tool_results, status='completed')
-            
             scan_summary = {
                 'scan_id': self.scan_id,
                 'targets': self.config.targets,
@@ -611,7 +565,6 @@ class PortScanner:
         except Exception as e:
             self.scan_end_time = datetime.utcnow()
             logger.error(f"Port scan failed: {e}")
-            self.save_scan_summary(tool_results, status='failed', error_message=str(e))
             raise
 
 
@@ -646,14 +599,6 @@ def get_ports_by_scan(scan_id: str, db: Session) -> List[Dict]:
     ).order_by(PortScan.target, PortScan.port).all()
     
     return [result.to_dict() for result in results]
-
-def get_scan_summary(scan_id: str, db: Session) -> Optional[Dict]:
-    """Get summary for a specific scan"""
-    summary = db.query(PortScanSummary).filter(
-        PortScanSummary.scan_id == scan_id
-    ).first()
-    
-    return summary.to_dict() if summary else None
 
 def get_open_ports(db: Session, limit: int = 100) -> List[Dict]:
     """Get all open ports across all scans"""
