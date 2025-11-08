@@ -44,6 +44,60 @@ def get_db() -> Generator[Session, None, None]:
     finally:
         db.close()
 
+def drop_all_indexes_and_constraints(conn):
+    """Drop all indexes and constraints to ensure clean slate"""
+    logger.info("🧹 Dropping all indexes and constraints...")
+    
+    try:
+        # Get all indexes except primary key indexes
+        result = conn.execute(text("""
+            SELECT indexname 
+            FROM pg_indexes 
+            WHERE schemaname = 'public' 
+            AND indexname NOT LIKE '%_pkey'
+        """))
+        
+        indexes = [row[0] for row in result]
+        for index_name in indexes:
+            try:
+                conn.execute(text(f'DROP INDEX IF EXISTS "{index_name}" CASCADE'))
+                logger.debug(f"  Dropped index: {index_name}")
+            except Exception as e:
+                logger.warning(f"  Could not drop index {index_name}: {e}")
+        
+        conn.commit()
+        logger.info(f"  ✓ Dropped {len(indexes)} indexes")
+        
+    except Exception as e:
+        logger.error(f"Error dropping indexes: {e}")
+        conn.rollback()
+
+def drop_all_tables(conn):
+    """Drop all tables with CASCADE"""
+    logger.info("🗑️  Dropping all tables...")
+    
+    try:
+        inspector = inspect(engine)
+        tables = inspector.get_table_names()
+        
+        if tables:
+            logger.info(f"  Found {len(tables)} tables to drop")
+            for table in tables:
+                try:
+                    conn.execute(text(f'DROP TABLE IF EXISTS "{table}" CASCADE'))
+                    logger.debug(f"  Dropped table: {table}")
+                except Exception as e:
+                    logger.warning(f"  Could not drop table {table}: {e}")
+            
+            conn.commit()
+            logger.info("  ✓ All tables dropped")
+        else:
+            logger.info("  No tables to drop")
+            
+    except Exception as e:
+        logger.error(f"Error dropping tables: {e}")
+        conn.rollback()
+
 def init_db():
     """
     Initialize database tables.
@@ -52,9 +106,9 @@ def init_db():
     """
     try:
         # Import all models to register them with the shared Base
+        logger.info("📦 Importing models...")
         from src.models import Subdomain, ContentDiscovery, JSEndpoint, APIParameter, PortScan
         
-        logger.info("📦 Importing models...")
         logger.info("✓ Models imported successfully")
         
         # Show registered models
@@ -62,13 +116,83 @@ def init_db():
         for table_name in Base.metadata.tables.keys():
             logger.info(f"  • {table_name}")
         
-        # Try to create tables
-        logger.info("🏗️  Creating tables...")
+        # Check if tables already exist
+        inspector = inspect(engine)
+        existing_tables = inspector.get_table_names()
         
-        try:
+        # If tables exist, check for orphaned objects
+        if existing_tables:
+            logger.info(f"⚠️  Found {len(existing_tables)} existing tables")
+            
+            # Try to create tables (will fail if there are conflicts)
+            logger.info("🏗️  Attempting to create/update tables...")
+            try:
+                Base.metadata.create_all(bind=engine)
+                
+                # Verify tables were created/updated
+                inspector = inspect(engine)
+                created_tables = inspector.get_table_names()
+                
+                print("\n✅ Database initialized successfully!")
+                print(f"Tables ready: {len(created_tables)}")
+                for table_name in created_tables:
+                    print(f"  ✓ {table_name}")
+                
+                return True
+                
+            except Exception as create_error:
+                error_str = str(create_error).lower()
+                
+                # Check if it's a duplicate/orphaned object error
+                if any(keyword in error_str for keyword in [
+                    'already exists', 
+                    'duplicatetable', 
+                    'duplicateobject',
+                    'relation', 
+                    'index'
+                ]):
+                    logger.warning("⚠️  Found orphaned database objects, performing deep cleanup...")
+                    
+                    # Perform comprehensive cleanup
+                    with engine.connect() as conn:
+                        # Drop all indexes first
+                        drop_all_indexes_and_constraints(conn)
+                        
+                        # Drop all tables
+                        drop_all_tables(conn)
+                        
+                        # Verify cleanup
+                        inspector = inspect(engine)
+                        remaining_tables = inspector.get_table_names()
+                        
+                        if remaining_tables:
+                            logger.error(f"❌ Tables still exist after cleanup: {remaining_tables}")
+                            raise Exception("Failed to clean up all tables")
+                    
+                    # Now create fresh tables
+                    logger.info("🏗️  Creating fresh database schema...")
+                    Base.metadata.create_all(bind=engine)
+                    
+                    # Verify
+                    inspector = inspect(engine)
+                    created_tables = inspector.get_table_names()
+                    
+                    print("\n✅ Database initialized successfully (after cleanup)!")
+                    print(f"Tables created: {len(created_tables)}")
+                    for table_name in created_tables:
+                        print(f"  ✓ {table_name}")
+                    
+                    return True
+                else:
+                    # Different error, re-raise
+                    raise
+        
+        else:
+            # No existing tables, create fresh
+            logger.info("🏗️  Creating fresh database schema...")
             Base.metadata.create_all(bind=engine)
             
-            # Verify tables were created
+            # Verify
             inspector = inspect(engine)
             created_tables = inspector.get_table_names()
             
@@ -78,43 +202,6 @@ def init_db():
                 print(f"  ✓ {table_name}")
             
             return True
-            
-        except Exception as create_error:
-            # If creation fails (e.g., orphaned indexes), clean and retry
-            error_str = str(create_error)
-            
-            if "already exists" in error_str or "DuplicateTable" in error_str:
-                logger.warning("⚠️  Found orphaned database objects, cleaning up...")
-                
-                # Drop everything and recreate
-                with engine.connect() as conn:
-                    inspector = inspect(engine)
-                    tables = inspector.get_table_names()
-                    
-                    if tables:
-                        logger.info(f"Dropping {len(tables)} existing tables with CASCADE...")
-                        for table in tables:
-                            conn.execute(text(f'DROP TABLE IF EXISTS "{table}" CASCADE'))
-                            conn.commit()
-                        logger.info("✓ Tables dropped")
-                
-                # Now create fresh tables
-                logger.info("🏗️  Creating fresh tables...")
-                Base.metadata.create_all(bind=engine)
-                
-                # Verify
-                inspector = inspect(engine)
-                created_tables = inspector.get_table_names()
-                
-                print("\n✅ Database initialized successfully (after cleanup)!")
-                print(f"Tables created: {len(created_tables)}")
-                for table_name in created_tables:
-                    print(f"  ✓ {table_name}")
-                
-                return True
-            else:
-                # Different error, re-raise
-                raise
         
     except Exception as e:
         logger.error(f"❌ Error initializing database: {e}")
@@ -124,22 +211,45 @@ def init_db():
 
 def drop_db():
     """
-    Drop all database tables.
+    Drop all database tables and indexes.
     WARNING: This will delete all data!
     """
     try:
-        logger.info("Dropping all tables...")
+        logger.info("Dropping entire database schema...")
         
-        # Drop with CASCADE to remove all dependencies
         with engine.connect() as conn:
-            inspector = inspect(engine)
-            tables = inspector.get_table_names()
+            # Drop all indexes first
+            drop_all_indexes_and_constraints(conn)
             
-            for table in tables:
-                conn.execute(text(f'DROP TABLE IF EXISTS "{table}" CASCADE'))
-                conn.commit()
+            # Drop all tables
+            drop_all_tables(conn)
         
-        print("✓ Database tables dropped!")
+        print("✓ Database schema dropped completely!")
+        
     except Exception as e:
-        logger.error(f"Error dropping tables: {e}")
+        logger.error(f"Error dropping database: {e}")
+        raise
+
+def reset_db():
+    """
+    Complete database reset: drop everything and recreate.
+    WARNING: This will delete all data!
+    """
+    logger.info("=" * 70)
+    logger.info("DATABASE RESET")
+    logger.info("=" * 70)
+    
+    try:
+        # Drop everything
+        drop_db()
+        
+        # Recreate
+        init_db()
+        
+        logger.info("=" * 70)
+        logger.info("DATABASE RESET COMPLETE!")
+        logger.info("=" * 70)
+        
+    except Exception as e:
+        logger.error(f"Database reset failed: {e}")
         raise

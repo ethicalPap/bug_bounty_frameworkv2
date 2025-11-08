@@ -30,12 +30,12 @@ class PortScan(Base):
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
     
-    # Create composite indexes for common queries
+    # Create composite indexes for common queries with UNIQUE names
     __table_args__ = (
-        Index('idx_target_port', 'target', 'port'),
-        Index('idx_target_state', 'target', 'state'),
-        Index('idx_scan_tool', 'scan_id', 'tool_name'),
-        Index('idx_port_state', 'port', 'state'),
+        Index('idx_port_target_port', 'target', 'port'),  # RENAMED with port_ prefix
+        Index('idx_port_target_state', 'target', 'state'),  # RENAMED with port_ prefix
+        Index('idx_port_scan_tool', 'scan_id', 'tool_name'),  # RENAMED with port_ prefix (was idx_scan_tool)
+        Index('idx_port_port_state', 'port', 'state'),  # RENAMED with port_ prefix
     )
     
     def __repr__(self):

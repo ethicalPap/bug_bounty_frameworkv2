@@ -31,11 +31,11 @@ class ContentDiscovery(Base):
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
     
-    # Create composite indexes for common queries
+    # Create composite indexes for common queries with UNIQUE names
     __table_args__ = (
-        Index('idx_target_discovery_type', 'target_url', 'discovery_type'),
-        Index('idx_scan_tool', 'scan_id', 'tool_name'),
-        Index('idx_status_interesting', 'status_code', 'is_interesting'),
+        Index('idx_content_target_discovery_type', 'target_url', 'discovery_type'),
+        Index('idx_content_scan_tool', 'scan_id', 'tool_name'),  # RENAMED from idx_scan_tool
+        Index('idx_content_status_interesting', 'status_code', 'is_interesting'),
     )
     
     def __repr__(self):
@@ -118,7 +118,7 @@ class APIParameter(Base):
     
     __table_args__ = (
         # Removed index on target_url since TEXT fields can't be indexed efficiently in PostgreSQL
-        Index('idx_param_name_type', 'parameter_name', 'parameter_type'),
+        Index('idx_api_param_name_type', 'parameter_name', 'parameter_type'),  # RENAMED with api_ prefix
     )
     
     def __repr__(self):
