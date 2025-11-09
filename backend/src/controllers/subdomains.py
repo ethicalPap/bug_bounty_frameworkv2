@@ -13,7 +13,7 @@ from datetime import datetime
 import requests
 from requests.packages.urllib3.exceptions import InsecureRequestWarning
 from sqlalchemy.orm import Session
-from sqlalchemy import and_
+from sqlalchemy import and_, func  # ✅ FIXED: Import func from sqlalchemy
 from src.config.database import get_db, SessionLocal
 from src.models import Subdomain
 
@@ -278,12 +278,12 @@ class SubdomainScanner:
         """Remove duplicate subdomains from database"""
         logger.info("Deduplicating subdomains in database...")
         
-        # Find duplicates based on full_domain
+        # ✅ FIXED: Use func from sqlalchemy import instead of db.func
         duplicates = db.query(Subdomain).filter(
             Subdomain.full_domain.in_(
                 db.query(Subdomain.full_domain)
                 .group_by(Subdomain.full_domain)
-                .having(db.func.count(Subdomain.id) > 1)
+                .having(func.count(Subdomain.id) > 1)  # ✅ FIXED
             )
         ).all()
         
