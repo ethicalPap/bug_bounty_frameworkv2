@@ -1,93 +1,233 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { startSubdomainScan, getSubdomains } from '../../api/client'
 import { Globe, Play, CheckCircle, XCircle, ExternalLink, Loader, Download, Copy, RefreshCw, AlertTriangle, X } from 'lucide-react'
 
+// LocalStorage keys
+const STORAGE_KEYS = {
+  LAST_SCAN_DOMAIN: 'subdomain_scanner_last_domain',
+  SCAN_CONFIG: 'subdomain_scanner_config',
+  FILTER_STATE: 'subdomain_scanner_filter',
+  IS_SCANNING: 'subdomain_scanner_is_scanning',
+}
+
 const SubdomainScanner = () => {
-  const [domain, setDomain] = useState('')
-  const [scanConfig, setScanConfig] = useState({
-    use_subfinder: true,
-    use_sublist3r: true,
-    use_amass: true,
-    use_assetfinder: true,
-    use_findomain: true,
-    use_chaos: false,
+  // Load persisted state from localStorage
+  const [domain, setDomain] = useState(() => {
+    return localStorage.getItem(STORAGE_KEYS.LAST_SCAN_DOMAIN) || ''
   })
-  const [lastScanDomain, setLastScanDomain] = useState(null)
-  const [filterActive, setFilterActive] = useState('all') // all, active, inactive
-  const [searchTerm, setSearchTerm] = useState('')
+  
+  const [scanConfig, setScanConfig] = useState(() => {
+    const saved = localStorage.getItem(STORAGE_KEYS.SCAN_CONFIG)
+    return saved ? JSON.parse(saved) : {
+      use_subfinder: true,
+      use_sublist3r: true,
+      use_amass: true,
+      use_assetfinder: true,
+      use_findomain: true,
+      use_chaos: false,
+    }
+  })
+  
+  const [lastScanDomain, setLastScanDomain] = useState(() => {
+    return localStorage.getItem(STORAGE_KEYS.LAST_SCAN_DOMAIN) || null
+  })
+  
+  const [filterActive, setFilterActive] = useState(() => {
+    const saved = localStorage.getItem(STORAGE_KEYS.FILTER_STATE)
+    return saved ? JSON.parse(saved).filterActive : 'all'
+  })
+  
+  const [searchTerm, setSearchTerm] = useState(() => {
+    const saved = localStorage.getItem(STORAGE_KEYS.FILTER_STATE)
+    return saved ? JSON.parse(saved).searchTerm : ''
+  })
+  
   const [scanProgress, setScanProgress] = useState(0)
   const [scanningTools, setScanningTools] = useState([])
   const [completedTools, setCompletedTools] = useState([])
   const [isCancelled, setIsCancelled] = useState(false)
+  const [dataRestoredFromCache, setDataRestoredFromCache] = useState(false)
+  
+  const [isScanning, setIsScanning] = useState(() => {
+    // Don't restore scanning state - always start fresh
+    return false
+  })
 
   const queryClient = useQueryClient()
+  const progressIntervalRef = useRef(null)
+  const hasCheckedCache = useRef(false)
 
-  // Calculate progress based on enabled tools
-  const enabledTools = Object.entries(scanConfig).filter(([_, enabled]) => enabled).map(([tool]) => tool)
+  // Persist state changes to localStorage
+  useEffect(() => {
+    if (lastScanDomain) {
+      localStorage.setItem(STORAGE_KEYS.LAST_SCAN_DOMAIN, lastScanDomain)
+    }
+  }, [lastScanDomain])
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEYS.SCAN_CONFIG, JSON.stringify(scanConfig))
+  }, [scanConfig])
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEYS.FILTER_STATE, JSON.stringify({
+      filterActive,
+      searchTerm
+    }))
+  }, [filterActive, searchTerm])
+
+  // Memoize enabled tools to prevent infinite re-renders
+  const enabledTools = useMemo(() => 
+    Object.entries(scanConfig).filter(([_, enabled]) => enabled).map(([tool]) => tool),
+    [scanConfig]
+  )
+  
   const totalTools = enabledTools.length
 
-  // Simulate progress during scan
+  // Check if we have cached data on mount
   useEffect(() => {
-    if (scanMutation.isLoading && !isCancelled) {
-      setScanningTools(enabledTools)
-      setCompletedTools([])
-      
-      // Simulate tool completion
-      const interval = setInterval(() => {
-        setScanProgress((prev) => {
-          if (prev >= 95) return prev // Cap at 95% until actual completion
-          return prev + (100 / totalTools / 10) // Gradual progress
-        })
-
-        // Simulate tools completing
-        setCompletedTools((prev) => {
-          if (prev.length < totalTools) {
-            const nextTool = enabledTools[prev.length]
-            return [...prev, nextTool]
-          }
-          return prev
-        })
-      }, 3000) // Update every 3 seconds
-
-      return () => clearInterval(interval)
-    } else if (scanMutation.isSuccess) {
-      setScanProgress(100)
-      setCompletedTools(enabledTools)
-    } else if (!scanMutation.isLoading) {
-      setScanProgress(0)
-      setScanningTools([])
-      setCompletedTools([])
+    if (!hasCheckedCache.current && lastScanDomain) {
+      // Check if React Query has cached data for this domain
+      const cachedData = queryClient.getQueryData(['subdomains', lastScanDomain])
+      if (cachedData?.data && cachedData.data.length > 0) {
+        console.log('✅ Found cached data for:', lastScanDomain, '- Count:', cachedData.data.length)
+        setDataRestoredFromCache(true)
+      } else {
+        console.log('⚠️ No cached data found for:', lastScanDomain, '- Will fetch from backend')
+      }
+      hasCheckedCache.current = true
     }
-  }, [scanMutation.isLoading, scanMutation.isSuccess, totalTools, enabledTools, isCancelled])
+  }, [lastScanDomain, queryClient])
 
   // Mutation for starting scan
   const scanMutation = useMutation({
     mutationFn: startSubdomainScan,
     onSuccess: (data) => {
       setLastScanDomain(domain)
-      setScanProgress(100)
-      setIsCancelled(false)
+      // Don't set isScanning to false here - let the results query handle it
       console.log('Scan started:', data.data)
     },
     onError: (error) => {
       console.error('Scan failed:', error)
       setScanProgress(0)
       setIsCancelled(false)
+      setIsScanning(false) // Stop scanning on error
+      
+      // Clear the interval on error
+      if (progressIntervalRef.current) {
+        clearInterval(progressIntervalRef.current)
+        progressIntervalRef.current = null
+      }
     },
   })
 
+  // Handle progress simulation - cleaner approach
+  useEffect(() => {
+    // Clean up interval on unmount
+    return () => {
+      if (progressIntervalRef.current) {
+        clearInterval(progressIntervalRef.current)
+      }
+    }
+  }, [])
+
+  // Start progress when scan begins
+  useEffect(() => {
+    if ((scanMutation.isLoading || isScanning) && !isCancelled) {
+      // Initialize scanning state
+      setScanningTools(enabledTools)
+      setCompletedTools([])
+      
+      // Clear any existing interval
+      if (progressIntervalRef.current) {
+        clearInterval(progressIntervalRef.current)
+      }
+      
+      // Start progress simulation
+      let currentProgress = scanProgress || 0
+      let toolsCompleted = completedTools.length
+      
+      progressIntervalRef.current = setInterval(() => {
+        // Update progress
+        currentProgress = Math.min(currentProgress + (100 / totalTools / 10), 95)
+        setScanProgress(currentProgress)
+
+        // Simulate tools completing
+        if (toolsCompleted < totalTools && currentProgress > (toolsCompleted + 1) * (95 / totalTools)) {
+          toolsCompleted++
+          setCompletedTools(prev => [...prev, enabledTools[toolsCompleted - 1]])
+        }
+      }, 3000)
+    } else {
+      // Clear interval when not loading
+      if (progressIntervalRef.current) {
+        clearInterval(progressIntervalRef.current)
+        progressIntervalRef.current = null
+      }
+      
+      if (!isScanning && !scanMutation.isLoading && !isCancelled) {
+        setScanProgress(0)
+        setScanningTools([])
+        setCompletedTools([])
+      }
+    }
+  }, [scanMutation.isLoading, isScanning, isCancelled])
+
   // Query for fetching results
-  const { data: subdomains, isLoading: isLoadingResults, refetch } = useQuery({
+  const { data: subdomains, isLoading: isLoadingResults, refetch, dataUpdatedAt, isFetching } = useQuery({
     queryKey: ['subdomains', lastScanDomain],
     queryFn: () => getSubdomains(lastScanDomain),
     enabled: !!lastScanDomain && !isCancelled,
-    refetchInterval: scanMutation.isLoading ? 3000 : false,
+    refetchInterval: isScanning ? 3000 : false, // Keep polling while scanning
+    refetchOnMount: false, // Don't refetch when component remounts
+    refetchOnWindowFocus: false, // Don't refetch when window regains focus
+    refetchOnReconnect: false, // Don't refetch on network reconnect
+    staleTime: Infinity, // Data never becomes stale
+    cacheTime: 1000 * 60 * 60 * 24, // Keep in cache for 24 hours
+    keepPreviousData: true, // Keep showing old data while fetching new
+    onSuccess: (data) => {
+      console.log('📥 Query onSuccess called:', {
+        hasData: !!data?.data,
+        count: data?.data?.length || 0,
+        isScanning,
+        domain: lastScanDomain
+      })
+      
+      // Check if we have results
+      if (data?.data && data.data.length > 0 && isScanning) {
+        // Results received! Complete the scan
+        console.log('✅ Scan complete! Found', data.data.length, 'subdomains')
+        setScanProgress(100)
+        setCompletedTools(enabledTools)
+        setIsScanning(false)
+        setDataRestoredFromCache(false)
+        
+        // Clear interval
+        if (progressIntervalRef.current) {
+          clearInterval(progressIntervalRef.current)
+          progressIntervalRef.current = null
+        }
+      } else if (data?.data && data.data.length > 0 && !isScanning && !isFetching) {
+        // Data was restored from cache or localStorage
+        console.log('🎉 Data restored from cache:', data.data.length, 'subdomains')
+        setDataRestoredFromCache(true)
+      }
+    },
+    onError: (error) => {
+      console.error('❌ Query error:', error)
+    }
   })
+
+  // Reset cache indicator when starting new scan
+  useEffect(() => {
+    if (isScanning) {
+      setDataRestoredFromCache(false)
+    }
+  }, [isScanning])
 
   const handleSubmit = (e) => {
     e.preventDefault()
-    if (!domain.trim()) return
+    if (!domain.trim() || isScanning) return // Prevent multiple submissions
 
     // Clear previous results
     setLastScanDomain(null)
@@ -95,6 +235,7 @@ const SubdomainScanner = () => {
     setFilterActive('all')
     setScanProgress(0)
     setIsCancelled(false)
+    setIsScanning(true) // Start scanning
 
     // Start scan
     scanMutation.mutate({
@@ -105,12 +246,36 @@ const SubdomainScanner = () => {
 
   const handleCancel = () => {
     setIsCancelled(true)
+    setIsScanning(false)
     setScanProgress(0)
     setScanningTools([])
     setCompletedTools([])
-    // Note: This doesn't actually cancel the backend scan
-    // In production, you'd need to implement actual cancellation via API
+    
+    // Clear interval
+    if (progressIntervalRef.current) {
+      clearInterval(progressIntervalRef.current)
+      progressIntervalRef.current = null
+    }
+    
+    // Cancel queries
     queryClient.cancelQueries(['subdomains', domain])
+  }
+
+  const clearResults = () => {
+    // Clear all state
+    setLastScanDomain(null)
+    setSearchTerm('')
+    setFilterActive('all')
+    setScanProgress(0)
+    setIsCancelled(false)
+    setIsScanning(false)
+    
+    // Clear localStorage
+    localStorage.removeItem(STORAGE_KEYS.LAST_SCAN_DOMAIN)
+    localStorage.removeItem(STORAGE_KEYS.FILTER_STATE)
+    
+    // Clear query cache
+    queryClient.removeQueries(['subdomains'])
   }
 
   const results = subdomains?.data || []
@@ -208,6 +373,14 @@ const SubdomainScanner = () => {
               <RefreshCw size={16} />
               Refresh
             </button>
+            <button
+              onClick={clearResults}
+              className="flex items-center gap-2 px-4 py-2 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 hover:bg-red-500/20 transition-all"
+              title="Clear all results and start fresh"
+            >
+              <X size={16} />
+              Clear
+            </button>
           </div>
         )}
       </div>
@@ -225,8 +398,9 @@ const SubdomainScanner = () => {
               value={domain}
               onChange={(e) => setDomain(e.target.value)}
               placeholder="example.com"
-              className="w-full px-4 py-3 bg-dark-200 border border-dark-50 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-cyber-blue transition-all"
-              disabled={scanMutation.isLoading}
+              className="w-full px-4 py-3 bg-dark-200 border border-dark-50 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-cyber-blue transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled={isScanning || scanMutation.isLoading}
+              readOnly={isScanning || scanMutation.isLoading}
             />
           </div>
 
@@ -239,7 +413,11 @@ const SubdomainScanner = () => {
               {Object.keys(scanConfig).map((tool) => (
                 <label
                   key={tool}
-                  className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-all ${
+                  className={`flex items-center gap-3 p-3 rounded-lg border transition-all ${
+                    isScanning || scanMutation.isLoading
+                      ? 'opacity-50 cursor-not-allowed' 
+                      : 'cursor-pointer'
+                  } ${
                     scanConfig[tool]
                       ? 'bg-cyber-blue/10 border-cyber-blue'
                       : 'bg-dark-200 border-dark-50 hover:border-gray-600'
@@ -249,8 +427,8 @@ const SubdomainScanner = () => {
                     type="checkbox"
                     checked={scanConfig[tool]}
                     onChange={(e) => setScanConfig({ ...scanConfig, [tool]: e.target.checked })}
-                    className="w-4 h-4 text-cyber-blue bg-dark-200 border-gray-600 rounded focus:ring-cyber-blue"
-                    disabled={scanMutation.isLoading}
+                    className="w-4 h-4 text-cyber-blue bg-dark-200 border-gray-600 rounded focus:ring-cyber-blue disabled:opacity-50 disabled:cursor-not-allowed"
+                    disabled={isScanning || scanMutation.isLoading}
                   />
                   <span className="text-sm text-white capitalize">
                     {tool.replace('use_', '').replace('_', ' ')}
@@ -258,46 +436,55 @@ const SubdomainScanner = () => {
                 </label>
               ))}
             </div>
-            <p className="text-xs text-gray-500 mt-2">
-              💡 Tip: Enable multiple tools for better coverage
-            </p>
+            {isScanning || scanMutation.isLoading ? (
+              <p className="text-xs text-orange-400 mt-2 flex items-center gap-2">
+                <Loader className="animate-spin" size={12} />
+                Scan in progress - settings locked
+              </p>
+            ) : (
+              <p className="text-xs text-gray-500 mt-2">
+                💡 Tip: Enable multiple tools for better coverage
+              </p>
+            )}
           </div>
 
           {/* Submit/Cancel Buttons */}
           <div className="flex gap-3">
-            <button
-              type="submit"
-              disabled={scanMutation.isLoading || !domain.trim() || totalTools === 0}
-              className="flex-1 py-3 px-6 bg-gradient-to-r from-cyber-blue to-cyber-purple rounded-lg font-medium text-white hover:from-cyber-blue/90 hover:to-cyber-purple/90 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2"
-            >
-              {scanMutation.isLoading ? (
-                <>
+            {!isScanning && !scanMutation.isLoading ? (
+              <button
+                type="submit"
+                disabled={!domain.trim() || totalTools === 0}
+                className="w-full py-3 px-6 bg-gradient-to-r from-cyber-blue to-cyber-purple rounded-lg font-medium text-white hover:from-cyber-blue/90 hover:to-cyber-purple/90 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2"
+              >
+                <Play size={20} />
+                Start Scan
+              </button>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  disabled
+                  className="flex-1 py-3 px-6 bg-gradient-to-r from-cyber-blue to-cyber-purple rounded-lg font-medium text-white opacity-75 cursor-not-allowed transition-all flex items-center justify-center gap-2"
+                >
                   <Loader className="animate-spin" size={20} />
                   Scanning... {scanProgress.toFixed(0)}%
-                </>
-              ) : (
-                <>
-                  <Play size={20} />
-                  Start Scan
-                </>
-              )}
-            </button>
-            
-            {scanMutation.isLoading && (
-              <button
-                type="button"
-                onClick={handleCancel}
-                className="px-6 py-3 bg-red-500/10 border border-red-500/30 rounded-lg font-medium text-red-400 hover:bg-red-500/20 transition-all flex items-center gap-2"
-              >
-                <X size={20} />
-                Cancel
-              </button>
+                </button>
+                
+                <button
+                  type="button"
+                  onClick={handleCancel}
+                  className="px-6 py-3 bg-red-500/10 border border-red-500/30 rounded-lg font-medium text-red-400 hover:bg-red-500/20 transition-all flex items-center gap-2 whitespace-nowrap"
+                >
+                  <X size={20} />
+                  Cancel Scan
+                </button>
+              </>
             )}
           </div>
         </form>
 
         {/* Progress Bar */}
-        {scanMutation.isLoading && !isCancelled && (
+        {(isScanning || scanMutation.isLoading) && !isCancelled && (
           <div className="mt-6 space-y-4">
             {/* Progress Bar */}
             <div>
@@ -365,7 +552,7 @@ const SubdomainScanner = () => {
         )}
 
         {/* Scan Status Messages */}
-        {scanMutation.isSuccess && !scanMutation.isLoading && (
+        {!isScanning && scanMutation.isSuccess && !scanMutation.isLoading && (
           <div className="mt-4 p-4 bg-green-500/10 border border-green-500/30 rounded-lg flex items-start gap-3">
             <CheckCircle className="text-green-400 flex-shrink-0 mt-0.5" size={20} />
             <div>
@@ -402,9 +589,30 @@ const SubdomainScanner = () => {
         )}
       </div>
 
-      {/* Results Section (same as before) */}
+      {/* Results Section */}
       {lastScanDomain && (
         <div className="bg-dark-100 border border-dark-50 rounded-xl p-6">
+          {/* Persistence Indicator */}
+          {results.length > 0 && !isScanning && dataRestoredFromCache && (
+            <div className="mb-4 p-3 bg-cyber-purple/10 border border-cyber-purple/30 rounded-lg flex items-center gap-3">
+              <CheckCircle className="text-cyber-purple flex-shrink-0" size={20} />
+              <div className="flex-1">
+                <p className="text-sm text-white font-medium">
+                  🎉 Results restored from cache
+                </p>
+                <p className="text-xs text-gray-400 mt-1">
+                  Last scanned: {lastScanDomain} • {results.length.toLocaleString()} subdomains • Data persists across navigation
+                </p>
+              </div>
+              <button
+                onClick={clearResults}
+                className="text-xs text-gray-400 hover:text-white transition-colors"
+              >
+                Clear
+              </button>
+            </div>
+          )}
+          
           {/* Results Header with Filters */}
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
             <div>
@@ -599,17 +807,5 @@ const SubdomainScanner = () => {
     </div>
   )
 }
-
-// Add shimmer animation to index.css
-const shimmerKeyframes = `
-@keyframes shimmer {
-  0% {
-    transform: translateX(-100%);
-  }
-  100% {
-    transform: translateX(100%);
-  }
-}
-`
 
 export default SubdomainScanner

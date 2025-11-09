@@ -8,8 +8,12 @@ import './index.css'
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      refetchOnWindowFocus: false,
+      refetchOnWindowFocus: false, // Don't refetch when window regains focus
+      refetchOnMount: false, // Don't refetch when component remounts
+      refetchOnReconnect: false, // Don't refetch on network reconnect
       retry: 1,
+      staleTime: 1000 * 60 * 5, // Data is fresh for 5 minutes
+      cacheTime: 1000 * 60 * 60, // Keep unused data in cache for 1 hour
     },
   },
 })
