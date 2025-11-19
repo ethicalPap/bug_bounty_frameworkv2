@@ -6,6 +6,7 @@ import LiveHosts from './pages/LiveHosts/LiveHosts'
 import ContentDiscovery from './pages/ContentDiscovery/ContentDiscovery'
 import PortScanner from './pages/PortScanner/PortScanner'
 import History from './pages/History/History'
+import Visualization from './pages/Visualization/Visualization'
 
 function App() {
   return (
@@ -16,6 +17,7 @@ function App() {
         <Route path="live-hosts" element={<LiveHosts />} />
         <Route path="content-discovery" element={<ContentDiscovery />} />
         <Route path="port-scanner" element={<PortScanner />} />
+        <Route path="visualization" element={<Visualization />} /> 
         <Route path="history" element={<History />} />
       </Route>
     </Routes>

@@ -32,6 +32,13 @@ from src.controllers.port_scanner import (
     get_vulnerable_services,
     get_ports_by_service
 )
+from src.controllers.visualization import (
+    get_domain_visualization_data,
+    get_technology_breakdown,
+    get_service_breakdown,
+    get_endpoint_tree,
+    get_attack_surface_summary
+)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -208,13 +215,15 @@ async def root():
             "subdomain_enumeration",
             "content_discovery",
             "port_scanning",
-            "vulnerability_scanning"
+            "vulnerability_scanning",
+            "visualization"
         ],
         "endpoints": {
             "health": "/health",
             "subdomain_scan": "/api/v1/scan",
             "content_discovery": "/api/v1/content/scan",
             "port_scan": "/api/v1/ports/scan",
+            "visualization": "/api/v1/visualization/{domain}",
             "docs": "/docs"
         }
     }
@@ -354,6 +363,73 @@ async def create_content_discovery(
     except Exception as e:
         logger.error(f"Content discovery failed: {e}")
         raise HTTPException(status_code=500, detail=f"Content discovery failed: {str(e)}")
+
+# ==================== Visualization Endpoints ====================
+
+@app.get("/api/v1/visualization/{domain}")
+async def get_visualization_data(
+    domain: str,
+    db: Session = Depends(get_db)
+):
+    """Get comprehensive visualization data for network graph"""
+    try:
+        data = get_domain_visualization_data(domain, db)
+        return data
+    except Exception as e:
+        logger.error(f"Failed to get visualization data: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get visualization data: {str(e)}")
+
+@app.get("/api/v1/visualization/{domain}/technology")
+async def get_tech_breakdown(
+    domain: str,
+    db: Session = Depends(get_db)
+):
+    """Get technology breakdown for visualization"""
+    try:
+        data = get_technology_breakdown(domain, db)
+        return data
+    except Exception as e:
+        logger.error(f"Failed to get technology breakdown: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get technology breakdown: {str(e)}")
+
+@app.get("/api/v1/visualization/{domain}/services")
+async def get_services_breakdown(
+    domain: str,
+    db: Session = Depends(get_db)
+):
+    """Get service/port breakdown for visualization"""
+    try:
+        data = get_service_breakdown(domain, db)
+        return data
+    except Exception as e:
+        logger.error(f"Failed to get service breakdown: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get service breakdown: {str(e)}")
+
+@app.get("/api/v1/visualization/{domain}/tree")
+async def get_tree_view(
+    domain: str,
+    db: Session = Depends(get_db)
+):
+    """Get hierarchical tree view of endpoints"""
+    try:
+        data = get_endpoint_tree(domain, db)
+        return data
+    except Exception as e:
+        logger.error(f"Failed to get tree view: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get tree view: {str(e)}")
+
+@app.get("/api/v1/visualization/{domain}/attack-surface")
+async def get_attack_surface(
+    domain: str,
+    db: Session = Depends(get_db)
+):
+    """Get attack surface summary metrics"""
+    try:
+        data = get_attack_surface_summary(domain, db)
+        return data
+    except Exception as e:
+        logger.error(f"Failed to get attack surface: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get attack surface: {str(e)}")
 
 # ==================== Statistics Endpoints ====================
 

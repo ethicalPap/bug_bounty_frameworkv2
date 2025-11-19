@@ -10,6 +10,7 @@ const Layout = () => {
     { path: '/live-hosts', label: 'Live Hosts', icon: Activity },
     { path: '/content-discovery', label: 'Content Discovery', icon: Search },
     { path: '/port-scanner', label: 'Port Scanner', icon: Network },
+    { path: '/visualization', label: 'Visualization', icon: Network },
     { path: '/history', label: 'History', icon: HistoryIcon },
   ]
 

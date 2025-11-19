@@ -40,6 +40,27 @@ export const getContentForTarget = (targetUrl) => {
   return api.get(`/api/v1/content/target/${targetUrl}`);
 };
 
+// Visualization Endpoints
+export const getVisualizationData = (domain) => {
+  return api.get(`/api/v1/visualization/${domain}`);
+};
+
+export const getTechnologyBreakdown = (domain) => {
+  return api.get(`/api/v1/visualization/${domain}/technology`);
+};
+
+export const getServiceBreakdown = (domain) => {
+  return api.get(`/api/v1/visualization/${domain}/services`);
+};
+
+export const getEndpointTree = (domain) => {
+  return api.get(`/api/v1/visualization/${domain}/tree`);
+};
+
+export const getAttackSurface = (domain) => {
+  return api.get(`/api/v1/visualization/${domain}/attack-surface`);
+};
+
 // Statistics
 export const getStats = () => {
   return api.get('/api/v1/stats');
