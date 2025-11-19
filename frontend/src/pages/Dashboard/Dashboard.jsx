@@ -25,6 +25,8 @@ import {
 const STORAGE_KEYS = {
   SUBDOMAIN_RESULTS: 'subdomain_scanner_last_domain',
   LIVE_HOSTS_RESULTS: 'live_hosts_results',
+  PORT_SCAN_RESULTS: 'port_scan_results', // ✅ ADDED
+  CONTENT_DISCOVERY_RESULTS: 'content_discovery_results', // ✅ ADDED
   FILTER_STATE: 'dashboard_filter_state',
   SORT_STATE: 'dashboard_sort_state',
 }
@@ -118,7 +120,27 @@ const Dashboard = () => {
     }
   }, [selectedDomain]) // Re-compute when domain changes
 
-  // Merge data from different sources
+  // ✅ ADDED: Get port scan data from localStorage
+  const portScanData = useMemo(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEYS.PORT_SCAN_RESULTS)
+      return saved ? JSON.parse(saved) : []
+    } catch {
+      return []
+    }
+  }, [selectedDomain]) // Re-compute when domain changes
+
+  // ✅ ADDED: Get content discovery data from localStorage
+  const contentDiscoveryData = useMemo(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEYS.CONTENT_DISCOVERY_RESULTS)
+      return saved ? JSON.parse(saved) : []
+    } catch {
+      return []
+    }
+  }, [selectedDomain]) // Re-compute when domain changes
+
+  // ✅ UPDATED: Merge data from different sources including port scans
   const mergedData = useMemo(() => {
     const subdomains = subdomainsData?.data || []
     
@@ -180,8 +202,108 @@ const Dashboard = () => {
       }
     })
     
+    // ✅ ADDED: Merge port scan data
+    portScanData.forEach(portData => {
+      const target = portData.target
+      const existing = dataMap.get(target)
+      
+      if (existing) {
+        // Aggregate open ports for this target
+        if (!existing.open_ports) {
+          existing.open_ports = []
+        }
+        if (portData.state === 'open') {
+          existing.open_ports.push({
+            port: portData.port,
+            service: portData.service,
+            version: portData.version,
+            protocol: portData.protocol
+          })
+        }
+        existing.from_port_scan = true
+        
+        // ✅ ADDED: Update IP address from port scan if not already set
+        if (!existing.ip_address && portData.ip_address) {
+          existing.ip_address = portData.ip_address
+        }
+      } else {
+        // Create new entry if only port scan data exists
+        dataMap.set(target, {
+          subdomain: target,
+          from_port_scan: true,
+          protocol: null,
+          response_time: null,
+          is_active: false,
+          status_code: null,
+          title: null,
+          server: null,
+          ip_address: portData.ip_address || null, // ✅ ADDED: Get IP from port scan
+          content_length: null,
+          technologies: null,
+          open_ports: portData.state === 'open' ? [{
+            port: portData.port,
+            service: portData.service,
+            version: portData.version,
+            protocol: portData.protocol
+          }] : [],
+          vulnerabilities: null,
+          last_updated: portData.created_at,
+        })
+      }
+    })
+    
+    // ✅ ADDED: Merge content discovery data for technology detection
+    contentDiscoveryData.forEach(content => {
+      // Extract domain from target_url or discovered_url
+      let targetDomain = null
+      try {
+        const url = new URL(content.target_url || content.discovered_url)
+        targetDomain = url.hostname
+      } catch {
+        // If URL parsing fails, skip this entry
+        return
+      }
+      
+      const existing = dataMap.get(targetDomain)
+      
+      if (existing) {
+        // Add technologies if available
+        if (content.technologies && !existing.technologies) {
+          existing.technologies = content.technologies
+        }
+        
+        // Mark as having content discovery data
+        existing.from_content_discovery = true
+        
+        // Aggregate discovered paths count
+        if (!existing.discovered_paths) {
+          existing.discovered_paths = 0
+        }
+        existing.discovered_paths += 1
+      } else {
+        // Create new entry if only content discovery data exists
+        dataMap.set(targetDomain, {
+          subdomain: targetDomain,
+          from_content_discovery: true,
+          protocol: null,
+          response_time: null,
+          is_active: false,
+          status_code: content.status_code || null,
+          title: null,
+          server: null,
+          ip_address: null,
+          content_length: null,
+          technologies: content.technologies || null,
+          open_ports: null,
+          vulnerabilities: null,
+          discovered_paths: 1,
+          last_updated: content.created_at,
+        })
+      }
+    })
+    
     return Array.from(dataMap.values())
-  }, [subdomainsData, liveHostsData])
+  }, [subdomainsData, liveHostsData, portScanData, contentDiscoveryData])
 
   // Filter data
   const filteredData = useMemo(() => {
@@ -273,8 +395,8 @@ const Dashboard = () => {
       'IP Address',
       'Title',
       'Server',
-      'Technologies',
       'Open Ports',
+      'Technologies',
       'Vulnerabilities'
     ]
     
@@ -287,8 +409,8 @@ const Dashboard = () => {
       item.ip_address || 'N/A',
       item.title || 'N/A',
       item.server || 'N/A',
+      item.open_ports ? item.open_ports.map(p => `${p.port}/${p.service}`).join('; ') : 'N/A',
       item.technologies || 'N/A',
-      item.open_ports || 'N/A',
       item.vulnerabilities || 'N/A'
     ])
 
@@ -314,7 +436,7 @@ const Dashboard = () => {
       .catch(err => console.error('Failed to copy:', err))
   }
 
-  // Statistics
+  // ✅ UPDATED: Statistics including port scan data
   const stats = {
     total: mergedData.length,
     active: mergedData.filter(d => d.is_active).length,
@@ -323,6 +445,10 @@ const Dashboard = () => {
     http: mergedData.filter(d => d.protocol === 'http').length,
     with_probe_data: mergedData.filter(d => d.from_live_probe).length,
     with_subdomain_data: mergedData.filter(d => d.from_subdomain_scan).length,
+    with_port_data: mergedData.filter(d => d.from_port_scan).length, // ✅ ADDED
+    total_open_ports: mergedData.reduce((sum, d) => sum + (d.open_ports?.length || 0), 0), // ✅ ADDED
+    with_content_discovery: mergedData.filter(d => d.from_content_discovery).length, // ✅ ADDED
+    with_technologies: mergedData.filter(d => d.technologies).length, // ✅ ADDED
   }
 
   return (
@@ -432,21 +558,27 @@ const Dashboard = () => {
             </div>
           </div>
 
-          <div className="bg-dark-100 border border-dark-50 rounded-xl p-4">
+          {/* ✅ UPDATED: Show port scan stats */}
+          <div className="bg-dark-100 border border-cyber-pink/20 rounded-xl p-4">
             <div className="flex items-center gap-3">
-              <div className="p-2 bg-yellow-500/10 rounded-lg">
-                <Unlock className="text-yellow-400" size={24} />
+              <div className="p-2 bg-cyber-pink/10 rounded-lg">
+                <Network className="text-cyber-pink" size={24} />
               </div>
               <div>
-                <div className="text-2xl font-bold text-white">{stats.http}</div>
-                <div className="text-xs text-gray-400">HTTP Only</div>
+                <div className="text-2xl font-bold text-white">{stats.total_open_ports}</div>
+                <div className="text-xs text-gray-400">Open Ports</div>
+                {stats.with_port_data > 0 && (
+                  <div className="text-xs text-cyber-pink/70">
+                    {stats.with_port_data} host{stats.with_port_data !== 1 ? 's' : ''}
+                  </div>
+                )}
               </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* Data Source Indicators */}
+      {/* ✅ UPDATED: Data Source Indicators */}
       {selectedDomain && mergedData.length > 0 && (
         <div className="bg-dark-100 border border-dark-50 rounded-xl p-4">
           <div className="flex items-center gap-6 text-sm">
@@ -459,12 +591,12 @@ const Dashboard = () => {
               <span className="text-gray-400">Live Probe: <span className="text-white font-medium">{stats.with_probe_data}</span></span>
             </div>
             <div className="flex items-center gap-2">
-              <div className="w-3 h-3 bg-gray-500 rounded-full"></div>
-              <span className="text-gray-400">Port Scan: <span className="text-white font-medium">0</span></span>
+              <div className="w-3 h-3 bg-cyber-pink rounded-full"></div>
+              <span className="text-gray-400">Port Scan: <span className="text-white font-medium">{stats.with_port_data}</span></span>
             </div>
             <div className="flex items-center gap-2">
-              <div className="w-3 h-3 bg-gray-500 rounded-full"></div>
-              <span className="text-gray-400">Tech Detection: <span className="text-white font-medium">0</span></span>
+              <div className="w-3 h-3 bg-cyber-purple rounded-full"></div>
+              <span className="text-gray-400">Tech Detection: <span className="text-white font-medium">{stats.with_technologies}</span></span>
             </div>
           </div>
         </div>
@@ -624,8 +756,9 @@ const Dashboard = () => {
                       </th>
                       <th className="text-left py-3 px-4 text-sm font-medium text-gray-400">IP Address</th>
                       <th className="text-left py-3 px-4 text-sm font-medium text-gray-400">Title</th>
+                      {/* ✅ UPDATED: Open Ports Column */}
+                      <th className="text-left py-3 px-4 text-sm font-medium text-gray-400">Open Ports</th>
                       <th className="text-left py-3 px-4 text-sm font-medium text-gray-400">Technologies</th>
-                      <th className="text-left py-3 px-4 text-sm font-medium text-gray-400">Ports</th>
                       <th className="text-center py-3 px-4 text-sm font-medium text-gray-400">Vulns</th>
                       <th className="text-right py-3 px-4 text-sm font-medium text-gray-400">Actions</th>
                     </tr>
@@ -699,15 +832,106 @@ const Dashboard = () => {
                             {item.title || '-'}
                           </span>
                         </td>
+                        {/* ✅ ADDED: Open Ports Display */}
                         <td className="py-3 px-4">
-                          <span className="text-gray-600 text-xs italic">
-                            {item.technologies || 'Not detected'}
-                          </span>
+                          {item.open_ports && item.open_ports.length > 0 ? (
+                            <div className="flex flex-wrap gap-1">
+                              {item.open_ports.slice(0, 3).map((port, idx) => (
+                                <span 
+                                  key={idx}
+                                  className="text-xs bg-cyber-pink/20 text-cyber-pink px-2 py-1 rounded font-mono"
+                                  title={`${port.port}/${port.protocol} - ${port.service}${port.version ? ' (' + port.version + ')' : ''}`}
+                                >
+                                  {port.port}
+                                </span>
+                              ))}
+                              {item.open_ports.length > 3 && (
+                                <span 
+                                  className="text-xs text-gray-500 px-2 py-1"
+                                  title={`Total: ${item.open_ports.length} open ports`}
+                                >
+                                  +{item.open_ports.length - 3}
+                                </span>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-gray-600 text-xs italic">No scans</span>
+                          )}
                         </td>
                         <td className="py-3 px-4">
-                          <span className="text-gray-600 text-xs italic">
-                            {item.open_ports || 'Not scanned'}
-                          </span>
+                          {item.technologies ? (
+                            <div className="flex flex-wrap gap-1">
+                              {(() => {
+                                try {
+                                  // Try to parse as JSON if it's a string
+                                  const techs = typeof item.technologies === 'string' 
+                                    ? JSON.parse(item.technologies) 
+                                    : item.technologies
+                                  
+                                  // Handle array format
+                                  if (Array.isArray(techs)) {
+                                    return techs.slice(0, 3).map((tech, idx) => (
+                                      <span 
+                                        key={idx}
+                                        className="text-xs bg-cyber-purple/20 text-cyber-purple px-2 py-1 rounded"
+                                        title={tech}
+                                      >
+                                        {tech}
+                                      </span>
+                                    ))
+                                  }
+                                  
+                                  // Handle object format
+                                  if (typeof techs === 'object') {
+                                    const techNames = Object.keys(techs).slice(0, 3)
+                                    return techNames.map((tech, idx) => (
+                                      <span 
+                                        key={idx}
+                                        className="text-xs bg-cyber-purple/20 text-cyber-purple px-2 py-1 rounded"
+                                        title={tech}
+                                      >
+                                        {tech}
+                                      </span>
+                                    ))
+                                  }
+                                  
+                                  // Fallback: display as string
+                                  return (
+                                    <span className="text-xs text-gray-400">
+                                      {item.technologies.substring(0, 30)}...
+                                    </span>
+                                  )
+                                } catch {
+                                  // If parsing fails, display as string
+                                  return (
+                                    <span className="text-xs text-gray-400" title={item.technologies}>
+                                      {item.technologies.substring(0, 30)}...
+                                    </span>
+                                  )
+                                }
+                              })()}
+                              {(() => {
+                                try {
+                                  const techs = typeof item.technologies === 'string' 
+                                    ? JSON.parse(item.technologies) 
+                                    : item.technologies
+                                  const count = Array.isArray(techs) ? techs.length : Object.keys(techs).length
+                                  if (count > 3) {
+                                    return (
+                                      <span className="text-xs text-gray-500" title={`Total: ${count} technologies`}>
+                                        +{count - 3}
+                                      </span>
+                                    )
+                                  }
+                                } catch {
+                                  return null
+                                }
+                                return null
+                              })()}
+                            </div>
+                          ) : (
+                            <span className="text-gray-600 text-xs italic">Not detected</span>
+                          )}
                         </td>
                         <td className="py-3 px-4 text-center">
                           <span className="text-gray-600 text-xs italic">
