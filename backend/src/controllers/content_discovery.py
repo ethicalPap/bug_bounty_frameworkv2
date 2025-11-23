@@ -900,15 +900,41 @@ class ContentDiscoveryScanner:
         # Save results to database
         saved_count = self.save_to_database(all_results)
         
-        scan_summary = {
-            'scan_id': self.scan_id,
-            'target_url': self.config.target_url,
-            'scan_type': self.config.scan_type,
-            'total_unique_urls': len(all_results),
-            'new_urls_saved': saved_count,
-            'tool_results': tool_results,
-            'timestamp': datetime.utcnow().isoformat()
-        }
+        # ✅ CRITICAL FIX: Query saved records to include in response
+        db = SessionLocal()
+        try:
+            saved_records = db.query(ContentDiscovery).filter(
+                ContentDiscovery.scan_id == self.scan_id
+            ).all()
+            
+            scan_summary = {
+                'scan_id': self.scan_id,
+                'target_url': self.config.target_url,
+                'scan_type': self.config.scan_type,
+                'total_unique_urls': len(all_results),
+                'new_urls_saved': saved_count,
+                'tool_results': tool_results,
+                'timestamp': datetime.utcnow().isoformat(),
+                
+                # ✅ THIS IS THE FIX - Include discovered_urls array for frontend
+                'discovered_urls': [
+                    {
+                        'id': record.id,
+                        'discovered_url': record.discovered_url,
+                        'status_code': record.status_code,
+                        'method': record.method or 'GET',
+                        'tool_name': record.tool_name,
+                        'is_interesting': record.is_interesting,
+                        'content_length': record.content_length,
+                        'response_time': record.response_time,
+                        'discovery_type': record.discovery_type,
+                        'created_at': record.created_at.isoformat() if record.created_at else None
+                    }
+                    for record in saved_records
+                ]
+            }
+        finally:
+            db.close()
         
         logger.info(f"Content discovery completed: {scan_summary}")
         return scan_summary

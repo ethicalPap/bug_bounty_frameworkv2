@@ -16,7 +16,6 @@ from src.controllers.validation import (
     get_validation_report
 )
 
-
 from src.controllers.subdomains import (
     start_subdomain_scan,
     get_subdomains_by_domain,
@@ -55,7 +54,7 @@ logger = logging.getLogger(__name__)
 # Create FastAPI app
 app = FastAPI(
     title="Bug Bounty Hunter Platform API",
-    description="Advanced subdomain enumeration, content discovery, port scanning, and vulnerability scanning tool",
+    description="Advanced subdomain enumeration, content discovery, port scanning, and vulnerability validation tool",
     version="2.0.0"
 )
 
@@ -190,11 +189,24 @@ class PortScanResponse(BaseModel):
     duration_seconds: int
     timestamp: str
 
-# Pydantic Models for Validation
+# Validation Models
 class TargetValidationRequest(BaseModel):
-    target_url: str
-    discovered_paths: Optional[List[str]] = []
-    background: bool = False
+    target_url: str = Field(..., description="Target URL to validate", example="https://admin.example.com")
+    discovered_paths: Optional[List[str]] = Field([], description="List of discovered paths for testing")
+    background: bool = Field(False, description="Run validation in background")
+
+class ValidationResponse(BaseModel):
+    target: str
+    validated_at: str
+    total_vulns: int
+    critical_vulns: int
+    high_vulns: int
+    proofs: List[Dict]
+
+class DomainValidationRequest(BaseModel):
+    domain: str = Field(..., description="Domain to validate high-value targets")
+    limit: int = Field(10, description="Max number of targets to validate", ge=1, le=50)
+    min_risk_score: int = Field(30, description="Minimum risk score for validation", ge=0, le=100)
 
 # ==================== Startup Events ====================
 
@@ -229,7 +241,7 @@ async def root():
             "subdomain_enumeration",
             "content_discovery",
             "port_scanning",
-            "vulnerability_scanning",
+            "vulnerability_validation",
             "visualization"
         ],
         "endpoints": {
@@ -237,6 +249,7 @@ async def root():
             "subdomain_scan": "/api/v1/scan",
             "content_discovery": "/api/v1/content/scan",
             "port_scan": "/api/v1/ports/scan",
+            "validation": "/api/v1/validation",
             "visualization": "/api/v1/visualization/{domain}",
             "docs": "/docs"
         }
@@ -271,6 +284,21 @@ async def create_scan(
     except Exception as e:
         logger.error(f"Scan failed: {e}")
         raise HTTPException(status_code=500, detail=f"Scan failed: {str(e)}")
+
+@app.get("/api/v1/domains")
+async def get_domains(db: Session = Depends(get_db)):
+    """Get all unique domains"""
+    try:
+        from src.models.Subdomain import Subdomain
+        from sqlalchemy import distinct
+        
+        domains = db.query(distinct(Subdomain.domain)).all()
+        domain_list = [d[0] for d in domains if d[0]]
+        
+        return sorted(domain_list)
+    except Exception as e:
+        logger.error(f"Failed to retrieve domains: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve domains: {str(e)}")
 
 @app.get("/api/v1/subdomains/{domain}")
 async def get_domain_subdomains(
@@ -378,6 +406,223 @@ async def create_content_discovery(
         logger.error(f"Content discovery failed: {e}")
         raise HTTPException(status_code=500, detail=f"Content discovery failed: {str(e)}")
 
+@app.post("/api/v1/content-discovery/start")
+async def start_content_discovery_scan(
+    request: dict,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db)
+):
+    """
+    Start content discovery scan with custom tool configuration (frontend endpoint)
+    
+    Body:
+    {
+        "target_url": "https://example.com",
+        "scan_type": "full",
+        "use_ffuf": true,
+        "use_feroxbuster": true,
+        "use_waymore": true,
+        "use_gau": true,
+        "use_katana": true,
+        "use_gospider": false,
+        "use_linkfinder": false,
+        "use_arjun": true,
+        "use_unfurl": true,
+        "use_uro": true,
+        "use_nuclei": false,
+        "threads": 10,
+        "timeout": 600,
+        "rate_limit": 150,
+        "crawl_depth": 3,
+        "wordlist": "/opt/wordlists/common.txt"
+    }
+    """
+    try:
+        target_url = request.get('target_url')
+        
+        if not target_url:
+            raise HTTPException(status_code=400, detail="target_url is required")
+        
+        # Extract all configuration options
+        scan_config = {
+            'scan_type': request.get('scan_type', 'full'),
+            'use_ffuf': request.get('use_ffuf', True),
+            'use_feroxbuster': request.get('use_feroxbuster', True),
+            'use_waymore': request.get('use_waymore', True),
+            'use_gau': request.get('use_gau', True),
+            'use_katana': request.get('use_katana', True),
+            'use_gospider': request.get('use_gospider', False),
+            'use_linkfinder': request.get('use_linkfinder', False),
+            'use_arjun': request.get('use_arjun', True),
+            'use_unfurl': request.get('use_unfurl', True),
+            'use_uro': request.get('use_uro', True),
+            'use_nuclei': request.get('use_nuclei', False),
+            'threads': request.get('threads', 10),
+            'timeout': request.get('timeout', 600),
+            'rate_limit': request.get('rate_limit', 150),
+            'crawl_depth': request.get('crawl_depth', 3),
+            'wordlist': request.get('wordlist', '/opt/wordlists/common.txt'),
+            'subdomain_id': request.get('subdomain_id')
+        }
+        
+        # Run scan (synchronously for now)
+        result = start_content_discovery(target_url, **scan_config)
+        
+        return result
+            
+    except Exception as e:
+        logger.error(f"Content discovery scan failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/v1/content-discovery/target/{target}")
+async def get_content_by_target_endpoint(
+    target: str,
+    db: Session = Depends(get_db)
+):
+    """Get all discovered content for a target URL"""
+    try:
+        results = get_content_by_target(target, db)
+        return results
+    except Exception as e:
+        logger.error(f"Failed to get content: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ==================== Validation Endpoints ====================
+
+@app.post("/api/v1/validation/validate-target")
+async def validate_target_endpoint(
+    request: TargetValidationRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db)
+):
+    """
+    Validate a single target for vulnerabilities
+    
+    ⚠️ IMPORTANT: Only use on targets you have permission to test!
+    """
+    try:
+        logger.info(f"Validation request for: {request.target_url}")
+        
+        if request.background:
+            # Run in background
+            background_tasks.add_task(
+                validate_single_target,
+                request.target_url,
+                request.discovered_paths,
+                db
+            )
+            return {
+                "message": "Validation started in background",
+                "target": request.target_url,
+                "status": "running"
+            }
+        else:
+            # Run synchronously
+            result = validate_single_target(
+                request.target_url,
+                request.discovered_paths,
+                db
+            )
+            return result
+            
+    except Exception as e:
+        logger.error(f"Validation failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/v1/validation/quick-validate")
+async def quick_validate_endpoint(
+    request: TargetValidationRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Quick validation of a target (critical checks only)
+    
+    ⚠️ IMPORTANT: Only use on targets you have permission to test!
+    """
+    try:
+        logger.info(f"Quick validation for: {request.target_url}")
+        
+        result = quick_validate_target(
+            request.target_url,
+            request.discovered_paths
+        )
+        return result
+        
+    except Exception as e:
+        logger.error(f"Quick validation failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/v1/validation/validate-domain")
+async def validate_domain_endpoint(
+    request: DomainValidationRequest,
+    background_tasks: BackgroundTasks = None,
+    db: Session = Depends(get_db)
+):
+    """
+    Validate high-value targets for a domain
+    
+    ⚠️ IMPORTANT: Only use on domains you have permission to test!
+    """
+    try:
+        logger.info(f"Domain validation for: {request.domain} (limit: {request.limit}, min_risk: {request.min_risk_score})")
+        
+        result = validate_high_value_targets_for_domain(
+            request.domain,
+            db,
+            request.limit,
+            request.min_risk_score
+        )
+        return result
+        
+    except Exception as e:
+        logger.error(f"Domain validation failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/v1/validation/results/{domain}")
+async def get_validation_report_endpoint(
+    domain: str,
+    db: Session = Depends(get_db)
+):
+    """Get validation report for a domain"""
+    try:
+        report = get_validation_report(domain, db)
+        return report
+    except Exception as e:
+        logger.error(f"Failed to get validation report: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/v1/validation/target/{subdomain}")
+async def get_target_validation_endpoint(
+    subdomain: str,
+    db: Session = Depends(get_db)
+):
+    """Get validation results for a specific subdomain"""
+    try:
+        from src.models.Subdomain import Subdomain
+        
+        target = db.query(Subdomain).filter(
+            Subdomain.full_domain == subdomain
+        ).first()
+        
+        if not target:
+            raise HTTPException(status_code=404, detail="Target not found")
+        
+        return {
+            'subdomain': subdomain,
+            'validated': target.validated,
+            'validation_results': target.validation_results,
+            'confirmed_vulns': target.confirmed_vulns,
+            'last_validated': target.last_validated.isoformat() if target.last_validated else None,
+            'risk_tier': target.risk_tier,
+            'risk_score': target.risk_score
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get target validation: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 # ==================== Visualization Endpoints ====================
 
 @app.get("/api/v1/visualization/{domain}")
@@ -433,6 +678,19 @@ async def get_tree_view(
         raise HTTPException(status_code=500, detail=f"Failed to get tree view: {str(e)}")
 
 @app.get("/api/v1/visualization/{domain}/attack-surface")
+async def get_attack_surface_viz(
+    domain: str,
+    db: Session = Depends(get_db)
+):
+    """Get attack surface summary metrics (visualization path)"""
+    try:
+        data = get_attack_surface_summary(domain, db)
+        return data
+    except Exception as e:
+        logger.error(f"Failed to get attack surface: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get attack surface: {str(e)}")
+
+@app.get("/api/v1/attack-surface/{domain}")
 async def get_attack_surface(
     domain: str,
     db: Session = Depends(get_db)
@@ -471,6 +729,15 @@ async def get_statistics(db: Session = Depends(get_db)):
             ContentDiscovery.is_interesting == True
         ).count()
         
+        # Validation stats
+        validated_targets = db.query(Subdomain).filter(
+            Subdomain.validated == True
+        ).count()
+        
+        confirmed_critical = db.query(Subdomain).filter(
+            Subdomain.risk_tier == 'CRITICAL_CONFIRMED'
+        ).count()
+        
         return {
             "subdomain_stats": {
                 "total_subdomains": total_subdomains,
@@ -484,6 +751,10 @@ async def get_statistics(db: Session = Depends(get_db)):
             "content_stats": {
                 "total_discoveries": total_discoveries,
                 "interesting_discoveries": interesting_discoveries
+            },
+            "validation_stats": {
+                "validated_targets": validated_targets,
+                "confirmed_critical": confirmed_critical
             }
         }
     except Exception as e:

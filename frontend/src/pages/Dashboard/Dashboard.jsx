@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { getSubdomains } from '../../api/client'
+import { useSearchParams } from 'react-router-dom'
+import { getSubdomains, validateTarget, quickValidateTarget } from '../../api/client'
 import { 
   Home, 
   Globe, 
@@ -30,7 +31,8 @@ import {
   ChevronRight,
   Info,
   BarChart3,
-  AlertTriangle
+  AlertTriangle,
+  Loader
 } from 'lucide-react'
 
 const STORAGE_KEYS = {
@@ -46,10 +48,22 @@ const STORAGE_KEYS = {
 
 const Dashboard = () => {
   const queryClient = useQueryClient()
+  const [searchParams, setSearchParams] = useSearchParams()
   
   // State management
   const [availableDomains, setAvailableDomains] = useState([])
-  const [selectedDomain, setSelectedDomain] = useState('')
+  
+  // Get domain from URL params, fallback to empty string
+  const selectedDomain = searchParams.get('domain') || ''
+  
+  // Function to update domain in URL
+  const setSelectedDomain = (domain) => {
+    if (domain) {
+      setSearchParams({ domain })
+    } else {
+      setSearchParams({})
+    }
+  }
   
   // View mode: 'overview' | 'detailed' | 'attack-surface'
   const [viewMode, setViewMode] = useState(() => {
@@ -68,6 +82,10 @@ const Dashboard = () => {
     }
   })
   
+  // Validation state
+  const [validating, setValidating] = useState({})
+  const [validationResults, setValidationResults] = useState({})
+  
   // Filters and search
   const [searchTerm, setSearchTerm] = useState(() => {
     const saved = localStorage.getItem(STORAGE_KEYS.FILTER_STATE)
@@ -82,16 +100,16 @@ const Dashboard = () => {
     return saved ? JSON.parse(saved).filterProtocol || 'all' : 'all'
   })
   const [filterInteresting, setFilterInteresting] = useState(false)
-  const [filterTier, setFilterTier] = useState('all') // NEW: Filter by risk tier
+  const [filterTier, setFilterTier] = useState('all')
   
   // Sorting
   const [sortBy, setSortBy] = useState(() => {
     const saved = localStorage.getItem(STORAGE_KEYS.SORT_STATE)
-    return saved ? JSON.parse(saved).sortBy || 'risk_score' : 'risk_score' // Changed default
+    return saved ? JSON.parse(saved).sortBy || 'risk_score' : 'risk_score'
   })
   const [sortOrder, setSortOrder] = useState(() => {
     const saved = localStorage.getItem(STORAGE_KEYS.SORT_STATE)
-    return saved ? JSON.parse(saved).sortOrder || 'desc' : 'desc' // Changed default
+    return saved ? JSON.parse(saved).sortOrder || 'desc' : 'desc'
   })
   
   // Pagination
@@ -104,6 +122,41 @@ const Dashboard = () => {
       ...prev,
       [section]: !prev[section]
     }))
+  }
+
+  // Validation handler
+  const handleValidateTarget = async (target) => {
+    const targetUrl = `${target.protocol || 'https'}://${target.subdomain}`
+    
+    setValidating(prev => ({ ...prev, [target.subdomain]: true }))
+    
+    try {
+      // Quick validation (faster)
+      const result = await quickValidateTarget(targetUrl, [])
+      
+      // Store results
+      setValidationResults(prev => ({
+        ...prev,
+        [target.subdomain]: result
+      }))
+      
+      // Show results
+      if (result.total_vulns > 0) {
+        alert(`🎯 Validation Complete!\n\nFound ${result.total_vulns} vulnerabilities on ${target.subdomain}\n\nCheck the console for details.`)
+        console.log('Validation Results:', result)
+      } else {
+        alert(`✅ Validation Complete!\n\nNo vulnerabilities found on ${target.subdomain}`)
+      }
+      
+      // Optionally refresh data to show updated validation status
+      queryClient.invalidateQueries(['subdomains', selectedDomain])
+      
+    } catch (error) {
+      console.error('Validation failed:', error)
+      alert(`❌ Validation Failed\n\n${error.response?.data?.detail || error.message}`)
+    } finally {
+      setValidating(prev => ({ ...prev, [target.subdomain]: false }))
+    }
   }
 
   // Persist state
@@ -130,23 +183,43 @@ const Dashboard = () => {
     localStorage.setItem(STORAGE_KEYS.EXPANDED_SECTIONS, JSON.stringify(expandedSections))
   }, [expandedSections])
 
-  // Fetch available domains from cache
+  // Fetch available domains from API on mount
   useEffect(() => {
-    const queryCache = queryClient.getQueryCache()
-    const allQueries = queryCache.getAll()
-    
-    const domains = allQueries
-      .filter(query => query.queryKey[0] === 'subdomains' && query.state.data?.data?.length > 0)
-      .map(query => query.queryKey[1])
-      .filter(Boolean)
-    
-    const uniqueDomains = [...new Set(domains)]
-    setAvailableDomains(uniqueDomains)
-    
-    if (!selectedDomain && uniqueDomains.length > 0) {
-      setSelectedDomain(uniqueDomains[0])
+    const fetchDomains = async () => {
+      try {
+        const response = await fetch('http://localhost:8000/api/v1/domains')
+        if (response.ok) {
+          const domains = await response.json()
+          setAvailableDomains(domains)
+          
+          // If no domain in URL and we have domains, set the first one
+          if (!selectedDomain && domains.length > 0) {
+            setSelectedDomain(domains[0])
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching domains:', error)
+        
+        // Fallback: try to get from query cache
+        const queryCache = queryClient.getQueryCache()
+        const allQueries = queryCache.getAll()
+        
+        const cachedDomains = allQueries
+          .filter(query => query.queryKey[0] === 'subdomains' && query.state.data?.data?.length > 0)
+          .map(query => query.queryKey[1])
+          .filter(Boolean)
+        
+        const uniqueDomains = [...new Set(cachedDomains)]
+        setAvailableDomains(uniqueDomains)
+        
+        if (!selectedDomain && uniqueDomains.length > 0) {
+          setSelectedDomain(uniqueDomains[0])
+        }
+      }
     }
-  }, [queryClient, selectedDomain])
+    
+    fetchDomains()
+  }, []) // Only run on mount
 
   // Fetch subdomain data
   const { data: subdomainsData, isLoading: isLoadingSubdomains } = useQuery({
@@ -185,14 +258,12 @@ const Dashboard = () => {
     }
   }, [selectedDomain])
 
-  // Advanced Risk Scoring System - Battle-Tested by Elite Bug Bounty Hunters
+  // Advanced Risk Scoring System
   const calculateRiskScore = (data) => {
     let score = 0
     const findings = []
     
-    // ============= CRITICAL TIER (50+) - Drop Everything and Test =============
-    
-    // 1. ADMIN/INTERNAL SUBDOMAINS (25 points base)
+    // CRITICAL TIER (50+)
     const criticalSubdomains = ['admin', 'internal', 'staging', 'dev', 'test', 'jenkins', 'vpn', 'console', 'panel']
     const subdomain = data.subdomain.toLowerCase()
     const isCriticalSubdomain = criticalSubdomains.some(keyword => subdomain.includes(keyword))
@@ -206,7 +277,7 @@ const Dashboard = () => {
       })
     }
     
-    // 2. CRITICAL PORT EXPOSURE (variable points)
+    // Critical ports
     const criticalPorts = {
       3389: { name: 'RDP', severity: 30, note: 'Remote Desktop - BlueKeep RCE, auth bypass' },
       5900: { name: 'VNC', severity: 30, note: 'VNC - Remote access, often weak auth' },
@@ -241,10 +312,9 @@ const Dashboard = () => {
       })
     }
     
-    // 3. SOURCE CODE LEAKS (30 points)
+    // Source code leaks
     const sourceCodeLeaks = ['.git', '.svn', '.env', 'backup.sql', '.sql', 'database.sql', '.bak']
     if (data.discovered_paths > 0) {
-      // Check if any discovered paths contain source code indicators
       const hasSourceLeak = sourceCodeLeaks.some(leak => 
         contentDiscoveryData.some(item => 
           item.target_url?.includes(data.subdomain) && 
@@ -262,7 +332,7 @@ const Dashboard = () => {
       }
     }
     
-    // 4. API ENDPOINTS (20 points base)
+    // API endpoints
     if (subdomain.includes('api')) {
       score += 20
       findings.push({
@@ -272,9 +342,7 @@ const Dashboard = () => {
       })
     }
     
-    // ============= HIGH TIER (30-49) - Priority Testing =============
-    
-    // 5. STAGING/DEV ENVIRONMENTS (15 points)
+    // Staging/dev environments
     if (subdomain.includes('staging') || subdomain.includes('dev') || subdomain.includes('test')) {
       score += 15
       findings.push({
@@ -284,7 +352,7 @@ const Dashboard = () => {
       })
     }
     
-    // 6. AUTHENTICATION PORTALS (12 points)
+    // Authentication portals
     if (data.status_code === 401 || data.status_code === 403) {
       score += 12
       findings.push({
@@ -294,151 +362,18 @@ const Dashboard = () => {
       })
     }
     
-    // 7. COMMON WEB SERVICES (variable points)
-    const webServices = {
-      'jenkins': 20,
-      'gitlab': 18,
-      'grafana': 15,
-      'kibana': 15,
-      'prometheus': 12,
-      'sonarqube': 15,
-      'jira': 12,
-      'confluence': 12,
-    }
-    
-    Object.entries(webServices).forEach(([service, points]) => {
-      if (subdomain.includes(service)) {
-        score += points
-        findings.push({
-          type: 'web_service',
-          service: service,
-          description: `${service} instance detected`,
-          impact: 'Known CVEs, default credentials, misconfigurations'
-        })
-      }
-    })
-    
-    // ============= MEDIUM TIER (15-29) - Worth Investigating =============
-    
-    // 8. MULTIPLE SERVICES (5 points if 3+, 10 points if 5+)
-    if (data.open_ports && data.open_ports.length >= 5) {
-      score += 10
-      findings.push({
-        type: 'multiple_services',
-        description: `${data.open_ports.length} services exposed`,
-        impact: 'Increased attack surface, service interaction bugs'
-      })
-    } else if (data.open_ports && data.open_ports.length >= 3) {
-      score += 5
-    }
-    
-    // 9. CONTENT DISCOVERY HITS (3 points per 10 paths)
-    if (data.discovered_paths > 10) {
-      const pathScore = Math.min(Math.floor(data.discovered_paths / 10) * 3, 15)
-      score += pathScore
-      findings.push({
-        type: 'content_discovery',
-        description: `${data.discovered_paths} paths/endpoints discovered`,
-        impact: 'Hidden functionality, forgotten endpoints'
-      })
-    }
-    
-    // 10. TECHNOLOGY STACK (8 points for known vulnerable tech)
-    const vulnerableTech = ['wordpress', 'drupal', 'joomla', 'struts', 'sharepoint']
-    if (data.server) {
-      const serverLower = data.server.toLowerCase()
-      vulnerableTech.forEach(tech => {
-        if (serverLower.includes(tech)) {
-          score += 8
-          findings.push({
-            type: 'vulnerable_tech',
-            technology: tech,
-            description: `${tech} detected`,
-            impact: 'Known CVEs, plugin vulnerabilities'
-          })
-        }
-      })
-    }
-    
-    // 11. HTTP-ONLY (no HTTPS) (5 points)
-    if (data.protocol === 'http') {
-      score += 5
-      findings.push({
-        type: 'insecure_protocol',
-        description: 'HTTP-only (no HTTPS)',
-        impact: 'Traffic interception, downgrade attacks'
-      })
-    }
-    
-    // 12. SUBDOMAIN TAKEOVER INDICATORS (15 points)
-    const takeoverIndicators = [
-      'There is no app configured',
-      'NoSuchBucket',
-      'No Such Account',
-      'You\'re Almost Done',
-      'Project doesnt exist',
-    ]
-    
-    if (data.title) {
-      const hasTakeoverIndicator = takeoverIndicators.some(indicator => 
-        data.title.includes(indicator)
-      )
-      
-      if (hasTakeoverIndicator) {
-        score += 15
-        findings.push({
-          type: 'subdomain_takeover',
-          description: 'Potential subdomain takeover',
-          impact: 'Full subdomain control, phishing, XSS'
-        })
-      }
-    }
-    
-    // ============= BONUS MULTIPLIERS =============
-    
-    // COMBO BONUS: Admin + Critical Port = Extra 10 points
-    if (isCriticalSubdomain && data.open_ports && data.open_ports.length > 0) {
-      const hasCriticalPort = data.open_ports.some(p => criticalPorts[p.port])
-      if (hasCriticalPort) {
-        score += 10
-        findings.push({
-          type: 'combo_bonus',
-          description: '🎯 JACKPOT: Critical subdomain + exposed service',
-          impact: 'Extremely high value target - test immediately!'
-        })
-      }
-    }
-    
-    // RECON COMPLETENESS BONUS: All scan types completed
-    const scanTypes = [
-      data.from_subdomain_scan,
-      data.from_live_probe,
-      data.from_port_scan,
-      data.from_content_discovery
-    ].filter(Boolean).length
-    
-    if (scanTypes >= 3) {
-      score += 5
-      findings.push({
-        type: 'comprehensive_recon',
-        description: 'Comprehensive reconnaissance completed',
-        impact: 'Full attack surface mapped'
-      })
-    }
-    
     return {
-      score: Math.min(score, 100), // Cap at 100
+      score: Math.min(score, 100),
       findings,
       tier: score >= 50 ? 'CRITICAL' : score >= 30 ? 'HIGH' : score >= 15 ? 'MEDIUM' : 'LOW'
     }
   }
 
-  // Merge all data sources with enhanced risk scoring
+  // Merge all data sources with risk scoring
   const mergedData = useMemo(() => {
     const subdomains = subdomainsData?.data || []
     const dataMap = new Map()
     
-    // Add subdomain scanner data
     subdomains.forEach(sub => {
       dataMap.set(sub.full_domain, {
         subdomain: sub.full_domain,
@@ -459,7 +394,6 @@ const Dashboard = () => {
       })
     })
     
-    // Merge live hosts data
     liveHostsData.forEach(host => {
       const existing = dataMap.get(host.subdomain)
       if (existing) {
@@ -491,7 +425,6 @@ const Dashboard = () => {
       }
     })
     
-    // Merge port scan data
     portScanData.forEach(portData => {
       const target = portData.target
       const existing = dataMap.get(target)
@@ -512,33 +445,9 @@ const Dashboard = () => {
         if (!existing.ip_address && portData.ip_address) {
           existing.ip_address = portData.ip_address
         }
-      } else {
-        dataMap.set(target, {
-          subdomain: target,
-          from_port_scan: true,
-          protocol: null,
-          response_time: null,
-          is_active: false,
-          status_code: null,
-          title: null,
-          server: null,
-          ip_address: portData.ip_address || null,
-          content_length: null,
-          technologies: null,
-          open_ports: portData.state === 'open' ? [{
-            port: portData.port,
-            service: portData.service,
-            version: portData.version,
-            protocol: portData.protocol
-          }] : [],
-          vulnerabilities: null,
-          discovered_paths: 0,
-          last_updated: portData.created_at,
-        })
       }
     })
     
-    // Merge content discovery data
     contentDiscoveryData.forEach(content => {
       let targetDomain = null
       try {
@@ -559,28 +468,9 @@ const Dashboard = () => {
           existing.discovered_paths = 0
         }
         existing.discovered_paths += 1
-      } else {
-        dataMap.set(targetDomain, {
-          subdomain: targetDomain,
-          from_content_discovery: true,
-          protocol: null,
-          response_time: null,
-          is_active: false,
-          status_code: content.status_code || null,
-          title: null,
-          server: null,
-          ip_address: null,
-          content_length: null,
-          technologies: content.technologies || null,
-          open_ports: null,
-          vulnerabilities: null,
-          discovered_paths: 1,
-          last_updated: content.created_at,
-        })
       }
     })
     
-    // Calculate risk scores for all assets
     return Array.from(dataMap.values()).map(asset => {
       const riskAnalysis = calculateRiskScore(asset)
       return {
@@ -588,7 +478,6 @@ const Dashboard = () => {
         risk_score: riskAnalysis.score,
         risk_tier: riskAnalysis.tier,
         risk_findings: riskAnalysis.findings,
-        // Keep legacy field for backward compatibility
         interesting_score: riskAnalysis.score
       }
     })
@@ -669,16 +558,6 @@ const Dashboard = () => {
 
   const totalPages = Math.ceil(sortedData.length / itemsPerPage)
 
-  // Handle sort
-  const handleSort = (column) => {
-    if (sortBy === column) {
-      setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')
-    } else {
-      setSortBy(column)
-      setSortOrder('asc')
-    }
-  }
-
   // Export to CSV
   const exportToCSV = () => {
     const headers = [
@@ -752,10 +631,10 @@ const Dashboard = () => {
     low_targets: mergedData.filter(d => d.risk_tier === 'LOW').length,
   }
 
-  // High value targets (CRITICAL and HIGH tiers)
+  // High value targets
   const highValueTargets = useMemo(() => {
     return mergedData
-      .filter(d => d.risk_score >= 30) // HIGH and CRITICAL
+      .filter(d => d.risk_score >= 30)
       .sort((a, b) => b.risk_score - a.risk_score)
       .slice(0, 10)
   }, [mergedData])
@@ -897,10 +776,10 @@ const Dashboard = () => {
         )}
       </div>
 
-      {/* Overview Mode */}
+      {/* Overview Mode - Just Metrics */}
       {selectedDomain && mergedData.length > 0 && viewMode === 'overview' && (
         <>
-          {/* Key Metrics Grid - Enhanced with Risk Tiers */}
+          {/* Key Metrics Grid */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div className="bg-gradient-to-br from-red-500/10 to-red-500/5 border border-red-500/30 rounded-xl p-5">
               <div className="flex items-center justify-between mb-3">
@@ -951,7 +830,137 @@ const Dashboard = () => {
             </div>
           </div>
 
-          {/* High Value Targets - Enhanced with Findings */}
+          {/* Attack Surface Summary */}
+          {attackSurface.length > 0 && (
+            <div className="bg-dark-100 border border-dark-50 rounded-xl p-6">
+              <button
+                onClick={() => toggleSection('attack_vectors')}
+                className="w-full flex items-center justify-between mb-4"
+              >
+                <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+                  <Shield className="text-cyber-pink" size={20} />
+                  Attack Surface Analysis
+                </h3>
+                {expandedSections.attack_vectors ? <ChevronUp size={20} className="text-gray-400" /> : <ChevronDown size={20} className="text-gray-400" />}
+              </button>
+
+              {expandedSections.attack_vectors && (
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  {attackSurface.map((svc, idx) => (
+                    <div
+                      key={idx}
+                      className="p-4 bg-dark-200 border border-dark-50 rounded-lg hover:border-cyber-pink transition-all"
+                    >
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="p-2 bg-cyber-pink/10 rounded">
+                          <Server size={16} className="text-cyber-pink" />
+                        </div>
+                        <span className="text-xs font-mono text-gray-400">:{svc.port}</span>
+                      </div>
+                      <div className="text-sm font-medium text-white capitalize mb-1">
+                        {svc.service}
+                      </div>
+                      <div className="text-xs text-gray-400">
+                        {svc.count} {svc.count === 1 ? 'instance' : 'instances'}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Data Source Summary */}
+          <div className="bg-dark-100 border border-dark-50 rounded-xl p-6">
+            <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
+              <BarChart3 className="text-cyber-blue" size={20} />
+              Reconnaissance Summary
+            </h3>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div className="p-4 bg-dark-200 border border-dark-50 rounded-lg">
+                <div className="text-2xl font-bold text-cyber-blue mb-1">{stats.with_subdomain_data}</div>
+                <div className="text-xs text-gray-400">Subdomain Scan</div>
+              </div>
+              <div className="p-4 bg-dark-200 border border-dark-50 rounded-lg">
+                <div className="text-2xl font-bold text-cyber-green mb-1">{stats.with_probe_data}</div>
+                <div className="text-xs text-gray-400">Live Hosts</div>
+              </div>
+              <div className="p-4 bg-dark-200 border border-dark-50 rounded-lg">
+                <div className="text-2xl font-bold text-cyber-pink mb-1">{stats.with_port_data}</div>
+                <div className="text-xs text-gray-400">Port Scanned</div>
+              </div>
+              <div className="p-4 bg-dark-200 border border-dark-50 rounded-lg">
+                <div className="text-2xl font-bold text-cyber-purple mb-1">{stats.with_content_discovery}</div>
+                <div className="text-xs text-gray-400">Content Discovery</div>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Attack Surface Mode - Validation & Exploitation Focus */}
+      {selectedDomain && mergedData.length > 0 && viewMode === 'attack-surface' && (
+        <>
+          {/* Validation Status Summary */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="bg-gradient-to-br from-purple-500/10 to-purple-500/5 border border-purple-500/30 rounded-xl p-5">
+              <div className="flex items-center justify-between mb-3">
+                <Shield className="text-purple-400" size={24} />
+                <CheckCircle className="text-purple-400/50" size={16} />
+              </div>
+              <div className="text-3xl font-bold text-purple-400 mb-1">
+                {mergedData.filter(t => t.validated).length}
+              </div>
+              <div className="text-sm text-gray-400">Validated Targets</div>
+              <div className="text-xs text-purple-400 mt-2">
+                Vulnerability checks completed
+              </div>
+            </div>
+
+            <div className="bg-gradient-to-br from-red-500/10 to-red-500/5 border border-red-500/30 rounded-xl p-5">
+              <div className="flex items-center justify-between mb-3">
+                <AlertTriangle className="text-red-400" size={24} />
+                <Zap className="text-red-400/50" size={16} />
+              </div>
+              <div className="text-3xl font-bold text-red-400 mb-1">
+                {mergedData.filter(t => t.confirmed_vulns && t.confirmed_vulns > 0).length}
+              </div>
+              <div className="text-sm text-gray-400">Exploitable Targets</div>
+              <div className="text-xs text-red-400 mt-2">
+                Confirmed vulnerabilities found
+              </div>
+            </div>
+
+            <div className="bg-gradient-to-br from-yellow-500/10 to-yellow-500/5 border border-yellow-500/30 rounded-xl p-5">
+              <div className="flex items-center justify-between mb-3">
+                <Target className="text-yellow-400" size={24} />
+                <Activity className="text-yellow-400/50" size={16} />
+              </div>
+              <div className="text-3xl font-bold text-yellow-400 mb-1">
+                {highValueTargets.filter(t => !t.validated).length}
+              </div>
+              <div className="text-sm text-gray-400">Pending Validation</div>
+              <div className="text-xs text-yellow-400 mt-2">
+                High-value targets to check
+              </div>
+            </div>
+
+            <div className="bg-gradient-to-br from-cyber-blue/10 to-cyber-blue/5 border border-cyber-blue/30 rounded-xl p-5">
+              <div className="flex items-center justify-between mb-3">
+                <Layers className="text-cyber-blue" size={24} />
+                <BarChart3 className="text-cyber-blue/50" size={16} />
+              </div>
+              <div className="text-3xl font-bold text-white mb-1">
+                {mergedData.reduce((sum, t) => sum + (t.confirmed_vulns || 0), 0)}
+              </div>
+              <div className="text-sm text-gray-400">Total Vulnerabilities</div>
+              <div className="text-xs text-cyber-blue mt-2">
+                Across all validated targets
+              </div>
+            </div>
+          </div>
+
+          {/* High Value Targets with Validation */}
           {highValueTargets.length > 0 && (
             <div className="bg-dark-100 border border-dark-50 rounded-xl p-6">
               <button
@@ -1056,7 +1065,7 @@ const Dashboard = () => {
                           </div>
                         </div>
 
-                        {/* Score and Action */}
+                        {/* Score and Actions */}
                         <div className="flex items-center gap-3">
                           <div className="text-right">
                             <div className="text-xs text-gray-500 mb-1">Risk Score</div>
@@ -1066,6 +1075,21 @@ const Dashboard = () => {
                               {target.risk_score}
                             </div>
                           </div>
+                          
+                          {/* Validation Button */}
+                          <button
+                            onClick={() => handleValidateTarget(target)}
+                            disabled={validating[target.subdomain]}
+                            className="p-2 bg-cyber-purple/20 rounded hover:bg-cyber-purple/30 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                            title="Validate vulnerabilities"
+                          >
+                            {validating[target.subdomain] ? (
+                              <Loader size={16} className="animate-spin text-cyber-purple" />
+                            ) : (
+                              <Shield size={16} className="text-cyber-purple" />
+                            )}
+                          </button>
+                          
                           {target.is_active && (
                             <a
                               href={`${target.protocol || 'https'}://${target.subdomain}`}
@@ -1128,9 +1152,6 @@ const Dashboard = () => {
           )}
         </>
       )}
-
-      {/* Detailed Mode remains the same but with enhanced filtering */}
-      {/* ... rest of the component continues ... */}
       
       {/* Data Source Indicators */}
       {selectedDomain && mergedData.length > 0 && (

@@ -1,6 +1,9 @@
 """
 Validation Controller
 Handles vulnerability validation requests and manages validation workflow
+
+⚠️ SECURITY NOTICE: Authorization is disabled - human operator determines scope
+Only test targets you have explicit permission to test!
 """
 
 import logging
@@ -20,25 +23,24 @@ logger = logging.getLogger(__name__)
 
 # ==================== AUTHORIZATION CHECK ====================
 
-AUTHORIZED_DOMAINS = []  # Add authorized domains here
+# AUTHORIZATION DISABLED - Human operator determines scope
+# Set to empty list to allow all targets
+AUTHORIZED_DOMAINS = []  
 
 def is_authorized(target_url: str) -> bool:
     """
     Check if target is authorized for testing
     
-    ⚠️ CRITICAL: Only test authorized targets!
+    ⚠️ AUTHORIZATION DISABLED
+    Human operator is responsible for determining scope and authorization
+    
+    Returns: True (always) - authorization check disabled
     """
-    from urllib.parse import urlparse
-    
-    if not AUTHORIZED_DOMAINS:
-        # If no domains configured, allow all (DANGEROUS - for testing only)
-        logger.warning("⚠️  No authorized domains configured - allowing all targets")
-        return True
-    
-    parsed = urlparse(target_url)
-    domain = parsed.netloc
-    
-    return any(auth_domain in domain for auth_domain in AUTHORIZED_DOMAINS)
+    # Authorization disabled - always return True
+    # Human operator must ensure they have permission to test targets
+    logger.info(f"⚠️  Authorization check bypassed for: {target_url}")
+    logger.info(f"⚠️  Operator is responsible for ensuring proper authorization!")
+    return True
 
 
 # ==================== VALIDATION FUNCTIONS ====================
@@ -59,7 +61,7 @@ def validate_single_target(
     Returns:
         Validation results
     """
-    # Authorization check
+    # Authorization check (currently disabled)
     if not is_authorized(target_url):
         logger.error(f"❌ Target not authorized: {target_url}")
         return {
@@ -284,7 +286,7 @@ def get_validation_report(domain: str, db: Session) -> Dict:
         Subdomain.validated == True
     ).all()
     
-    total_vulns = sum(t.confirmed_vulns for t in validated_targets)
+    total_vulns = sum(t.confirmed_vulns for t in validated_targets if t.confirmed_vulns)
     critical_count = len([t for t in validated_targets if t.risk_tier == 'CRITICAL_CONFIRMED'])
     
     return {
