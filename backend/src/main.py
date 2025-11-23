@@ -9,6 +9,14 @@ import os
 # FIXED: Correct import path
 from src.config.database import get_db, init_db
 
+from src.controllers.validation import (
+    validate_single_target,
+    validate_high_value_targets_for_domain,
+    quick_validate_target,
+    get_validation_report
+)
+
+
 from src.controllers.subdomains import (
     start_subdomain_scan,
     get_subdomains_by_domain,
@@ -181,6 +189,12 @@ class PortScanResponse(BaseModel):
     tool_results: Dict[str, int]
     duration_seconds: int
     timestamp: str
+
+# Pydantic Models for Validation
+class TargetValidationRequest(BaseModel):
+    target_url: str
+    discovered_paths: Optional[List[str]] = []
+    background: bool = False
 
 # ==================== Startup Events ====================
 

@@ -21,6 +21,12 @@ class Subdomain(Base):
     technologies = Column(Text)  # JSON string of detected technologies
     screenshot_path = Column(String(512))
     scan_id = Column(String(50), index=True)  # For grouping scans
+    validated = Column(Boolean, default=False, index=True)
+    validation_results = Column(Text)
+    confirmed_vulns = Column(Integer, default=0)
+    last_validated = Column(DateTime)
+    risk_score = Column(Integer, default=0)
+    risk_tier = Column(String(50))
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
     
@@ -42,6 +48,12 @@ class Subdomain(Base):
             'technologies': self.technologies,
             'screenshot_path': self.screenshot_path,
             'scan_id': self.scan_id,
+            'validated': self.validated,
+            'validation_results': self.validation_results,
+            'confirmed_vulns': self.confirmed_vulns,
+            'last_validated': self.last_validated.isoformat() if self.last_validated else None,
+            'risk_score': self.risk_score,
+            'risk_tier': self.risk_tier,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None
         }

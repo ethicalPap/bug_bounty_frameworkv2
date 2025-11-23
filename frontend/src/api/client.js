@@ -71,4 +71,37 @@ export const healthCheck = () => {
   return api.get('/health');
 };
 
+
+// Validation Endpoints
+export const validateTarget = (targetUrl, discoveredPaths = [], background = false) => {
+  return api.post('/api/v1/validation/validate-target', {
+    target_url: targetUrl,
+    discovered_paths: discoveredPaths,
+    background: background
+  });
+};
+
+export const quickValidateTarget = (targetUrl, discoveredPaths = []) => {
+  return api.post('/api/v1/validation/quick-validate', {
+    target_url: targetUrl,
+    discovered_paths: discoveredPaths
+  });
+};
+
+export const validateDomain = (domain, limit = 10, minRiskScore = 30) => {
+  return api.post('/api/v1/validation/validate-domain', {
+    domain: domain,
+    limit: limit,
+    min_risk_score: minRiskScore
+  });
+};
+
+export const getValidationReport = (domain) => {
+  return api.get(`/api/v1/validation/results/${domain}`);
+};
+
+export const getTargetValidation = (subdomain) => {
+  return api.get(`/api/v1/validation/target/${subdomain}`);
+};
+
 export default api;
