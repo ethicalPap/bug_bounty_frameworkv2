@@ -1,5 +1,5 @@
 import { Outlet, Link, useLocation } from 'react-router-dom'
-import { Home, Globe, Activity, Search, Network, History as HistoryIcon } from 'lucide-react'
+import { Home, Globe, Activity, Search, Network, BarChart3, History as HistoryIcon } from 'lucide-react'
 
 const Layout = () => {
   const location = useLocation()
@@ -10,7 +10,7 @@ const Layout = () => {
     { path: '/live-hosts', label: 'Live Hosts', icon: Activity },
     { path: '/content-discovery', label: 'Content Discovery', icon: Search },
     { path: '/port-scanner', label: 'Port Scanner', icon: Network },
-    { path: '/visualization', label: 'Visualization', icon: Network },
+    { path: '/visualization', label: 'Visualization', icon: BarChart3 },
     { path: '/history', label: 'History', icon: HistoryIcon },
   ]
 
@@ -27,7 +27,7 @@ const Layout = () => {
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 p-4 space-y-2">
+        <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
           {navItems.map((item) => {
             const Icon = item.icon
             const isActive = location.pathname === item.path
@@ -52,7 +52,7 @@ const Layout = () => {
         {/* Footer */}
         <div className="p-4 border-t border-dark-50">
           <div className="text-xs text-gray-500 text-center">
-            v1.0.0 • Built with ❤️
+            v2.0.0 • Built with ❤️
           </div>
         </div>
       </aside>

@@ -19,24 +19,53 @@ import {
   Lock,
   Unlock,
   Zap,
-  AlertCircle
+  AlertCircle,
+  Shield,
+  Target,
+  TrendingUp,
+  Eye,
+  Server,
+  Code,
+  Layers,
+  ChevronRight,
+  Info,
+  BarChart3
 } from 'lucide-react'
 
 const STORAGE_KEYS = {
   SUBDOMAIN_RESULTS: 'subdomain_scanner_last_domain',
   LIVE_HOSTS_RESULTS: 'live_hosts_results',
-  PORT_SCAN_RESULTS: 'port_scan_results', // ✅ ADDED
-  CONTENT_DISCOVERY_RESULTS: 'content_discovery_results', // ✅ ADDED
+  PORT_SCAN_RESULTS: 'port_scan_results',
+  CONTENT_DISCOVERY_RESULTS: 'content_discovery_results',
   FILTER_STATE: 'dashboard_filter_state',
   SORT_STATE: 'dashboard_sort_state',
+  VIEW_MODE: 'dashboard_view_mode',
+  EXPANDED_SECTIONS: 'dashboard_expanded_sections',
 }
 
 const Dashboard = () => {
   const queryClient = useQueryClient()
   
-  // Get available domains from all scan types
+  // State management
   const [availableDomains, setAvailableDomains] = useState([])
   const [selectedDomain, setSelectedDomain] = useState('')
+  
+  // View mode: 'overview' | 'detailed' | 'attack-surface'
+  const [viewMode, setViewMode] = useState(() => {
+    return localStorage.getItem(STORAGE_KEYS.VIEW_MODE) || 'overview'
+  })
+  
+  // Expanded sections for better UX
+  const [expandedSections, setExpandedSections] = useState(() => {
+    const saved = localStorage.getItem(STORAGE_KEYS.EXPANDED_SECTIONS)
+    return saved ? JSON.parse(saved) : {
+      stats: true,
+      quick_actions: true,
+      attack_vectors: true,
+      high_value_targets: true,
+      reconnaissance: true,
+    }
+  })
   
   // Filters and search
   const [searchTerm, setSearchTerm] = useState(() => {
@@ -51,6 +80,7 @@ const Dashboard = () => {
     const saved = localStorage.getItem(STORAGE_KEYS.FILTER_STATE)
     return saved ? JSON.parse(saved).filterProtocol || 'all' : 'all'
   })
+  const [filterInteresting, setFilterInteresting] = useState(false)
   
   // Sorting
   const [sortBy, setSortBy] = useState(() => {
@@ -65,8 +95,16 @@ const Dashboard = () => {
   // Pagination
   const [currentPage, setCurrentPage] = useState(1)
   const [itemsPerPage, setItemsPerPage] = useState(50)
-  
-  // Persist filter and sort state
+
+  // Toggle section expansion
+  const toggleSection = (section) => {
+    setExpandedSections(prev => ({
+      ...prev,
+      [section]: !prev[section]
+    }))
+  }
+
+  // Persist state
   useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.FILTER_STATE, JSON.stringify({
       searchTerm,
@@ -82,6 +120,14 @@ const Dashboard = () => {
     }))
   }, [sortBy, sortOrder])
 
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEYS.VIEW_MODE, viewMode)
+  }, [viewMode])
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEYS.EXPANDED_SECTIONS, JSON.stringify(expandedSections))
+  }, [expandedSections])
+
   // Fetch available domains from cache
   useEffect(() => {
     const queryCache = queryClient.getQueryCache()
@@ -95,7 +141,6 @@ const Dashboard = () => {
     const uniqueDomains = [...new Set(domains)]
     setAvailableDomains(uniqueDomains)
     
-    // Auto-select first domain if none selected
     if (!selectedDomain && uniqueDomains.length > 0) {
       setSelectedDomain(uniqueDomains[0])
     }
@@ -110,7 +155,7 @@ const Dashboard = () => {
     cacheTime: 1000 * 60 * 60 * 24,
   })
 
-  // Get live hosts data from localStorage
+  // Get all scan data from localStorage
   const liveHostsData = useMemo(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEYS.LIVE_HOSTS_RESULTS)
@@ -118,9 +163,8 @@ const Dashboard = () => {
     } catch {
       return []
     }
-  }, [selectedDomain]) // Re-compute when domain changes
+  }, [selectedDomain])
 
-  // ✅ ADDED: Get port scan data from localStorage
   const portScanData = useMemo(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEYS.PORT_SCAN_RESULTS)
@@ -128,9 +172,8 @@ const Dashboard = () => {
     } catch {
       return []
     }
-  }, [selectedDomain]) // Re-compute when domain changes
+  }, [selectedDomain])
 
-  // ✅ ADDED: Get content discovery data from localStorage
   const contentDiscoveryData = useMemo(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEYS.CONTENT_DISCOVERY_RESULTS)
@@ -138,13 +181,11 @@ const Dashboard = () => {
     } catch {
       return []
     }
-  }, [selectedDomain]) // Re-compute when domain changes
+  }, [selectedDomain])
 
-  // ✅ UPDATED: Merge data from different sources including port scans
+  // Merge all data sources
   const mergedData = useMemo(() => {
     const subdomains = subdomainsData?.data || []
-    
-    // Create a map of subdomain data
     const dataMap = new Map()
     
     // Add subdomain scanner data
@@ -152,19 +193,19 @@ const Dashboard = () => {
       dataMap.set(sub.full_domain, {
         subdomain: sub.full_domain,
         from_subdomain_scan: true,
-        // Data from subdomain scanner
         ip_address: sub.ip_address,
         status_code: sub.status_code,
         is_active: sub.is_active,
         title: sub.title,
         server: sub.server,
         content_length: sub.content_length,
-        // Placeholders for other scan types
         protocol: null,
         response_time: null,
         technologies: null,
         open_ports: null,
         vulnerabilities: null,
+        discovered_paths: 0,
+        interesting_score: 0,
         last_updated: sub.updated_at,
       })
     })
@@ -173,7 +214,6 @@ const Dashboard = () => {
     liveHostsData.forEach(host => {
       const existing = dataMap.get(host.subdomain)
       if (existing) {
-        // Update existing entry with live host data
         existing.protocol = host.protocol
         existing.response_time = host.response_time
         existing.is_active = host.is_active
@@ -182,7 +222,6 @@ const Dashboard = () => {
         existing.server = host.server || existing.server
         existing.from_live_probe = true
       } else {
-        // Add new entry from live hosts
         dataMap.set(host.subdomain, {
           subdomain: host.subdomain,
           from_live_probe: true,
@@ -197,18 +236,19 @@ const Dashboard = () => {
           technologies: null,
           open_ports: null,
           vulnerabilities: null,
+          discovered_paths: 0,
+          interesting_score: 0,
           last_updated: host.probed_at,
         })
       }
     })
     
-    // ✅ ADDED: Merge port scan data
+    // Merge port scan data
     portScanData.forEach(portData => {
       const target = portData.target
       const existing = dataMap.get(target)
       
       if (existing) {
-        // Aggregate open ports for this target
         if (!existing.open_ports) {
           existing.open_ports = []
         }
@@ -219,15 +259,16 @@ const Dashboard = () => {
             version: portData.version,
             protocol: portData.protocol
           })
+          // Increase interesting score for common vulnerable ports
+          if ([21, 22, 23, 3306, 3389, 5432, 27017].includes(portData.port)) {
+            existing.interesting_score += 10
+          }
         }
         existing.from_port_scan = true
-        
-        // ✅ ADDED: Update IP address from port scan if not already set
         if (!existing.ip_address && portData.ip_address) {
           existing.ip_address = portData.ip_address
         }
       } else {
-        // Create new entry if only port scan data exists
         dataMap.set(target, {
           subdomain: target,
           from_port_scan: true,
@@ -237,7 +278,7 @@ const Dashboard = () => {
           status_code: null,
           title: null,
           server: null,
-          ip_address: portData.ip_address || null, // ✅ ADDED: Get IP from port scan
+          ip_address: portData.ip_address || null,
           content_length: null,
           technologies: null,
           open_ports: portData.state === 'open' ? [{
@@ -247,41 +288,42 @@ const Dashboard = () => {
             protocol: portData.protocol
           }] : [],
           vulnerabilities: null,
+          discovered_paths: 0,
+          interesting_score: 0,
           last_updated: portData.created_at,
         })
       }
     })
     
-    // ✅ ADDED: Merge content discovery data for technology detection
+    // Merge content discovery data
     contentDiscoveryData.forEach(content => {
-      // Extract domain from target_url or discovered_url
       let targetDomain = null
       try {
         const url = new URL(content.target_url || content.discovered_url)
         targetDomain = url.hostname
       } catch {
-        // If URL parsing fails, skip this entry
         return
       }
       
       const existing = dataMap.get(targetDomain)
       
       if (existing) {
-        // Add technologies if available
         if (content.technologies && !existing.technologies) {
           existing.technologies = content.technologies
         }
-        
-        // Mark as having content discovery data
         existing.from_content_discovery = true
-        
-        // Aggregate discovered paths count
         if (!existing.discovered_paths) {
           existing.discovered_paths = 0
         }
         existing.discovered_paths += 1
+        
+        // Increase interesting score for sensitive paths
+        const path = content.path?.toLowerCase() || ''
+        if (path.includes('admin') || path.includes('api') || path.includes('backup') || 
+            path.includes('.git') || path.includes('.env')) {
+          existing.interesting_score += 5
+        }
       } else {
-        // Create new entry if only content discovery data exists
         dataMap.set(targetDomain, {
           subdomain: targetDomain,
           from_content_discovery: true,
@@ -297,6 +339,7 @@ const Dashboard = () => {
           open_ports: null,
           vulnerabilities: null,
           discovered_paths: 1,
+          interesting_score: 0,
           last_updated: content.created_at,
         })
       }
@@ -308,22 +351,21 @@ const Dashboard = () => {
   // Filter data
   const filteredData = useMemo(() => {
     return mergedData.filter(item => {
-      // Search filter
       if (searchTerm && !item.subdomain.toLowerCase().includes(searchTerm.toLowerCase())) {
         return false
       }
       
-      // Status filter
       if (filterStatus === 'active' && !item.is_active) return false
       if (filterStatus === 'inactive' && item.is_active) return false
       
-      // Protocol filter
       if (filterProtocol === 'https' && item.protocol !== 'https') return false
       if (filterProtocol === 'http' && item.protocol !== 'http') return false
       
+      if (filterInteresting && item.interesting_score < 5) return false
+      
       return true
     })
-  }, [mergedData, searchTerm, filterStatus, filterProtocol])
+  }, [mergedData, searchTerm, filterStatus, filterProtocol, filterInteresting])
 
   // Sort data
   const sortedData = useMemo(() => {
@@ -352,6 +394,10 @@ const Dashboard = () => {
         case 'status_code':
           aVal = a.status_code || 0
           bVal = b.status_code || 0
+          break
+        case 'interesting':
+          aVal = a.interesting_score || 0
+          bVal = b.interesting_score || 0
           break
         default:
           return 0
@@ -397,7 +443,7 @@ const Dashboard = () => {
       'Server',
       'Open Ports',
       'Technologies',
-      'Vulnerabilities'
+      'Interesting Score'
     ]
     
     const rows = sortedData.map(item => [
@@ -411,7 +457,7 @@ const Dashboard = () => {
       item.server || 'N/A',
       item.open_ports ? item.open_ports.map(p => `${p.port}/${p.service}`).join('; ') : 'N/A',
       item.technologies || 'N/A',
-      item.vulnerabilities || 'N/A'
+      item.interesting_score || 0
     ])
 
     const csvContent = [
@@ -436,7 +482,7 @@ const Dashboard = () => {
       .catch(err => console.error('Failed to copy:', err))
   }
 
-  // ✅ UPDATED: Statistics including port scan data
+  // Statistics
   const stats = {
     total: mergedData.length,
     active: mergedData.filter(d => d.is_active).length,
@@ -445,57 +491,130 @@ const Dashboard = () => {
     http: mergedData.filter(d => d.protocol === 'http').length,
     with_probe_data: mergedData.filter(d => d.from_live_probe).length,
     with_subdomain_data: mergedData.filter(d => d.from_subdomain_scan).length,
-    with_port_data: mergedData.filter(d => d.from_port_scan).length, // ✅ ADDED
-    total_open_ports: mergedData.reduce((sum, d) => sum + (d.open_ports?.length || 0), 0), // ✅ ADDED
-    with_content_discovery: mergedData.filter(d => d.from_content_discovery).length, // ✅ ADDED
-    with_technologies: mergedData.filter(d => d.technologies).length, // ✅ ADDED
+    with_port_data: mergedData.filter(d => d.from_port_scan).length,
+    total_open_ports: mergedData.reduce((sum, d) => sum + (d.open_ports?.length || 0), 0),
+    with_content_discovery: mergedData.filter(d => d.from_content_discovery).length,
+    with_technologies: mergedData.filter(d => d.technologies).length,
+    high_value_targets: mergedData.filter(d => d.interesting_score >= 15).length,
+    medium_value_targets: mergedData.filter(d => d.interesting_score >= 5 && d.interesting_score < 15).length,
   }
+
+  // High value targets
+  const highValueTargets = useMemo(() => {
+    return mergedData
+      .filter(d => d.interesting_score >= 5)
+      .sort((a, b) => b.interesting_score - a.interesting_score)
+      .slice(0, 10)
+  }, [mergedData])
+
+  // Attack surface summary
+  const attackSurface = useMemo(() => {
+    const services = new Map()
+    mergedData.forEach(host => {
+      if (host.open_ports) {
+        host.open_ports.forEach(port => {
+          const key = `${port.service || 'unknown'}:${port.port}`
+          if (!services.has(key)) {
+            services.set(key, {
+              service: port.service || 'unknown',
+              port: port.port,
+              count: 0,
+              hosts: []
+            })
+          }
+          const svc = services.get(key)
+          svc.count++
+          svc.hosts.push(host.subdomain)
+        })
+      }
+    })
+    
+    return Array.from(services.values())
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 8)
+  }, [mergedData])
 
   return (
     <div className="p-8 space-y-6">
-      {/* Header */}
+      {/* Header with Navigation */}
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-3xl font-bold text-white flex items-center gap-3">
-            <Home className="text-cyber-blue" />
-            Dashboard
+            <Target className="text-cyber-blue" />
+            Attack Surface Dashboard
           </h2>
-          <p className="text-gray-400 mt-2">Unified view of all reconnaissance data</p>
+          <p className="text-gray-400 mt-2">Comprehensive reconnaissance intelligence</p>
         </div>
 
-        {mergedData.length > 0 && (
-          <div className="flex gap-2">
+        <div className="flex items-center gap-3">
+          {/* View Mode Selector */}
+          <div className="flex bg-dark-100 border border-dark-50 rounded-lg p-1">
             <button
-              onClick={copyToClipboard}
-              className="flex items-center gap-2 px-4 py-2 bg-dark-100 border border-dark-50 rounded-lg text-white hover:border-cyber-blue transition-all"
-              title="Copy all subdomains"
+              onClick={() => setViewMode('overview')}
+              className={`px-3 py-1.5 rounded text-xs font-medium transition-all ${
+                viewMode === 'overview'
+                  ? 'bg-cyber-blue text-white'
+                  : 'text-gray-400 hover:text-white'
+              }`}
             >
-              <Copy size={16} />
-              Copy
+              Overview
             </button>
             <button
-              onClick={exportToCSV}
-              className="flex items-center gap-2 px-4 py-2 bg-dark-100 border border-dark-50 rounded-lg text-white hover:border-cyber-green transition-all"
-              title="Export to CSV"
+              onClick={() => setViewMode('detailed')}
+              className={`px-3 py-1.5 rounded text-xs font-medium transition-all ${
+                viewMode === 'detailed'
+                  ? 'bg-cyber-blue text-white'
+                  : 'text-gray-400 hover:text-white'
+              }`}
             >
-              <Download size={16} />
-              Export
+              Detailed
+            </button>
+            <button
+              onClick={() => setViewMode('attack-surface')}
+              className={`px-3 py-1.5 rounded text-xs font-medium transition-all ${
+                viewMode === 'attack-surface'
+                  ? 'bg-cyber-blue text-white'
+                  : 'text-gray-400 hover:text-white'
+              }`}
+            >
+              Attack Surface
             </button>
           </div>
-        )}
+
+          {mergedData.length > 0 && (
+            <>
+              <button
+                onClick={copyToClipboard}
+                className="flex items-center gap-2 px-3 py-2 bg-dark-100 border border-dark-50 rounded-lg text-white hover:border-cyber-blue transition-all text-sm"
+                title="Copy all subdomains"
+              >
+                <Copy size={16} />
+                Copy
+              </button>
+              <button
+                onClick={exportToCSV}
+                className="flex items-center gap-2 px-3 py-2 bg-dark-100 border border-dark-50 rounded-lg text-white hover:border-cyber-green transition-all text-sm"
+                title="Export to CSV"
+              >
+                <Download size={16} />
+                Export
+              </button>
+            </>
+          )}
+        </div>
       </div>
 
       {/* Domain Selection */}
       <div className="bg-dark-100 border border-dark-50 rounded-xl p-6">
         <label className="block text-sm font-medium text-gray-300 mb-2">
-          Select Domain
+          Target Domain
         </label>
         {availableDomains.length === 0 ? (
           <div className="text-center py-8 bg-dark-200 border border-dark-50 rounded-lg">
             <Globe className="mx-auto text-gray-600 mb-3" size={48} />
-            <p className="text-gray-400 mb-2">No data available</p>
+            <p className="text-gray-400 mb-2">No reconnaissance data available</p>
             <p className="text-sm text-gray-500">
-              Run a subdomain scan to populate the dashboard
+              Start by running a subdomain scan from the Subdomain Scanner
             </p>
           </div>
         ) : (
@@ -503,7 +622,7 @@ const Dashboard = () => {
             value={selectedDomain}
             onChange={(e) => {
               setSelectedDomain(e.target.value)
-              setCurrentPage(1) // Reset to first page
+              setCurrentPage(1)
             }}
             className="w-full px-4 py-3 bg-dark-200 border border-dark-50 rounded-lg text-white focus:outline-none focus:border-cyber-blue transition-all"
           >
@@ -514,74 +633,601 @@ const Dashboard = () => {
         )}
       </div>
 
-      {/* Statistics Cards */}
-      {selectedDomain && mergedData.length > 0 && (
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <div className="bg-dark-100 border border-dark-50 rounded-xl p-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-cyber-blue/10 rounded-lg">
+      {/* Overview Mode */}
+      {selectedDomain && mergedData.length > 0 && viewMode === 'overview' && (
+        <>
+          {/* Key Metrics Grid */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="bg-gradient-to-br from-cyber-blue/10 to-cyber-blue/5 border border-cyber-blue/30 rounded-xl p-5">
+              <div className="flex items-center justify-between mb-3">
                 <Globe className="text-cyber-blue" size={24} />
+                <TrendingUp className="text-cyber-blue/50" size={16} />
               </div>
-              <div>
-                <div className="text-2xl font-bold text-white">{stats.total}</div>
-                <div className="text-xs text-gray-400">Total Hosts</div>
+              <div className="text-3xl font-bold text-white mb-1">{stats.total}</div>
+              <div className="text-sm text-gray-400">Total Assets</div>
+              <div className="text-xs text-cyber-blue mt-2">
+                {stats.active > 0 ? `${((stats.active / stats.total) * 100).toFixed(1)}% active` : 'No active hosts'}
               </div>
             </div>
-          </div>
 
-          <div className="bg-dark-100 border border-green-500/20 rounded-xl p-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-green-500/10 rounded-lg">
+            <div className="bg-gradient-to-br from-green-500/10 to-green-500/5 border border-green-500/30 rounded-xl p-5">
+              <div className="flex items-center justify-between mb-3">
                 <CheckCircle className="text-green-400" size={24} />
+                <Activity className="text-green-400/50" size={16} />
               </div>
-              <div>
-                <div className="text-2xl font-bold text-green-400">{stats.active}</div>
-                <div className="text-xs text-gray-400">Active Hosts</div>
-                {stats.active > 0 && (
-                  <div className="text-xs text-green-400/70">
-                    {((stats.active / stats.total) * 100).toFixed(1)}%
-                  </div>
-                )}
+              <div className="text-3xl font-bold text-green-400 mb-1">{stats.active}</div>
+              <div className="text-sm text-gray-400">Active Hosts</div>
+              <div className="text-xs text-green-400/70 mt-2">
+                {stats.https} HTTPS, {stats.http} HTTP
               </div>
             </div>
-          </div>
 
-          <div className="bg-dark-100 border border-dark-50 rounded-xl p-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-green-500/10 rounded-lg">
-                <Lock className="text-green-400" size={24} />
-              </div>
-              <div>
-                <div className="text-2xl font-bold text-white">{stats.https}</div>
-                <div className="text-xs text-gray-400">HTTPS</div>
-              </div>
-            </div>
-          </div>
-
-          {/* ✅ UPDATED: Show port scan stats */}
-          <div className="bg-dark-100 border border-cyber-pink/20 rounded-xl p-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-cyber-pink/10 rounded-lg">
+            <div className="bg-gradient-to-br from-cyber-pink/10 to-cyber-pink/5 border border-cyber-pink/30 rounded-xl p-5">
+              <div className="flex items-center justify-between mb-3">
                 <Network className="text-cyber-pink" size={24} />
+                <Server className="text-cyber-pink/50" size={16} />
               </div>
-              <div>
-                <div className="text-2xl font-bold text-white">{stats.total_open_ports}</div>
-                <div className="text-xs text-gray-400">Open Ports</div>
-                {stats.with_port_data > 0 && (
-                  <div className="text-xs text-cyber-pink/70">
-                    {stats.with_port_data} host{stats.with_port_data !== 1 ? 's' : ''}
+              <div className="text-3xl font-bold text-cyber-pink mb-1">{stats.total_open_ports}</div>
+              <div className="text-sm text-gray-400">Open Ports</div>
+              <div className="text-xs text-cyber-pink/70 mt-2">
+                {stats.with_port_data} hosts scanned
+              </div>
+            </div>
+
+            <div className="bg-gradient-to-br from-cyber-purple/10 to-cyber-purple/5 border border-cyber-purple/30 rounded-xl p-5">
+              <div className="flex items-center justify-between mb-3">
+                <Shield className="text-cyber-purple" size={24} />
+                <Eye className="text-cyber-purple/50" size={16} />
+              </div>
+              <div className="text-3xl font-bold text-cyber-purple mb-1">{stats.high_value_targets}</div>
+              <div className="text-sm text-gray-400">High Value Targets</div>
+              <div className="text-xs text-cyber-purple/70 mt-2">
+                {stats.medium_value_targets} medium priority
+              </div>
+            </div>
+          </div>
+
+          {/* Quick Actions */}
+          <div className="bg-dark-100 border border-dark-50 rounded-xl p-6">
+            <button
+              onClick={() => toggleSection('quick_actions')}
+              className="w-full flex items-center justify-between mb-4"
+            >
+              <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+                <Zap className="text-cyber-blue" size={20} />
+                Quick Actions
+              </h3>
+              {expandedSections.quick_actions ? <ChevronUp size={20} className="text-gray-400" /> : <ChevronDown size={20} className="text-gray-400" />}
+            </button>
+
+            {expandedSections.quick_actions && (
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <button className="flex items-center gap-3 p-4 bg-dark-200 border border-dark-50 rounded-lg hover:border-cyber-blue transition-all group">
+                  <div className="p-2 bg-cyber-blue/10 rounded-lg group-hover:bg-cyber-blue/20 transition-all">
+                    <Activity size={20} className="text-cyber-blue" />
                   </div>
-                )}
+                  <div className="text-left">
+                    <div className="text-sm font-medium text-white">Live Probe</div>
+                    <div className="text-xs text-gray-400">Check all hosts</div>
+                  </div>
+                  <ChevronRight size={16} className="ml-auto text-gray-600 group-hover:text-cyber-blue transition-all" />
+                </button>
+
+                <button className="flex items-center gap-3 p-4 bg-dark-200 border border-dark-50 rounded-lg hover:border-cyber-pink transition-all group">
+                  <div className="p-2 bg-cyber-pink/10 rounded-lg group-hover:bg-cyber-pink/20 transition-all">
+                    <Network size={20} className="text-cyber-pink" />
+                  </div>
+                  <div className="text-left">
+                    <div className="text-sm font-medium text-white">Port Scan</div>
+                    <div className="text-xs text-gray-400">Active targets</div>
+                  </div>
+                  <ChevronRight size={16} className="ml-auto text-gray-600 group-hover:text-cyber-pink transition-all" />
+                </button>
+
+                <button className="flex items-center gap-3 p-4 bg-dark-200 border border-dark-50 rounded-lg hover:border-cyber-purple transition-all group">
+                  <div className="p-2 bg-cyber-purple/10 rounded-lg group-hover:bg-cyber-purple/20 transition-all">
+                    <Search size={20} className="text-cyber-purple" />
+                  </div>
+                  <div className="text-left">
+                    <div className="text-sm font-medium text-white">Content Discovery</div>
+                    <div className="text-xs text-gray-400">Find hidden paths</div>
+                  </div>
+                  <ChevronRight size={16} className="ml-auto text-gray-600 group-hover:text-cyber-purple transition-all" />
+                </button>
+
+                <button className="flex items-center gap-3 p-4 bg-dark-200 border border-dark-50 rounded-lg hover:border-cyber-green transition-all group">
+                  <div className="p-2 bg-cyber-green/10 rounded-lg group-hover:bg-cyber-green/20 transition-all">
+                    <Download size={20} className="text-cyber-green" />
+                  </div>
+                  <div className="text-left">
+                    <div className="text-sm font-medium text-white">Export All</div>
+                    <div className="text-xs text-gray-400">Complete report</div>
+                  </div>
+                  <ChevronRight size={16} className="ml-auto text-gray-600 group-hover:text-cyber-green transition-all" />
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* High Value Targets */}
+          {highValueTargets.length > 0 && (
+            <div className="bg-dark-100 border border-dark-50 rounded-xl p-6">
+              <button
+                onClick={() => toggleSection('high_value_targets')}
+                className="w-full flex items-center justify-between mb-4"
+              >
+                <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+                  <Target className="text-cyber-purple" size={20} />
+                  High Value Targets
+                  <span className="ml-2 px-2 py-0.5 bg-cyber-purple/20 rounded-full text-xs text-cyber-purple">
+                    {highValueTargets.length}
+                  </span>
+                </h3>
+                {expandedSections.high_value_targets ? <ChevronUp size={20} className="text-gray-400" /> : <ChevronDown size={20} className="text-gray-400" />}
+              </button>
+
+              {expandedSections.high_value_targets && (
+                <div className="space-y-2">
+                  {highValueTargets.map((target, idx) => (
+                    <div
+                      key={idx}
+                      className="flex items-center gap-4 p-4 bg-dark-200 border border-dark-50 rounded-lg hover:border-cyber-purple transition-all"
+                    >
+                      <div className="flex-shrink-0">
+                        <div className="w-10 h-10 bg-cyber-purple/10 rounded-lg flex items-center justify-center">
+                          <span className="text-cyber-purple font-bold">{idx + 1}</span>
+                        </div>
+                      </div>
+                      
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-white font-mono text-sm truncate">{target.subdomain}</span>
+                          {target.is_active && (
+                            <CheckCircle size={14} className="text-green-400 flex-shrink-0" />
+                          )}
+                        </div>
+                        <div className="flex items-center gap-3 text-xs text-gray-400">
+                          {target.open_ports && target.open_ports.length > 0 && (
+                            <span className="flex items-center gap-1">
+                              <Network size={12} />
+                              {target.open_ports.length} ports
+                            </span>
+                          )}
+                          {target.discovered_paths > 0 && (
+                            <span className="flex items-center gap-1">
+                              <Search size={12} />
+                              {target.discovered_paths} paths
+                            </span>
+                          )}
+                          {target.protocol && (
+                            <span className={`px-1.5 py-0.5 rounded text-xs ${
+                              target.protocol === 'https' ? 'bg-green-500/20 text-green-400' : 'bg-yellow-500/20 text-yellow-400'
+                            }`}>
+                              {target.protocol.toUpperCase()}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-3">
+                        <div className="text-right">
+                          <div className="text-xs text-gray-500">Risk Score</div>
+                          <div className="text-sm font-bold text-cyber-purple">{target.interesting_score}</div>
+                        </div>
+                        {target.is_active && (
+                          <a
+                            href={`${target.protocol || 'https'}://${target.subdomain}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="p-2 hover:bg-dark-100 rounded transition-all"
+                          >
+                            <ExternalLink size={16} className="text-cyber-blue" />
+                          </a>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Attack Surface Summary */}
+          {attackSurface.length > 0 && (
+            <div className="bg-dark-100 border border-dark-50 rounded-xl p-6">
+              <button
+                onClick={() => toggleSection('attack_vectors')}
+                className="w-full flex items-center justify-between mb-4"
+              >
+                <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+                  <Shield className="text-cyber-pink" size={20} />
+                  Attack Surface Analysis
+                </h3>
+                {expandedSections.attack_vectors ? <ChevronUp size={20} className="text-gray-400" /> : <ChevronDown size={20} className="text-gray-400" />}
+              </button>
+
+              {expandedSections.attack_vectors && (
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  {attackSurface.map((svc, idx) => (
+                    <div
+                      key={idx}
+                      className="p-4 bg-dark-200 border border-dark-50 rounded-lg hover:border-cyber-pink transition-all"
+                    >
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="p-2 bg-cyber-pink/10 rounded">
+                          <Server size={16} className="text-cyber-pink" />
+                        </div>
+                        <span className="text-xs font-mono text-gray-400">:{svc.port}</span>
+                      </div>
+                      <div className="text-sm font-medium text-white capitalize mb-1">
+                        {svc.service}
+                      </div>
+                      <div className="text-xs text-gray-400">
+                        {svc.count} {svc.count === 1 ? 'instance' : 'instances'}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Detailed Mode - Full Table */}
+      {selectedDomain && mergedData.length > 0 && viewMode === 'detailed' && (
+        <>
+          {/* Filters and Search */}
+          <div className="bg-dark-100 border border-dark-50 rounded-xl p-6">
+            <div className="flex flex-col lg:flex-row gap-4">
+              {/* Search */}
+              <div className="flex-1">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500" size={18} />
+                  <input
+                    type="text"
+                    value={searchTerm}
+                    onChange={(e) => {
+                      setSearchTerm(e.target.value)
+                      setCurrentPage(1)
+                    }}
+                    placeholder="Search assets..."
+                    className="w-full pl-10 pr-4 py-2 bg-dark-200 border border-dark-50 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-cyber-blue transition-all"
+                  />
+                </div>
+              </div>
+
+              {/* Filters */}
+              <div className="flex gap-2">
+                <select
+                  value={filterStatus}
+                  onChange={(e) => {
+                    setFilterStatus(e.target.value)
+                    setCurrentPage(1)
+                  }}
+                  className="px-4 py-2 bg-dark-200 border border-dark-50 rounded-lg text-white focus:outline-none focus:border-cyber-blue transition-all text-sm"
+                >
+                  <option value="all">All Status</option>
+                  <option value="active">Active Only</option>
+                  <option value="inactive">Inactive Only</option>
+                </select>
+
+                <select
+                  value={filterProtocol}
+                  onChange={(e) => {
+                    setFilterProtocol(e.target.value)
+                    setCurrentPage(1)
+                  }}
+                  className="px-4 py-2 bg-dark-200 border border-dark-50 rounded-lg text-white focus:outline-none focus:border-cyber-blue transition-all text-sm"
+                >
+                  <option value="all">All Protocols</option>
+                  <option value="https">HTTPS Only</option>
+                  <option value="http">HTTP Only</option>
+                </select>
+
+                <label className="flex items-center gap-2 px-4 py-2 bg-dark-200 border border-dark-50 rounded-lg cursor-pointer hover:border-cyber-purple transition-all">
+                  <input
+                    type="checkbox"
+                    checked={filterInteresting}
+                    onChange={(e) => {
+                      setFilterInteresting(e.target.checked)
+                      setCurrentPage(1)
+                    }}
+                    className="w-4 h-4 text-cyber-purple bg-dark-100 border-gray-600 rounded focus:ring-cyber-purple"
+                  />
+                  <span className="text-sm text-white whitespace-nowrap">Interesting Only</span>
+                </label>
+
+                <select
+                  value={itemsPerPage}
+                  onChange={(e) => {
+                    setItemsPerPage(Number(e.target.value))
+                    setCurrentPage(1)
+                  }}
+                  className="px-4 py-2 bg-dark-200 border border-dark-50 rounded-lg text-white focus:outline-none focus:border-cyber-blue transition-all text-sm"
+                >
+                  <option value="25">25 per page</option>
+                  <option value="50">50 per page</option>
+                  <option value="100">100 per page</option>
+                  <option value="200">200 per page</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          {/* Results Table */}
+          <div className="bg-dark-100 border border-dark-50 rounded-xl overflow-hidden">
+            {sortedData.length === 0 ? (
+              <div className="text-center py-12 px-6">
+                <AlertCircle className="mx-auto text-gray-600 mb-3" size={48} />
+                <p className="text-gray-400">No results match your filters</p>
+                <button
+                  onClick={() => {
+                    setSearchTerm('')
+                    setFilterStatus('all')
+                    setFilterProtocol('all')
+                    setFilterInteresting(false)
+                  }}
+                  className="mt-4 text-cyber-blue hover:underline"
+                >
+                  Clear all filters
+                </button>
+              </div>
+            ) : (
+              <>
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead className="bg-dark-200 border-b border-dark-50">
+                      <tr>
+                        <th 
+                          onClick={() => handleSort('interesting')}
+                          className="text-left py-3 px-4 text-xs font-medium text-gray-400 cursor-pointer hover:text-white transition-colors"
+                        >
+                          <div className="flex items-center gap-2">
+                            Score
+                            {sortBy === 'interesting' && (
+                              sortOrder === 'asc' ? <ChevronUp size={14} /> : <ChevronDown size={14} />
+                            )}
+                          </div>
+                        </th>
+                        <th 
+                          onClick={() => handleSort('subdomain')}
+                          className="text-left py-3 px-4 text-xs font-medium text-gray-400 cursor-pointer hover:text-white transition-colors"
+                        >
+                          <div className="flex items-center gap-2">
+                            Asset
+                            {sortBy === 'subdomain' && (
+                              sortOrder === 'asc' ? <ChevronUp size={14} /> : <ChevronDown size={14} />
+                            )}
+                          </div>
+                        </th>
+                        <th 
+                          onClick={() => handleSort('status')}
+                          className="text-center py-3 px-4 text-xs font-medium text-gray-400 cursor-pointer hover:text-white transition-colors"
+                        >
+                          <div className="flex items-center justify-center gap-2">
+                            Status
+                            {sortBy === 'status' && (
+                              sortOrder === 'asc' ? <ChevronUp size={14} /> : <ChevronDown size={14} />
+                            )}
+                          </div>
+                        </th>
+                        <th 
+                          onClick={() => handleSort('protocol')}
+                          className="text-center py-3 px-4 text-xs font-medium text-gray-400 cursor-pointer hover:text-white transition-colors"
+                        >
+                          <div className="flex items-center justify-center gap-2">
+                            Protocol
+                            {sortBy === 'protocol' && (
+                              sortOrder === 'asc' ? <ChevronUp size={14} /> : <ChevronDown size={14} />
+                            )}
+                          </div>
+                        </th>
+                        <th className="text-left py-3 px-4 text-xs font-medium text-gray-400">IP Address</th>
+                        <th className="text-left py-3 px-4 text-xs font-medium text-gray-400">Open Ports</th>
+                        <th className="text-left py-3 px-4 text-xs font-medium text-gray-400">Technologies</th>
+                        <th className="text-center py-3 px-4 text-xs font-medium text-gray-400">Paths</th>
+                        <th className="text-right py-3 px-4 text-xs font-medium text-gray-400">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {paginatedData.map((item, index) => (
+                        <tr key={index} className="border-b border-dark-50 hover:bg-dark-50 transition-colors">
+                          <td className="py-3 px-4">
+                            <div className={`w-12 h-8 rounded flex items-center justify-center text-xs font-bold ${
+                              item.interesting_score >= 15 ? 'bg-red-500/20 text-red-400' :
+                              item.interesting_score >= 5 ? 'bg-yellow-500/20 text-yellow-400' :
+                              'bg-gray-500/20 text-gray-500'
+                            }`}>
+                              {item.interesting_score || 0}
+                            </div>
+                          </td>
+                          <td className="py-3 px-4">
+                            <span className="text-white font-mono text-sm">{item.subdomain}</span>
+                          </td>
+                          <td className="py-3 px-4 text-center">
+                            {item.is_active ? (
+                              <span className="inline-flex items-center gap-1 text-green-400">
+                                <CheckCircle size={16} />
+                                <span className="text-xs">Active</span>
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 text-gray-500">
+                                <XCircle size={16} />
+                                <span className="text-xs">Inactive</span>
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-3 px-4 text-center">
+                            {item.protocol ? (
+                              <span className={`text-xs font-medium px-2 py-1 rounded ${
+                                item.protocol === 'https' 
+                                  ? 'bg-green-500/20 text-green-400' 
+                                  : 'bg-yellow-500/20 text-yellow-400'
+                              }`}>
+                                {item.protocol.toUpperCase()}
+                              </span>
+                            ) : (
+                              <span className="text-gray-600 text-xs">-</span>
+                            )}
+                          </td>
+                          <td className="py-3 px-4">
+                            <span className="text-gray-400 text-xs font-mono">
+                              {item.ip_address || '-'}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4">
+                            {item.open_ports && item.open_ports.length > 0 ? (
+                              <div className="flex flex-wrap gap-1">
+                                {item.open_ports.slice(0, 3).map((port, idx) => (
+                                  <span 
+                                    key={idx}
+                                    className="text-xs bg-cyber-pink/20 text-cyber-pink px-2 py-1 rounded font-mono"
+                                    title={`${port.port}/${port.protocol} - ${port.service}${port.version ? ' (' + port.version + ')' : ''}`}
+                                  >
+                                    {port.port}
+                                  </span>
+                                ))}
+                                {item.open_ports.length > 3 && (
+                                  <span 
+                                    className="text-xs text-gray-500 px-2 py-1"
+                                    title={`Total: ${item.open_ports.length} open ports`}
+                                  >
+                                    +{item.open_ports.length - 3}
+                                  </span>
+                                )}
+                              </div>
+                            ) : (
+                              <span className="text-gray-600 text-xs italic">No data</span>
+                            )}
+                          </td>
+                          <td className="py-3 px-4">
+                            {item.technologies ? (
+                              <div className="flex flex-wrap gap-1">
+                                <span className="text-xs bg-cyber-purple/20 text-cyber-purple px-2 py-1 rounded">
+                                  Detected
+                                </span>
+                              </div>
+                            ) : (
+                              <span className="text-gray-600 text-xs italic">None</span>
+                            )}
+                          </td>
+                          <td className="py-3 px-4 text-center">
+                            {item.discovered_paths > 0 ? (
+                              <span className="text-xs bg-cyber-blue/20 text-cyber-blue px-2 py-1 rounded font-mono">
+                                {item.discovered_paths}
+                              </span>
+                            ) : (
+                              <span className="text-gray-600 text-xs">-</span>
+                            )}
+                          </td>
+                          <td className="py-3 px-4 text-right">
+                            {item.is_active && (
+                              <a
+                                href={`${item.protocol || 'https'}://${item.subdomain}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1 text-cyber-blue hover:text-cyber-blue/80 transition-colors"
+                              >
+                                <span className="text-xs">Visit</span>
+                                <ExternalLink size={14} />
+                              </a>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Pagination */}
+                <div className="px-6 py-4 border-t border-dark-50 flex items-center justify-between">
+                  <div className="text-sm text-gray-400">
+                    Showing {((currentPage - 1) * itemsPerPage) + 1} to {Math.min(currentPage * itemsPerPage, sortedData.length)} of {sortedData.length} results
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
+                      disabled={currentPage === 1}
+                      className="px-3 py-1 bg-dark-200 border border-dark-50 rounded text-white disabled:opacity-50 disabled:cursor-not-allowed hover:border-cyber-blue transition-all text-sm"
+                    >
+                      Previous
+                    </button>
+                    <span className="text-sm text-gray-400">
+                      Page {currentPage} of {totalPages}
+                    </span>
+                    <button
+                      onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
+                      disabled={currentPage === totalPages}
+                      className="px-3 py-1 bg-dark-200 border border-dark-50 rounded text-white disabled:opacity-50 disabled:cursor-not-allowed hover:border-cyber-blue transition-all text-sm"
+                    >
+                      Next
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        </>
+      )}
+
+      {/* Attack Surface Mode */}
+      {selectedDomain && mergedData.length > 0 && viewMode === 'attack-surface' && (
+        <div className="space-y-6">
+          <div className="bg-dark-100 border border-dark-50 rounded-xl p-6">
+            <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
+              <BarChart3 className="text-cyber-blue" size={20} />
+              Attack Surface Breakdown
+            </h3>
+            
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              {/* Service Distribution */}
+              <div className="col-span-2">
+                <h4 className="text-sm font-medium text-gray-400 mb-3">Exposed Services</h4>
+                <div className="space-y-2">
+                  {attackSurface.map((svc, idx) => (
+                    <div key={idx} className="flex items-center gap-3">
+                      <div className="flex-1">
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-sm text-white capitalize">{svc.service}:{svc.port}</span>
+                          <span className="text-xs text-gray-400">{svc.count} instances</span>
+                        </div>
+                        <div className="w-full bg-dark-200 rounded-full h-2">
+                          <div 
+                            className="bg-gradient-to-r from-cyber-pink to-cyber-purple h-2 rounded-full"
+                            style={{ width: `${(svc.count / stats.total_open_ports) * 100}%` }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Summary Stats */}
+              <div className="space-y-3">
+                <div className="p-4 bg-dark-200 border border-dark-50 rounded-lg">
+                  <div className="text-2xl font-bold text-white mb-1">{attackSurface.length}</div>
+                  <div className="text-xs text-gray-400">Unique Services</div>
+                </div>
+                <div className="p-4 bg-dark-200 border border-dark-50 rounded-lg">
+                  <div className="text-2xl font-bold text-cyber-pink mb-1">{stats.total_open_ports}</div>
+                  <div className="text-xs text-gray-400">Total Open Ports</div>
+                </div>
+                <div className="p-4 bg-dark-200 border border-dark-50 rounded-lg">
+                  <div className="text-2xl font-bold text-cyber-purple mb-1">{stats.with_port_data}</div>
+                  <div className="text-xs text-gray-400">Assets Scanned</div>
+                </div>
               </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* ✅ UPDATED: Data Source Indicators */}
+      {/* Data Source Indicators */}
       {selectedDomain && mergedData.length > 0 && (
         <div className="bg-dark-100 border border-dark-50 rounded-xl p-4">
-          <div className="flex items-center gap-6 text-sm">
+          <div className="flex items-center gap-6 text-xs flex-wrap">
             <div className="flex items-center gap-2">
               <div className="w-3 h-3 bg-cyber-blue rounded-full"></div>
               <span className="text-gray-400">Subdomain Scan: <span className="text-white font-medium">{stats.with_subdomain_data}</span></span>
@@ -596,394 +1242,9 @@ const Dashboard = () => {
             </div>
             <div className="flex items-center gap-2">
               <div className="w-3 h-3 bg-cyber-purple rounded-full"></div>
-              <span className="text-gray-400">Tech Detection: <span className="text-white font-medium">{stats.with_technologies}</span></span>
+              <span className="text-gray-400">Content Discovery: <span className="text-white font-medium">{stats.with_content_discovery}</span></span>
             </div>
           </div>
-        </div>
-      )}
-
-      {/* Filters and Search */}
-      {selectedDomain && mergedData.length > 0 && (
-        <div className="bg-dark-100 border border-dark-50 rounded-xl p-6">
-          <div className="flex flex-col lg:flex-row gap-4">
-            {/* Search */}
-            <div className="flex-1">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500" size={18} />
-                <input
-                  type="text"
-                  value={searchTerm}
-                  onChange={(e) => {
-                    setSearchTerm(e.target.value)
-                    setCurrentPage(1)
-                  }}
-                  placeholder="Search hosts..."
-                  className="w-full pl-10 pr-4 py-2 bg-dark-200 border border-dark-50 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-cyber-blue transition-all"
-                />
-              </div>
-            </div>
-
-            {/* Status Filter */}
-            <div>
-              <select
-                value={filterStatus}
-                onChange={(e) => {
-                  setFilterStatus(e.target.value)
-                  setCurrentPage(1)
-                }}
-                className="px-4 py-2 bg-dark-200 border border-dark-50 rounded-lg text-white focus:outline-none focus:border-cyber-blue transition-all"
-              >
-                <option value="all">All Status</option>
-                <option value="active">Active Only</option>
-                <option value="inactive">Inactive Only</option>
-              </select>
-            </div>
-
-            {/* Protocol Filter */}
-            <div>
-              <select
-                value={filterProtocol}
-                onChange={(e) => {
-                  setFilterProtocol(e.target.value)
-                  setCurrentPage(1)
-                }}
-                className="px-4 py-2 bg-dark-200 border border-dark-50 rounded-lg text-white focus:outline-none focus:border-cyber-blue transition-all"
-              >
-                <option value="all">All Protocols</option>
-                <option value="https">HTTPS Only</option>
-                <option value="http">HTTP Only</option>
-              </select>
-            </div>
-
-            {/* Items per page */}
-            <div>
-              <select
-                value={itemsPerPage}
-                onChange={(e) => {
-                  setItemsPerPage(Number(e.target.value))
-                  setCurrentPage(1)
-                }}
-                className="px-4 py-2 bg-dark-200 border border-dark-50 rounded-lg text-white focus:outline-none focus:border-cyber-blue transition-all"
-              >
-                <option value="25">25 per page</option>
-                <option value="50">50 per page</option>
-                <option value="100">100 per page</option>
-                <option value="200">200 per page</option>
-              </select>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Results Table */}
-      {selectedDomain && mergedData.length > 0 && (
-        <div className="bg-dark-100 border border-dark-50 rounded-xl overflow-hidden">
-          {sortedData.length === 0 ? (
-            <div className="text-center py-12 px-6">
-              <AlertCircle className="mx-auto text-gray-600 mb-3" size={48} />
-              <p className="text-gray-400">No results match your filters</p>
-              <button
-                onClick={() => {
-                  setSearchTerm('')
-                  setFilterStatus('all')
-                  setFilterProtocol('all')
-                }}
-                className="mt-4 text-cyber-blue hover:underline"
-              >
-                Clear all filters
-              </button>
-            </div>
-          ) : (
-            <>
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead className="bg-dark-200 border-b border-dark-50">
-                    <tr>
-                      <th 
-                        onClick={() => handleSort('subdomain')}
-                        className="text-left py-3 px-4 text-sm font-medium text-gray-400 cursor-pointer hover:text-white transition-colors"
-                      >
-                        <div className="flex items-center gap-2">
-                          Subdomain
-                          {sortBy === 'subdomain' && (
-                            sortOrder === 'asc' ? <ChevronUp size={14} /> : <ChevronDown size={14} />
-                          )}
-                        </div>
-                      </th>
-                      <th 
-                        onClick={() => handleSort('status')}
-                        className="text-center py-3 px-4 text-sm font-medium text-gray-400 cursor-pointer hover:text-white transition-colors"
-                      >
-                        <div className="flex items-center justify-center gap-2">
-                          Status
-                          {sortBy === 'status' && (
-                            sortOrder === 'asc' ? <ChevronUp size={14} /> : <ChevronDown size={14} />
-                          )}
-                        </div>
-                      </th>
-                      <th 
-                        onClick={() => handleSort('protocol')}
-                        className="text-center py-3 px-4 text-sm font-medium text-gray-400 cursor-pointer hover:text-white transition-colors"
-                      >
-                        <div className="flex items-center justify-center gap-2">
-                          Protocol
-                          {sortBy === 'protocol' && (
-                            sortOrder === 'asc' ? <ChevronUp size={14} /> : <ChevronDown size={14} />
-                          )}
-                        </div>
-                      </th>
-                      <th 
-                        onClick={() => handleSort('status_code')}
-                        className="text-center py-3 px-4 text-sm font-medium text-gray-400 cursor-pointer hover:text-white transition-colors"
-                      >
-                        <div className="flex items-center justify-center gap-2">
-                          HTTP Code
-                          {sortBy === 'status_code' && (
-                            sortOrder === 'asc' ? <ChevronUp size={14} /> : <ChevronDown size={14} />
-                          )}
-                        </div>
-                      </th>
-                      <th 
-                        onClick={() => handleSort('response_time')}
-                        className="text-center py-3 px-4 text-sm font-medium text-gray-400 cursor-pointer hover:text-white transition-colors"
-                      >
-                        <div className="flex items-center justify-center gap-2">
-                          Response
-                          {sortBy === 'response_time' && (
-                            sortOrder === 'asc' ? <ChevronUp size={14} /> : <ChevronDown size={14} />
-                          )}
-                        </div>
-                      </th>
-                      <th className="text-left py-3 px-4 text-sm font-medium text-gray-400">IP Address</th>
-                      <th className="text-left py-3 px-4 text-sm font-medium text-gray-400">Title</th>
-                      {/* ✅ UPDATED: Open Ports Column */}
-                      <th className="text-left py-3 px-4 text-sm font-medium text-gray-400">Open Ports</th>
-                      <th className="text-left py-3 px-4 text-sm font-medium text-gray-400">Technologies</th>
-                      <th className="text-center py-3 px-4 text-sm font-medium text-gray-400">Vulns</th>
-                      <th className="text-right py-3 px-4 text-sm font-medium text-gray-400">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {paginatedData.map((item, index) => (
-                      <tr key={index} className="border-b border-dark-50 hover:bg-dark-50 transition-colors">
-                        <td className="py-3 px-4">
-                          <span className="text-white font-mono text-sm">{item.subdomain}</span>
-                        </td>
-                        <td className="py-3 px-4 text-center">
-                          {item.is_active ? (
-                            <span className="inline-flex items-center gap-1 text-green-400">
-                              <CheckCircle size={16} />
-                              <span className="text-sm">Active</span>
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center gap-1 text-gray-500">
-                              <XCircle size={16} />
-                              <span className="text-sm">Inactive</span>
-                            </span>
-                          )}
-                        </td>
-                        <td className="py-3 px-4 text-center">
-                          {item.protocol ? (
-                            <span className={`text-xs font-medium px-2 py-1 rounded ${
-                              item.protocol === 'https' 
-                                ? 'bg-green-500/20 text-green-400' 
-                                : 'bg-yellow-500/20 text-yellow-400'
-                            }`}>
-                              {item.protocol.toUpperCase()}
-                            </span>
-                          ) : (
-                            <span className="text-gray-600 text-xs">-</span>
-                          )}
-                        </td>
-                        <td className="py-3 px-4 text-center">
-                          {item.status_code ? (
-                            <span className={`text-sm font-medium ${
-                              item.status_code >= 200 && item.status_code < 300 ? 'text-green-400' :
-                              item.status_code >= 300 && item.status_code < 400 ? 'text-yellow-400' :
-                              item.status_code >= 400 && item.status_code < 500 ? 'text-orange-400' :
-                              'text-red-400'
-                            }`}>
-                              {item.status_code}
-                            </span>
-                          ) : (
-                            <span className="text-gray-600 text-xs">-</span>
-                          )}
-                        </td>
-                        <td className="py-3 px-4 text-center">
-                          {item.response_time ? (
-                            <span className={`text-sm ${
-                              item.response_time < 500 ? 'text-green-400' :
-                              item.response_time < 1500 ? 'text-yellow-400' :
-                              'text-red-400'
-                            }`}>
-                              {item.response_time}ms
-                            </span>
-                          ) : (
-                            <span className="text-gray-600 text-xs">-</span>
-                          )}
-                        </td>
-                        <td className="py-3 px-4">
-                          <span className="text-gray-400 text-sm font-mono">
-                            {item.ip_address || '-'}
-                          </span>
-                        </td>
-                        <td className="py-3 px-4">
-                          <span className="text-gray-400 text-sm truncate max-w-xs block" title={item.title || ''}>
-                            {item.title || '-'}
-                          </span>
-                        </td>
-                        {/* ✅ ADDED: Open Ports Display */}
-                        <td className="py-3 px-4">
-                          {item.open_ports && item.open_ports.length > 0 ? (
-                            <div className="flex flex-wrap gap-1">
-                              {item.open_ports.slice(0, 3).map((port, idx) => (
-                                <span 
-                                  key={idx}
-                                  className="text-xs bg-cyber-pink/20 text-cyber-pink px-2 py-1 rounded font-mono"
-                                  title={`${port.port}/${port.protocol} - ${port.service}${port.version ? ' (' + port.version + ')' : ''}`}
-                                >
-                                  {port.port}
-                                </span>
-                              ))}
-                              {item.open_ports.length > 3 && (
-                                <span 
-                                  className="text-xs text-gray-500 px-2 py-1"
-                                  title={`Total: ${item.open_ports.length} open ports`}
-                                >
-                                  +{item.open_ports.length - 3}
-                                </span>
-                              )}
-                            </div>
-                          ) : (
-                            <span className="text-gray-600 text-xs italic">No scans</span>
-                          )}
-                        </td>
-                        <td className="py-3 px-4">
-                          {item.technologies ? (
-                            <div className="flex flex-wrap gap-1">
-                              {(() => {
-                                try {
-                                  // Try to parse as JSON if it's a string
-                                  const techs = typeof item.technologies === 'string' 
-                                    ? JSON.parse(item.technologies) 
-                                    : item.technologies
-                                  
-                                  // Handle array format
-                                  if (Array.isArray(techs)) {
-                                    return techs.slice(0, 3).map((tech, idx) => (
-                                      <span 
-                                        key={idx}
-                                        className="text-xs bg-cyber-purple/20 text-cyber-purple px-2 py-1 rounded"
-                                        title={tech}
-                                      >
-                                        {tech}
-                                      </span>
-                                    ))
-                                  }
-                                  
-                                  // Handle object format
-                                  if (typeof techs === 'object') {
-                                    const techNames = Object.keys(techs).slice(0, 3)
-                                    return techNames.map((tech, idx) => (
-                                      <span 
-                                        key={idx}
-                                        className="text-xs bg-cyber-purple/20 text-cyber-purple px-2 py-1 rounded"
-                                        title={tech}
-                                      >
-                                        {tech}
-                                      </span>
-                                    ))
-                                  }
-                                  
-                                  // Fallback: display as string
-                                  return (
-                                    <span className="text-xs text-gray-400">
-                                      {item.technologies.substring(0, 30)}...
-                                    </span>
-                                  )
-                                } catch {
-                                  // If parsing fails, display as string
-                                  return (
-                                    <span className="text-xs text-gray-400" title={item.technologies}>
-                                      {item.technologies.substring(0, 30)}...
-                                    </span>
-                                  )
-                                }
-                              })()}
-                              {(() => {
-                                try {
-                                  const techs = typeof item.technologies === 'string' 
-                                    ? JSON.parse(item.technologies) 
-                                    : item.technologies
-                                  const count = Array.isArray(techs) ? techs.length : Object.keys(techs).length
-                                  if (count > 3) {
-                                    return (
-                                      <span className="text-xs text-gray-500" title={`Total: ${count} technologies`}>
-                                        +{count - 3}
-                                      </span>
-                                    )
-                                  }
-                                } catch {
-                                  return null
-                                }
-                                return null
-                              })()}
-                            </div>
-                          ) : (
-                            <span className="text-gray-600 text-xs italic">Not detected</span>
-                          )}
-                        </td>
-                        <td className="py-3 px-4 text-center">
-                          <span className="text-gray-600 text-xs italic">
-                            {item.vulnerabilities || '-'}
-                          </span>
-                        </td>
-                        <td className="py-3 px-4 text-right">
-                          {item.is_active && (
-                            <a
-                              href={`${item.protocol || 'https'}://${item.subdomain}`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="inline-flex items-center gap-1 text-cyber-blue hover:text-cyber-blue/80 transition-colors"
-                            >
-                              <span className="text-sm">Visit</span>
-                              <ExternalLink size={14} />
-                            </a>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-
-              {/* Pagination */}
-              <div className="px-6 py-4 border-t border-dark-50 flex items-center justify-between">
-                <div className="text-sm text-gray-400">
-                  Showing {((currentPage - 1) * itemsPerPage) + 1} to {Math.min(currentPage * itemsPerPage, sortedData.length)} of {sortedData.length} results
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
-                    disabled={currentPage === 1}
-                    className="px-3 py-1 bg-dark-200 border border-dark-50 rounded text-white disabled:opacity-50 disabled:cursor-not-allowed hover:border-cyber-blue transition-all"
-                  >
-                    Previous
-                  </button>
-                  <span className="text-sm text-gray-400">
-                    Page {currentPage} of {totalPages}
-                  </span>
-                  <button
-                    onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
-                    disabled={currentPage === totalPages}
-                    className="px-3 py-1 bg-dark-200 border border-dark-50 rounded text-white disabled:opacity-50 disabled:cursor-not-allowed hover:border-cyber-blue transition-all"
-                  >
-                    Next
-                  </button>
-                </div>
-              </div>
-            </>
-          )}
         </div>
       )}
     </div>
