@@ -7,6 +7,7 @@ import ContentDiscovery from './pages/ContentDiscovery/ContentDiscovery'
 import PortScanner from './pages/PortScanner/PortScanner'
 import Visualization from './pages/Visualization/Visualization'
 import History from './pages/History/History'
+import Exports from './pages/Export/Exports'
 
 function App() {
   return (
@@ -19,6 +20,7 @@ function App() {
         <Route path="port-scanner" element={<PortScanner />} />
         <Route path="visualization" element={<Visualization />} />
         <Route path="history" element={<History />} />
+        <Route path="/exports" element={<Exports />} />
       </Route>
     </Routes>
   )
