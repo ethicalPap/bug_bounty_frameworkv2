@@ -1,8 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { getSubdomains } from '../../api/client'
+import { getSubdomains, probeHostsWithProgress } from '../../api/client'
 import { Activity, Play, CheckCircle, XCircle, ExternalLink, Loader, Download, Copy, RefreshCw, AlertTriangle, X, Globe } from 'lucide-react'
-import axios from 'axios'
 
 // LocalStorage keys
 const STORAGE_KEYS = {
@@ -74,130 +73,58 @@ const LiveHosts = () => {
 
   const subdomainsList = subdomains?.data || []
 
-  // HTTP Probe function
-  const probeSubdomain = async (subdomain) => {
-    const protocols = ['https', 'http']
-    
-    for (const protocol of protocols) {
-      try {
-        const url = `${protocol}://${subdomain}`
-        const startTime = Date.now()
-        
-        const response = await axios.get(url, {
-          timeout: 10000,
-          maxRedirects: 5,
-          validateStatus: () => true, // Accept any status code
-          signal: probeAbortController.current?.signal
-        })
-        
-        const responseTime = Date.now() - startTime
-
-        return {
-          subdomain,
-          url,
-          protocol,
-          status_code: response.status,
-          response_time: responseTime,
-          is_active: true,
-          content_length: response.data?.length || 0,
-          server: response.headers['server'] || 'Unknown',
-          title: extractTitle(response.data),
-          redirect_url: response.request?.responseURL !== url ? response.request?.responseURL : null,
-          error: null,
-          probed_at: new Date().toISOString()
-        }
-      } catch (error) {
-        // If it's an abort, throw it up
-        if (error.name === 'CanceledError' || error.message?.includes('aborted')) {
-          throw error
-        }
-        // Try next protocol
-        continue
-      }
-    }
-
-    // Both protocols failed
-    return {
-      subdomain,
-      url: `https://${subdomain}`,
-      protocol: null,
-      status_code: null,
-      response_time: null,
-      is_active: false,
-      content_length: null,
-      server: null,
-      title: null,
-      redirect_url: null,
-      error: 'Connection failed',
-      probed_at: new Date().toISOString()
-    }
-  }
-
-  // Extract title from HTML
-  const extractTitle = (html) => {
-    if (!html || typeof html !== 'string') return null
-    
-    const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i)
-    return titleMatch ? titleMatch[1].trim().substring(0, 100) : null
-  }
-
-  // Start probing
+  // ✅ NEW: Start probing using backend API (NO CORS!)
   const startProbing = async () => {
     if (!selectedDomain || subdomainsList.length === 0 || isProbing) return
 
     setIsProbing(true)
     setProbeProgress(0)
     setProbeResults([])
-    probeAbortController.current = new AbortController()
-
-    const results = []
-    const total = subdomainsList.length
-    let completed = 0
+    setCurrentlyProbing('Initializing...')
 
     try {
-      // Process in batches for concurrency control
-      const batchSize = concurrency
-      for (let i = 0; i < subdomainsList.length; i += batchSize) {
-        const batch = subdomainsList.slice(i, i + batchSize)
-        
-        const batchPromises = batch.map(async (sub) => {
-          setCurrentlyProbing(sub.full_domain)
-          try {
-            const result = await probeSubdomain(sub.full_domain)
-            completed++
-            setProbeProgress((completed / total) * 100)
-            return result
-          } catch (error) {
-            if (error.name === 'CanceledError' || error.message?.includes('aborted')) {
-              throw error // Propagate abort
-            }
-            completed++
-            setProbeProgress((completed / total) * 100)
-            return {
-              subdomain: sub.full_domain,
-              is_active: false,
-              error: 'Probe failed',
-              probed_at: new Date().toISOString()
-            }
+      // Extract just the subdomain names
+      const subdomainNames = subdomainsList.map(sub => sub.full_domain || sub.subdomain || sub)
+
+      console.log(`🚀 Starting probe for ${subdomainNames.length} subdomains via backend API`)
+
+      // ✅ Use backend API - NO CORS ERRORS!
+      const results = await probeHostsWithProgress(
+        subdomainNames,
+        (progressData) => {
+          // Update progress in real-time
+          setProbeProgress((progressData.completed / progressData.total) * 100)
+          setCurrentlyProbing(`Batch ${progressData.currentBatch}/${progressData.totalBatches}`)
+          
+          // Update results as they come in
+          if (progressData.results && progressData.results.length > 0) {
+            setProbeResults([...progressData.results])
           }
-        })
 
-        const batchResults = await Promise.all(batchPromises)
-        results.push(...batchResults)
-        setProbeResults([...results]) // Update UI after each batch
-      }
+          console.log(
+            `Progress: ${progressData.completed}/${progressData.total} | ` +
+            `Active: ${progressData.stats.active} | ` +
+            `Inactive: ${progressData.stats.inactive}`
+          )
+        },
+        concurrency // Use user-selected concurrency
+      )
 
-      setIsProbing(false)
+      // Final update
+      setProbeResults(results)
       setProbeProgress(100)
       setCurrentlyProbing('')
-      
+
+      // Save to localStorage
+      localStorage.setItem(STORAGE_KEYS.LIVE_HOSTS_RESULTS, JSON.stringify(results))
+
+      const activeCount = results.filter(r => r.is_active).length
+      console.log(`✅ Probing complete! Found ${activeCount} active hosts out of ${results.length}`)
+
     } catch (error) {
-      if (error.name === 'CanceledError' || error.message?.includes('aborted')) {
-        console.log('Probing cancelled by user')
-        setProbeResults([...results]) // Save partial results
-      } else {
-        console.error('Probing error:', error)
-      }
+      console.error('❌ Probing failed:', error)
+      alert(`Probing failed: ${error.message || 'Unknown error'}`)
+    } finally {
       setIsProbing(false)
       setCurrentlyProbing('')
     }
@@ -205,11 +132,10 @@ const LiveHosts = () => {
 
   // Cancel probing
   const cancelProbing = () => {
-    if (probeAbortController.current) {
-      probeAbortController.current.abort()
-    }
+    // Note: We can't cancel backend requests easily, but we can stop updating the UI
     setIsProbing(false)
     setCurrentlyProbing('')
+    console.log('⚠️ Probing cancelled by user (backend may still be processing)')
   }
 
   // Clear results

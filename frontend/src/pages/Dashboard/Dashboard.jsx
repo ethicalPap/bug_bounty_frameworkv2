@@ -1,38 +1,38 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useSearchParams } from 'react-router-dom'
+import { useSearchParams, useNavigate } from 'react-router-dom'
 import { getSubdomains, validateTarget, quickValidateTarget } from '../../api/client'
 import { 
-  Home, 
   Globe, 
   Activity, 
   Search, 
   Network, 
-  Filter,
-  Download,
-  Copy,
-  RefreshCw,
-  ChevronDown,
-  ChevronUp,
-  ExternalLink,
-  CheckCircle,
-  XCircle,
-  Lock,
-  Unlock,
-  Zap,
-  AlertCircle,
+  ChevronRight,
   Shield,
   Target,
   TrendingUp,
-  Eye,
   Server,
-  Code,
   Layers,
-  ChevronRight,
-  Info,
   BarChart3,
   AlertTriangle,
-  Loader
+  Zap,
+  Eye,
+  ArrowRight,
+  ExternalLink,
+  CheckCircle,
+  XCircle,
+  Loader,
+  Download,
+  Copy,
+  Filter,
+  ChevronDown,
+  ChevronUp,
+  Code,
+  Lock,
+  RefreshCw,
+  FileText,
+  Database,
+  Terminal
 } from 'lucide-react'
 
 const STORAGE_KEYS = {
@@ -43,475 +43,281 @@ const STORAGE_KEYS = {
   FILTER_STATE: 'dashboard_filter_state',
   SORT_STATE: 'dashboard_sort_state',
   VIEW_MODE: 'dashboard_view_mode',
-  EXPANDED_SECTIONS: 'dashboard_expanded_sections',
 }
 
-const Dashboard = () => {
+// Risk scoring keywords
+const RISK_KEYWORDS = {
+  HIGH: ['admin', 'api', 'dev', 'stage', 'staging', 'test', 'internal', 'vpn', 'db', 'database', 'backup'],
+  MEDIUM: ['beta', 'qa', 'uat', 'demo', 'sandbox', 'git', 'jenkins', 'ci'],
+  LOW: ['www', 'mail', 'blog', 'cdn', 'static', 'assets']
+}
+
+// Critical services for security assessment
+const CRITICAL_SERVICES = {
+  3389: { name: 'RDP', severity: 'critical' },
+  5900: { name: 'VNC', severity: 'critical' },
+  27017: { name: 'MongoDB', severity: 'critical' },
+  6379: { name: 'Redis', severity: 'critical' },
+  9200: { name: 'Elasticsearch', severity: 'critical' },
+  445: { name: 'SMB', severity: 'high' },
+  3306: { name: 'MySQL', severity: 'high' },
+  5432: { name: 'PostgreSQL', severity: 'high' },
+  1433: { name: 'MSSQL', severity: 'high' },
+  22: { name: 'SSH', severity: 'medium' },
+  21: { name: 'FTP', severity: 'medium' },
+  23: { name: 'Telnet', severity: 'high' },
+}
+
+export default function Dashboard() {
+  const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [searchParams, setSearchParams] = useSearchParams()
   
   // State management
-  const [availableDomains, setAvailableDomains] = useState([])
+  const [selectedDomain, setSelectedDomain] = useState(
+    () => localStorage.getItem(STORAGE_KEYS.SUBDOMAIN_RESULTS) || ''
+  )
+  const [viewMode, setViewMode] = useState(
+    () => localStorage.getItem(STORAGE_KEYS.VIEW_MODE) || 'overview'
+  )
+  const [expandedSections, setExpandedSections] = useState({
+    metrics: true,
+    highValue: true,
+    attackSurface: true,
+    criticalFindings: true,
+    reconnaissance: true
+  })
   
-  // Get domain from URL params, fallback to empty string
-  const selectedDomain = searchParams.get('domain') || ''
-  
-  // Function to update domain in URL
-  const setSelectedDomain = (domain) => {
-    if (domain) {
-      setSearchParams({ domain })
-    } else {
-      setSearchParams({})
+  // Filter state
+  const [filters, setFilters] = useState(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEYS.FILTER_STATE)
+      return saved ? JSON.parse(saved) : {
+        search: '',
+        status: 'all',
+        protocol: 'all',
+        tier: 'all',
+        interesting: false,
+        hasVulnerabilities: false,
+        hasPorts: false,
+        hasEndpoints: false
+      }
+    } catch (error) {
+      console.error('Error parsing filter state:', error)
+      return {
+        search: '',
+        status: 'all',
+        protocol: 'all',
+        tier: 'all',
+        interesting: false,
+        hasVulnerabilities: false,
+        hasPorts: false,
+        hasEndpoints: false
+      }
     }
-  }
-  
-  // View mode: 'overview' | 'detailed' | 'attack-surface'
-  const [viewMode, setViewMode] = useState(() => {
-    return localStorage.getItem(STORAGE_KEYS.VIEW_MODE) || 'overview'
   })
   
-  // Expanded sections for better UX
-  const [expandedSections, setExpandedSections] = useState(() => {
-    const saved = localStorage.getItem(STORAGE_KEYS.EXPANDED_SECTIONS)
-    return saved ? JSON.parse(saved) : {
-      stats: true,
-      quick_actions: true,
-      attack_vectors: true,
-      high_value_targets: true,
-      reconnaissance: true,
+  // Sort state
+  const [sortConfig, setSortConfig] = useState(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEYS.SORT_STATE)
+      return saved ? JSON.parse(saved) : {
+        field: 'risk_score',
+        direction: 'desc'
+      }
+    } catch (error) {
+      console.error('Error parsing sort state:', error)
+      return {
+        field: 'risk_score',
+        direction: 'desc'
+      }
     }
-  })
-  
-  // Validation state
-  const [validating, setValidating] = useState({})
-  const [validationResults, setValidationResults] = useState({})
-  
-  // Filters and search
-  const [searchTerm, setSearchTerm] = useState(() => {
-    const saved = localStorage.getItem(STORAGE_KEYS.FILTER_STATE)
-    return saved ? JSON.parse(saved).searchTerm || '' : ''
-  })
-  const [filterStatus, setFilterStatus] = useState(() => {
-    const saved = localStorage.getItem(STORAGE_KEYS.FILTER_STATE)
-    return saved ? JSON.parse(saved).filterStatus || 'all' : 'all'
-  })
-  const [filterProtocol, setFilterProtocol] = useState(() => {
-    const saved = localStorage.getItem(STORAGE_KEYS.FILTER_STATE)
-    return saved ? JSON.parse(saved).filterProtocol || 'all' : 'all'
-  })
-  const [filterInteresting, setFilterInteresting] = useState(false)
-  const [filterTier, setFilterTier] = useState('all')
-  
-  // Sorting
-  const [sortBy, setSortBy] = useState(() => {
-    const saved = localStorage.getItem(STORAGE_KEYS.SORT_STATE)
-    return saved ? JSON.parse(saved).sortBy || 'risk_score' : 'risk_score'
-  })
-  const [sortOrder, setSortOrder] = useState(() => {
-    const saved = localStorage.getItem(STORAGE_KEYS.SORT_STATE)
-    return saved ? JSON.parse(saved).sortOrder || 'desc' : 'desc'
   })
   
   // Pagination
   const [currentPage, setCurrentPage] = useState(1)
-  const [itemsPerPage, setItemsPerPage] = useState(50)
-
-  // Toggle section expansion
-  const toggleSection = (section) => {
-    setExpandedSections(prev => ({
-      ...prev,
-      [section]: !prev[section]
-    }))
-  }
-
-  // Validation handler
-  const handleValidateTarget = async (target) => {
-    const targetUrl = `${target.protocol || 'https'}://${target.subdomain}`
-    
-    setValidating(prev => ({ ...prev, [target.subdomain]: true }))
-    
-    try {
-      // Quick validation (faster)
-      const result = await quickValidateTarget(targetUrl, [])
-      
-      // Store results
-      setValidationResults(prev => ({
-        ...prev,
-        [target.subdomain]: result
-      }))
-      
-      // Show results
-      if (result.total_vulns > 0) {
-        alert(`🎯 Validation Complete!\n\nFound ${result.total_vulns} vulnerabilities on ${target.subdomain}\n\nCheck the console for details.`)
-        console.log('Validation Results:', result)
-      } else {
-        alert(`✅ Validation Complete!\n\nNo vulnerabilities found on ${target.subdomain}`)
-      }
-      
-      // Optionally refresh data to show updated validation status
-      queryClient.invalidateQueries(['subdomains', selectedDomain])
-      
-    } catch (error) {
-      console.error('Validation failed:', error)
-      alert(`❌ Validation Failed\n\n${error.response?.data?.detail || error.message}`)
-    } finally {
-      setValidating(prev => ({ ...prev, [target.subdomain]: false }))
-    }
-  }
-
-  // Persist state
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.FILTER_STATE, JSON.stringify({
-      searchTerm,
-      filterStatus,
-      filterProtocol
-    }))
-  }, [searchTerm, filterStatus, filterProtocol])
+  const itemsPerPage = 50
   
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.SORT_STATE, JSON.stringify({
-      sortBy,
-      sortOrder
-    }))
-  }, [sortBy, sortOrder])
+  // Validation state
+  const [validatingTargets, setValidatingTargets] = useState(new Set())
+  const [validationResults, setValidationResults] = useState({})
 
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.VIEW_MODE, viewMode)
-  }, [viewMode])
-
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.EXPANDED_SECTIONS, JSON.stringify(expandedSections))
-  }, [expandedSections])
-
-  // Fetch available domains from API on mount
-  useEffect(() => {
-    const fetchDomains = async () => {
-      try {
-        const response = await fetch('http://localhost:8000/api/v1/domains')
-        if (response.ok) {
-          const domains = await response.json()
-          setAvailableDomains(domains)
-          
-          // If no domain in URL and we have domains, set the first one
-          if (!selectedDomain && domains.length > 0) {
-            setSelectedDomain(domains[0])
-          }
-        }
-      } catch (error) {
-        console.error('Error fetching domains:', error)
-        
-        // Fallback: try to get from query cache
-        const queryCache = queryClient.getQueryCache()
-        const allQueries = queryCache.getAll()
-        
-        const cachedDomains = allQueries
-          .filter(query => query.queryKey[0] === 'subdomains' && query.state.data?.data?.length > 0)
-          .map(query => query.queryKey[1])
-          .filter(Boolean)
-        
-        const uniqueDomains = [...new Set(cachedDomains)]
-        setAvailableDomains(uniqueDomains)
-        
-        if (!selectedDomain && uniqueDomains.length > 0) {
-          setSelectedDomain(uniqueDomains[0])
-        }
-      }
-    }
-    
-    fetchDomains()
-  }, []) // Only run on mount
-
-  // Fetch subdomain data
-  const { data: subdomainsData, isLoading: isLoadingSubdomains } = useQuery({
+  // Fetch data from various sources
+  const { data: subdomainDataRaw, isLoading } = useQuery({
     queryKey: ['subdomains', selectedDomain],
     queryFn: () => getSubdomains(selectedDomain),
     enabled: !!selectedDomain,
     staleTime: Infinity,
-    cacheTime: 1000 * 60 * 60 * 24,
+    cacheTime: Infinity
   })
 
-  // Get all scan data from localStorage
+  // Ensure subdomainData is always an array
+  const subdomainData = useMemo(() => {
+    if (!subdomainDataRaw) return []
+    if (Array.isArray(subdomainDataRaw)) return subdomainDataRaw
+    if (subdomainDataRaw.subdomains && Array.isArray(subdomainDataRaw.subdomains)) {
+      return subdomainDataRaw.subdomains
+    }
+    return []
+  }, [subdomainDataRaw])
+
   const liveHostsData = useMemo(() => {
     try {
-      const saved = localStorage.getItem(STORAGE_KEYS.LIVE_HOSTS_RESULTS)
-      return saved ? JSON.parse(saved) : []
-    } catch {
+      const stored = localStorage.getItem(STORAGE_KEYS.LIVE_HOSTS_RESULTS)
+      if (!stored) return []
+      const parsed = JSON.parse(stored)
+      return Array.isArray(parsed) ? parsed : []
+    } catch (error) {
+      console.error('Error parsing live hosts data:', error)
       return []
     }
-  }, [selectedDomain])
+  }, [])
 
   const portScanData = useMemo(() => {
     try {
-      const saved = localStorage.getItem(STORAGE_KEYS.PORT_SCAN_RESULTS)
-      return saved ? JSON.parse(saved) : []
-    } catch {
+      const stored = localStorage.getItem(STORAGE_KEYS.PORT_SCAN_RESULTS)
+      if (!stored) return []
+      const parsed = JSON.parse(stored)
+      return Array.isArray(parsed) ? parsed : []
+    } catch (error) {
+      console.error('Error parsing port scan data:', error)
       return []
     }
-  }, [selectedDomain])
+  }, [])
 
   const contentDiscoveryData = useMemo(() => {
     try {
-      const saved = localStorage.getItem(STORAGE_KEYS.CONTENT_DISCOVERY_RESULTS)
-      return saved ? JSON.parse(saved) : []
-    } catch {
+      const stored = localStorage.getItem(STORAGE_KEYS.CONTENT_DISCOVERY_RESULTS)
+      if (!stored) return []
+      const parsed = JSON.parse(stored)
+      return Array.isArray(parsed) ? parsed : []
+    } catch (error) {
+      console.error('Error parsing content discovery data:', error)
       return []
     }
-  }, [selectedDomain])
+  }, [])
 
-  // Advanced Risk Scoring System
-  const calculateRiskScore = (data) => {
+  // Calculate risk score for a subdomain
+  const calculateRiskScore = (subdomain) => {
     let score = 0
-    const findings = []
+    const subdomainLower = subdomain.toLowerCase()
     
-    // CRITICAL TIER (50+)
-    const criticalSubdomains = ['admin', 'internal', 'staging', 'dev', 'test', 'jenkins', 'vpn', 'console', 'panel']
-    const subdomain = data.subdomain.toLowerCase()
-    const isCriticalSubdomain = criticalSubdomains.some(keyword => subdomain.includes(keyword))
+    // Keyword analysis (0-40 points)
+    if (RISK_KEYWORDS.HIGH.some(kw => subdomainLower.includes(kw))) score += 40
+    else if (RISK_KEYWORDS.MEDIUM.some(kw => subdomainLower.includes(kw))) score += 25
+    else if (RISK_KEYWORDS.LOW.some(kw => subdomainLower.includes(kw))) score += 5
+    else score += 15 // Unknown/custom subdomain
     
-    if (isCriticalSubdomain) {
-      score += 25
-      findings.push({
-        type: 'critical_subdomain',
-        description: `Critical subdomain detected: ${subdomain}`,
-        impact: 'High-value target for authentication bypass, privilege escalation'
-      })
-    }
-    
-    // Critical ports
-    const criticalPorts = {
-      3389: { name: 'RDP', severity: 30, note: 'Remote Desktop - BlueKeep RCE, auth bypass' },
-      5900: { name: 'VNC', severity: 30, note: 'VNC - Remote access, often weak auth' },
-      27017: { name: 'MongoDB', severity: 30, note: 'MongoDB - Often no authentication, data exposure' },
-      6379: { name: 'Redis', severity: 28, note: 'Redis - RCE via module loading, data leak' },
-      9200: { name: 'Elasticsearch', severity: 28, note: 'Elasticsearch - RCE, sensitive data exposure' },
-      2375: { name: 'Docker', severity: 30, note: 'Docker API - Container escape, RCE' },
-      8080: { name: 'Jenkins', severity: 25, note: 'Jenkins - Script console RCE' },
-      8443: { name: 'Alt-HTTPS', severity: 15, note: 'Alternative HTTPS - Often development/staging' },
-      5432: { name: 'PostgreSQL', severity: 25, note: 'PostgreSQL - SQL injection, credential theft' },
-      3306: { name: 'MySQL', severity: 25, note: 'MySQL - SQL injection, credential theft' },
-      1433: { name: 'MSSQL', severity: 25, note: 'MSSQL - SQL injection, xp_cmdshell RCE' },
-      22: { name: 'SSH', severity: 10, note: 'SSH - Brute force target, key leaks' },
-      23: { name: 'Telnet', severity: 35, note: 'Telnet - Unencrypted, ancient protocol' },
-      21: { name: 'FTP', severity: 20, note: 'FTP - Anonymous access, directory traversal' },
-    }
-    
-    if (data.open_ports) {
-      data.open_ports.forEach(port => {
-        const criticalPort = criticalPorts[port.port]
-        if (criticalPort) {
-          score += criticalPort.severity
-          findings.push({
-            type: 'critical_port',
-            port: port.port,
-            service: criticalPort.name,
-            description: `${criticalPort.name} exposed on port ${port.port}`,
-            impact: criticalPort.note,
-            severity: criticalPort.severity
-          })
-        }
-      })
-    }
-    
-    // Source code leaks
-    const sourceCodeLeaks = ['.git', '.svn', '.env', 'backup.sql', '.sql', 'database.sql', '.bak']
-    if (data.discovered_paths > 0) {
-      const hasSourceLeak = sourceCodeLeaks.some(leak => 
-        contentDiscoveryData.some(item => 
-          item.target_url?.includes(data.subdomain) && 
-          item.path?.toLowerCase().includes(leak)
-        )
-      )
+    // Open ports analysis (0-30 points)
+    const ports = portScanData.filter(p => p.subdomain === subdomain)
+    if (ports.length > 0) {
+      const criticalPorts = ports.filter(p => CRITICAL_SERVICES[p.port]?.severity === 'critical')
+      const highPorts = ports.filter(p => CRITICAL_SERVICES[p.port]?.severity === 'high')
       
-      if (hasSourceLeak) {
-        score += 30
-        findings.push({
-          type: 'source_leak',
-          description: 'Source code / backup file exposed',
-          impact: 'Hardcoded credentials, API keys, database credentials'
-        })
-      }
+      if (criticalPorts.length > 0) score += 30
+      else if (highPorts.length > 0) score += 20
+      else if (ports.length > 10) score += 15
+      else score += 10
     }
     
-    // API endpoints
-    if (subdomain.includes('api')) {
-      score += 20
-      findings.push({
-        type: 'api_endpoint',
-        description: 'API subdomain detected',
-        impact: 'BOLA/IDOR, authentication bypass, data exposure'
-      })
+    // Content discovery analysis (0-20 points)
+    const endpoints = contentDiscoveryData.filter(e => e.subdomain === subdomain)
+    const interestingEndpoints = endpoints.filter(e => e.is_interesting)
+    const apiEndpoints = endpoints.filter(e => 
+      e.path?.includes('/api/') || e.path?.includes('/v1/') || e.path?.includes('/v2/')
+    )
+    
+    if (interestingEndpoints.length > 0) score += 20
+    else if (apiEndpoints.length > 5) score += 15
+    else if (endpoints.length > 20) score += 10
+    else if (endpoints.length > 0) score += 5
+    
+    // Staging/development indicators (0-10 points)
+    if (subdomainLower.includes('staging') || 
+        subdomainLower.includes('dev') || 
+        subdomainLower.includes('test')) {
+      score += 10
     }
     
-    // Staging/dev environments
-    if (subdomain.includes('staging') || subdomain.includes('dev') || subdomain.includes('test')) {
-      score += 15
-      findings.push({
-        type: 'staging_env',
-        description: 'Staging/Development environment',
-        impact: 'Production data with weaker security controls'
-      })
-    }
-    
-    // Authentication portals
-    if (data.status_code === 401 || data.status_code === 403) {
-      score += 12
-      findings.push({
-        type: 'auth_portal',
-        description: 'Authentication portal detected',
-        impact: 'Auth bypass, credential stuffing, brute force'
-      })
-    }
-    
-    return {
-      score: Math.min(score, 100),
-      findings,
-      tier: score >= 50 ? 'CRITICAL' : score >= 30 ? 'HIGH' : score >= 15 ? 'MEDIUM' : 'LOW'
-    }
+    return Math.min(100, score)
   }
 
-  // Merge all data sources with risk scoring
+  // Merge all data sources
   const mergedData = useMemo(() => {
-    const subdomains = subdomainsData?.data || []
-    const dataMap = new Map()
-    
-    subdomains.forEach(sub => {
-      dataMap.set(sub.full_domain, {
-        subdomain: sub.full_domain,
-        from_subdomain_scan: true,
-        ip_address: sub.ip_address,
-        status_code: sub.status_code,
-        is_active: sub.is_active,
-        title: sub.title,
-        server: sub.server,
-        content_length: sub.content_length,
-        protocol: null,
-        response_time: null,
-        technologies: null,
-        open_ports: null,
-        vulnerabilities: null,
-        discovered_paths: 0,
-        last_updated: sub.updated_at,
-      })
-    })
-    
-    liveHostsData.forEach(host => {
-      const existing = dataMap.get(host.subdomain)
-      if (existing) {
-        existing.protocol = host.protocol
-        existing.response_time = host.response_time
-        existing.is_active = host.is_active
-        existing.status_code = host.status_code || existing.status_code
-        existing.title = host.title || existing.title
-        existing.server = host.server || existing.server
-        existing.from_live_probe = true
-      } else {
-        dataMap.set(host.subdomain, {
-          subdomain: host.subdomain,
-          from_live_probe: true,
-          protocol: host.protocol,
-          response_time: host.response_time,
-          is_active: host.is_active,
-          status_code: host.status_code,
-          title: host.title,
-          server: host.server,
-          ip_address: null,
-          content_length: null,
-          technologies: null,
-          open_ports: null,
-          vulnerabilities: null,
-          discovered_paths: 0,
-          last_updated: host.probed_at,
-        })
-      }
-    })
-    
-    portScanData.forEach(portData => {
-      const target = portData.target
-      const existing = dataMap.get(target)
+    return subdomainData.map(sub => {
+      const hostInfo = liveHostsData.find(h => h.subdomain === sub.subdomain)
+      const ports = portScanData.filter(p => p.subdomain === sub.subdomain)
+      const endpoints = contentDiscoveryData.filter(e => e.subdomain === sub.subdomain)
       
-      if (existing) {
-        if (!existing.open_ports) {
-          existing.open_ports = []
-        }
-        if (portData.state === 'open') {
-          existing.open_ports.push({
-            port: portData.port,
-            service: portData.service,
-            version: portData.version,
-            protocol: portData.protocol
-          })
-        }
-        existing.from_port_scan = true
-        if (!existing.ip_address && portData.ip_address) {
-          existing.ip_address = portData.ip_address
-        }
-      }
-    })
-    
-    contentDiscoveryData.forEach(content => {
-      let targetDomain = null
-      try {
-        const url = new URL(content.target_url || content.discovered_url)
-        targetDomain = url.hostname
-      } catch {
-        return
-      }
+      const riskScore = calculateRiskScore(sub.subdomain)
+      const tier = riskScore >= 70 ? 'high' : riskScore >= 40 ? 'medium' : 'low'
       
-      const existing = dataMap.get(targetDomain)
-      
-      if (existing) {
-        if (content.technologies && !existing.technologies) {
-          existing.technologies = content.technologies
-        }
-        existing.from_content_discovery = true
-        if (!existing.discovered_paths) {
-          existing.discovered_paths = 0
-        }
-        existing.discovered_paths += 1
-      }
-    })
-    
-    return Array.from(dataMap.values()).map(asset => {
-      const riskAnalysis = calculateRiskScore(asset)
       return {
-        ...asset,
-        risk_score: riskAnalysis.score,
-        risk_tier: riskAnalysis.tier,
-        risk_findings: riskAnalysis.findings,
-        interesting_score: riskAnalysis.score
+        ...sub,
+        is_active: hostInfo?.is_active || false,
+        status_code: hostInfo?.status_code,
+        final_url: hostInfo?.final_url,
+        response_time: hostInfo?.response_time,
+        server: hostInfo?.server,
+        content_type: hostInfo?.content_type,
+        ports: ports,
+        endpoints: endpoints,
+        interesting_endpoints: endpoints.filter(e => e.is_interesting),
+        risk_score: riskScore,
+        tier: tier,
+        critical_services: ports.filter(p => CRITICAL_SERVICES[p.port]?.severity === 'critical'),
+        validation_result: validationResults[sub.subdomain]
       }
     })
-  }, [subdomainsData, liveHostsData, portScanData, contentDiscoveryData])
+  }, [subdomainData, liveHostsData, portScanData, contentDiscoveryData, validationResults])
 
-  // Filter data
+  // Apply filters
   const filteredData = useMemo(() => {
     return mergedData.filter(item => {
-      if (searchTerm && !item.subdomain.toLowerCase().includes(searchTerm.toLowerCase())) {
+      // Search filter
+      if (filters.search && !item.subdomain.toLowerCase().includes(filters.search.toLowerCase())) {
         return false
       }
       
-      if (filterStatus === 'active' && !item.is_active) return false
-      if (filterStatus === 'inactive' && item.is_active) return false
+      // Status filter
+      if (filters.status !== 'all') {
+        if (filters.status === 'active' && !item.is_active) return false
+        if (filters.status === 'inactive' && item.is_active) return false
+      }
       
-      if (filterProtocol === 'https' && item.protocol !== 'https') return false
-      if (filterProtocol === 'http' && item.protocol !== 'http') return false
+      // Protocol filter
+      if (filters.protocol !== 'all') {
+        const url = item.final_url || ''
+        if (filters.protocol === 'http' && !url.startsWith('http://')) return false
+        if (filters.protocol === 'https' && !url.startsWith('https://')) return false
+      }
       
-      if (filterInteresting && item.risk_score < 15) return false
+      // Tier filter
+      if (filters.tier !== 'all' && item.tier !== filters.tier) return false
       
-      if (filterTier !== 'all' && item.risk_tier !== filterTier) return false
+      // Interesting endpoints filter
+      if (filters.interesting && item.interesting_endpoints.length === 0) return false
+      
+      // Has vulnerabilities filter
+      if (filters.hasVulnerabilities && !item.validation_result?.has_vulnerabilities) return false
+      
+      // Has ports filter
+      if (filters.hasPorts && item.ports.length === 0) return false
+      
+      // Has endpoints filter
+      if (filters.hasEndpoints && item.endpoints.length === 0) return false
       
       return true
     })
-  }, [mergedData, searchTerm, filterStatus, filterProtocol, filterInteresting, filterTier])
+  }, [mergedData, filters])
 
-  // Sort data
+  // Apply sorting
   const sortedData = useMemo(() => {
     const sorted = [...filteredData]
-    
     sorted.sort((a, b) => {
       let aVal, bVal
       
-      switch (sortBy) {
+      switch (sortConfig.field) {
         case 'subdomain':
           aVal = a.subdomain
           bVal = b.subdomain
@@ -521,180 +327,259 @@ const Dashboard = () => {
           bVal = b.is_active ? 1 : 0
           break
         case 'protocol':
-          aVal = a.protocol || ''
-          bVal = b.protocol || ''
+          aVal = a.final_url?.startsWith('https://') ? 1 : 0
+          bVal = b.final_url?.startsWith('https://') ? 1 : 0
           break
         case 'response_time':
-          aVal = a.response_time || 999999
-          bVal = b.response_time || 999999
-          break
-        case 'status_code':
-          aVal = a.status_code || 0
-          bVal = b.status_code || 0
+          aVal = a.response_time || 0
+          bVal = b.response_time || 0
           break
         case 'risk_score':
-        case 'interesting':
-          aVal = a.risk_score || 0
-          bVal = b.risk_score || 0
+          aVal = a.risk_score
+          bVal = b.risk_score
+          break
+        case 'ports':
+          aVal = a.ports.length
+          bVal = b.ports.length
+          break
+        case 'endpoints':
+          aVal = a.endpoints.length
+          bVal = b.endpoints.length
           break
         default:
           return 0
       }
       
-      if (aVal < bVal) return sortOrder === 'asc' ? -1 : 1
-      if (aVal > bVal) return sortOrder === 'asc' ? 1 : -1
+      if (aVal < bVal) return sortConfig.direction === 'asc' ? -1 : 1
+      if (aVal > bVal) return sortConfig.direction === 'asc' ? 1 : -1
       return 0
     })
     
     return sorted
-  }, [filteredData, sortBy, sortOrder])
+  }, [filteredData, sortConfig])
 
-  // Paginate data
+  // Pagination
   const paginatedData = useMemo(() => {
-    const startIndex = (currentPage - 1) * itemsPerPage
-    const endIndex = startIndex + itemsPerPage
-    return sortedData.slice(startIndex, endIndex)
-  }, [sortedData, currentPage, itemsPerPage])
+    const startIdx = (currentPage - 1) * itemsPerPage
+    return sortedData.slice(startIdx, startIdx + itemsPerPage)
+  }, [sortedData, currentPage])
 
   const totalPages = Math.ceil(sortedData.length / itemsPerPage)
 
-  // Export to CSV
-  const exportToCSV = () => {
-    const headers = [
-      'Subdomain',
-      'Risk Score',
-      'Risk Tier',
-      'Status',
-      'Protocol',
-      'HTTP Code',
-      'Response Time (ms)',
-      'IP Address',
-      'Title',
-      'Server',
-      'Open Ports',
-      'Technologies'
-    ]
-    
-    const rows = sortedData.map(item => [
-      item.subdomain,
-      item.risk_score || 0,
-      item.risk_tier || 'LOW',
-      item.is_active ? 'Active' : 'Inactive',
-      item.protocol || 'N/A',
-      item.status_code || 'N/A',
-      item.response_time || 'N/A',
-      item.ip_address || 'N/A',
-      item.title || 'N/A',
-      item.server || 'N/A',
-      item.open_ports ? item.open_ports.map(p => `${p.port}/${p.service}`).join('; ') : 'N/A',
-      item.technologies || 'N/A'
-    ])
+  // Calculate statistics
+  const stats = useMemo(() => {
+    return {
+      total_subdomains: mergedData.length,
+      active_hosts: mergedData.filter(d => d.is_active).length,
+      total_ports: portScanData.length,
+      critical_ports: portScanData.filter(p => CRITICAL_SERVICES[p.port]?.severity === 'critical').length,
+      total_endpoints: contentDiscoveryData.length,
+      interesting_endpoints: contentDiscoveryData.filter(e => e.is_interesting).length,
+      high_risk: mergedData.filter(d => d.tier === 'high').length,
+      medium_risk: mergedData.filter(d => d.tier === 'medium').length,
+      low_risk: mergedData.filter(d => d.tier === 'low').length,
+      validated: Object.keys(validationResults).length,
+      with_vulnerabilities: Object.values(validationResults).filter(r => r.has_vulnerabilities).length
+    }
+  }, [mergedData, portScanData, contentDiscoveryData, validationResults])
 
-    const csvContent = [
-      headers.join(','),
-      ...rows.map(row => row.map(cell => `"${cell}"`).join(','))
-    ].join('\n')
+  // Attack surface score (0-100)
+  const attackSurfaceScore = useMemo(() => {
+    let score = 0
+    score += Math.min(25, mergedData.length * 0.5)
+    score += Math.min(20, stats.active_hosts * 2)
+    score += Math.min(25, portScanData.length * 0.5)
+    score += Math.min(20, contentDiscoveryData.length * 0.1)
+    score += Math.min(10, stats.critical_ports * 5)
+    return Math.round(score)
+  }, [mergedData, stats, portScanData, contentDiscoveryData])
 
-    const blob = new Blob([csvContent], { type: 'text/csv' })
-    const url = window.URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `${selectedDomain}-dashboard-${new Date().toISOString().split('T')[0]}.csv`
-    a.click()
-    window.URL.revokeObjectURL(url)
-  }
-
-  // Copy to clipboard
-  const copyToClipboard = () => {
-    const text = sortedData.map(item => item.subdomain).join('\n')
-    navigator.clipboard.writeText(text)
-      .then(() => alert('Copied to clipboard!'))
-      .catch(err => console.error('Failed to copy:', err))
-  }
-
-  // Statistics
-  const stats = {
-    total: mergedData.length,
-    active: mergedData.filter(d => d.is_active).length,
-    inactive: mergedData.filter(d => !d.is_active).length,
-    https: mergedData.filter(d => d.protocol === 'https').length,
-    http: mergedData.filter(d => d.protocol === 'http').length,
-    with_probe_data: mergedData.filter(d => d.from_live_probe).length,
-    with_subdomain_data: mergedData.filter(d => d.from_subdomain_scan).length,
-    with_port_data: mergedData.filter(d => d.from_port_scan).length,
-    total_open_ports: mergedData.reduce((sum, d) => sum + (d.open_ports?.length || 0), 0),
-    with_content_discovery: mergedData.filter(d => d.from_content_discovery).length,
-    with_technologies: mergedData.filter(d => d.technologies).length,
-    critical_targets: mergedData.filter(d => d.risk_tier === 'CRITICAL').length,
-    high_targets: mergedData.filter(d => d.risk_tier === 'HIGH').length,
-    medium_targets: mergedData.filter(d => d.risk_tier === 'MEDIUM').length,
-    low_targets: mergedData.filter(d => d.risk_tier === 'LOW').length,
-  }
-
-  // High value targets
+  // High-value targets
   const highValueTargets = useMemo(() => {
     return mergedData
-      .filter(d => d.risk_score >= 30)
+      .filter(d => d.tier === 'high' && d.is_active)
       .sort((a, b) => b.risk_score - a.risk_score)
       .slice(0, 10)
   }, [mergedData])
 
-  // Attack surface summary
-  const attackSurface = useMemo(() => {
-    const services = new Map()
-    mergedData.forEach(host => {
-      if (host.open_ports) {
-        host.open_ports.forEach(port => {
-          const key = `${port.service || 'unknown'}:${port.port}`
-          if (!services.has(key)) {
-            services.set(key, {
-              service: port.service || 'unknown',
-              port: port.port,
-              count: 0,
-              hosts: []
-            })
-          }
-          const svc = services.get(key)
-          svc.count++
-          svc.hosts.push(host.subdomain)
-        })
-      }
+  // Top services
+  const topServices = useMemo(() => {
+    const serviceCounts = {}
+    portScanData.forEach(port => {
+      const service = port.service || `Port ${port.port}`
+      serviceCounts[service] = (serviceCounts[service] || 0) + 1
     })
     
-    return Array.from(services.values())
+    return Object.entries(serviceCounts)
+      .map(([service, count]) => ({ service, count }))
       .sort((a, b) => b.count - a.count)
-      .slice(0, 8)
-  }, [mergedData])
+      .slice(0, 6)
+  }, [portScanData])
 
-  // Helper to get tier color
-  const getTierColor = (tier) => {
-    switch (tier) {
-      case 'CRITICAL': return 'text-red-400 bg-red-500/20 border-red-500/30'
-      case 'HIGH': return 'text-orange-400 bg-orange-500/20 border-orange-500/30'
-      case 'MEDIUM': return 'text-yellow-400 bg-yellow-500/20 border-yellow-500/30'
-      case 'LOW': return 'text-gray-400 bg-gray-500/20 border-gray-500/30'
-      default: return 'text-gray-400 bg-gray-500/20 border-gray-500/30'
+  // Handle validation
+  const handleValidate = async (subdomain, quick = false) => {
+    setValidatingTargets(prev => new Set([...prev, subdomain]))
+    
+    try {
+      const result = quick 
+        ? await quickValidateTarget(subdomain)
+        : await validateTarget(subdomain)
+      
+      setValidationResults(prev => ({
+        ...prev,
+        [subdomain]: result
+      }))
+    } catch (error) {
+      console.error('Validation failed:', error)
+    } finally {
+      setValidatingTargets(prev => {
+        const newSet = new Set(prev)
+        newSet.delete(subdomain)
+        return newSet
+      })
     }
   }
 
+  // Handle sort
+  const handleSort = (field) => {
+    setSortConfig(prev => {
+      const newConfig = {
+        field,
+        direction: prev.field === field && prev.direction === 'asc' ? 'desc' : 'asc'
+      }
+      localStorage.setItem(STORAGE_KEYS.SORT_STATE, JSON.stringify(newConfig))
+      return newConfig
+    })
+    setCurrentPage(1)
+  }
+
+  // Update filters
+  const updateFilters = (updates) => {
+    const newFilters = { ...filters, ...updates }
+    setFilters(newFilters)
+    localStorage.setItem(STORAGE_KEYS.FILTER_STATE, JSON.stringify(newFilters))
+    setCurrentPage(1)
+  }
+
+  // Export data
+  const handleExport = (format = 'json') => {
+    const dataToExport = filteredData.map(item => ({
+      subdomain: item.subdomain,
+      active: item.is_active,
+      status_code: item.status_code,
+      risk_score: item.risk_score,
+      tier: item.tier,
+      ports: item.ports.length,
+      endpoints: item.endpoints.length,
+      critical_services: item.critical_services.length,
+      interesting_endpoints: item.interesting_endpoints.length
+    }))
+    
+    if (format === 'json') {
+      const blob = new Blob([JSON.stringify(dataToExport, null, 2)], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `dashboard-export-${Date.now()}.json`
+      a.click()
+    } else if (format === 'csv') {
+      const headers = Object.keys(dataToExport[0] || {}).join(',')
+      const rows = dataToExport.map(row => Object.values(row).join(','))
+      const csv = [headers, ...rows].join('\n')
+      const blob = new Blob([csv], { type: 'text/csv' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `dashboard-export-${Date.now()}.csv`
+      a.click()
+    }
+  }
+
+  // Copy to clipboard
+  const handleCopy = () => {
+    const text = filteredData.map(d => d.subdomain).join('\n')
+    navigator.clipboard.writeText(text)
+  }
+
+  // Toggle section
+  const toggleSection = (section) => {
+    setExpandedSections(prev => ({
+      ...prev,
+      [section]: !prev[section]
+    }))
+  }
+
+  const getSeverityColor = (severity) => {
+    switch (severity) {
+      case 'critical': return 'text-red-500'
+      case 'high': return 'text-orange-500'
+      case 'medium': return 'text-yellow-500'
+      default: return 'text-gray-400'
+    }
+  }
+
+  const getTierColor = (tier) => {
+    switch (tier) {
+      case 'high': return 'text-red-500 bg-red-500/10 border-red-500/30'
+      case 'medium': return 'text-orange-500 bg-orange-500/10 border-orange-500/30'
+      case 'low': return 'text-green-500 bg-green-500/10 border-green-500/30'
+      default: return 'text-gray-400 bg-gray-500/10 border-gray-500/30'
+    }
+  }
+
+  if (!selectedDomain) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <div className="text-center">
+          <Globe className="w-16 h-16 text-gray-600 mx-auto mb-4" />
+          <h3 className="text-xl font-semibold text-white mb-2">No Domain Selected</h3>
+          <p className="text-gray-400 mb-6">Start by scanning a domain to see the dashboard</p>
+          <button
+            onClick={() => navigate('/subdomain-scanner')}
+            className="px-6 py-3 bg-cyber-blue text-white rounded-lg hover:bg-cyber-blue/80 transition-colors"
+          >
+            Start Scanning
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <div className="text-center">
+          <Loader className="w-16 h-16 text-cyber-blue mx-auto mb-4 animate-spin" />
+          <h3 className="text-xl font-semibold text-white mb-2">Loading Dashboard</h3>
+          <p className="text-gray-400">Gathering reconnaissance data...</p>
+        </div>
+      </div>
+    )
+  }
+
   return (
-    <div className="p-8 space-y-6">
-      {/* Header with Navigation */}
+    <div className="space-y-6">
+      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-3xl font-bold text-white flex items-center gap-3">
-            <Target className="text-cyber-blue" />
+          <h1 className="text-3xl font-bold text-white flex items-center gap-3">
+            <Shield className="w-8 h-8 text-cyber-blue" />
             Attack Surface Dashboard
-          </h2>
-          <p className="text-gray-400 mt-2">Elite bug bounty hunter methodology • Battle-tested risk scoring</p>
+          </h1>
+          <p className="text-gray-400 mt-1">
+            Analyzing <span className="text-cyber-blue font-medium">{selectedDomain}</span>
+          </p>
         </div>
-
+        
         <div className="flex items-center gap-3">
-          {/* View Mode Selector */}
-          <div className="flex bg-dark-100 border border-dark-50 rounded-lg p-1">
+          {/* View Mode Toggle */}
+          <div className="flex gap-2 bg-dark-200 rounded-lg p-1">
             <button
-              onClick={() => setViewMode('overview')}
-              className={`px-3 py-1.5 rounded text-xs font-medium transition-all ${
+              onClick={() => {
+                setViewMode('overview')
+                localStorage.setItem(STORAGE_KEYS.VIEW_MODE, 'overview')
+              }}
+              className={`px-4 py-2 rounded-md transition-colors ${
                 viewMode === 'overview'
                   ? 'bg-cyber-blue text-white'
                   : 'text-gray-400 hover:text-white'
@@ -703,8 +588,11 @@ const Dashboard = () => {
               Overview
             </button>
             <button
-              onClick={() => setViewMode('detailed')}
-              className={`px-3 py-1.5 rounded text-xs font-medium transition-all ${
+              onClick={() => {
+                setViewMode('detailed')
+                localStorage.setItem(STORAGE_KEYS.VIEW_MODE, 'detailed')
+              }}
+              className={`px-4 py-2 rounded-md transition-colors ${
                 viewMode === 'detailed'
                   ? 'bg-cyber-blue text-white'
                   : 'text-gray-400 hover:text-white'
@@ -713,8 +601,11 @@ const Dashboard = () => {
               Detailed
             </button>
             <button
-              onClick={() => setViewMode('attack-surface')}
-              className={`px-3 py-1.5 rounded text-xs font-medium transition-all ${
+              onClick={() => {
+                setViewMode('attack-surface')
+                localStorage.setItem(STORAGE_KEYS.VIEW_MODE, 'attack-surface')
+              }}
+              className={`px-4 py-2 rounded-md transition-colors ${
                 viewMode === 'attack-surface'
                   ? 'bg-cyber-blue text-white'
                   : 'text-gray-400 hover:text-white'
@@ -724,458 +615,979 @@ const Dashboard = () => {
             </button>
           </div>
 
-          {mergedData.length > 0 && (
-            <>
-              <button
-                onClick={copyToClipboard}
-                className="flex items-center gap-2 px-3 py-2 bg-dark-100 border border-dark-50 rounded-lg text-white hover:border-cyber-blue transition-all text-sm"
-                title="Copy all subdomains"
-              >
-                <Copy size={16} />
-                Copy
-              </button>
-              <button
-                onClick={exportToCSV}
-                className="flex items-center gap-2 px-3 py-2 bg-dark-100 border border-dark-50 rounded-lg text-white hover:border-cyber-green transition-all text-sm"
-                title="Export to CSV"
-              >
-                <Download size={16} />
-                Export
-              </button>
-            </>
-          )}
+          {/* Actions */}
+          <button
+            onClick={() => handleExport('json')}
+            className="p-2 bg-dark-200 text-gray-400 rounded-lg hover:text-white hover:bg-dark-300 transition-colors"
+            title="Export JSON"
+          >
+            <Download className="w-5 h-5" />
+          </button>
+          <button
+            onClick={handleCopy}
+            className="p-2 bg-dark-200 text-gray-400 rounded-lg hover:text-white hover:bg-dark-300 transition-colors"
+            title="Copy Subdomains"
+          >
+            <Copy className="w-5 h-5" />
+          </button>
+          <button
+            onClick={() => queryClient.invalidateQueries(['subdomains'])}
+            className="p-2 bg-dark-200 text-gray-400 rounded-lg hover:text-white hover:bg-dark-300 transition-colors"
+            title="Refresh"
+          >
+            <RefreshCw className="w-5 h-5" />
+          </button>
         </div>
       </div>
 
-      {/* Domain Selection */}
-      <div className="bg-dark-100 border border-dark-50 rounded-xl p-6">
-        <label className="block text-sm font-medium text-gray-300 mb-2">
-          Target Domain
-        </label>
-        {availableDomains.length === 0 ? (
-          <div className="text-center py-8 bg-dark-200 border border-dark-50 rounded-lg">
-            <Globe className="mx-auto text-gray-600 mb-3" size={48} />
-            <p className="text-gray-400 mb-2">No reconnaissance data available</p>
-            <p className="text-sm text-gray-500">
-              Start by running a subdomain scan from the Subdomain Scanner
-            </p>
-          </div>
-        ) : (
-          <select
-            value={selectedDomain}
-            onChange={(e) => {
-              setSelectedDomain(e.target.value)
-              setCurrentPage(1)
-            }}
-            className="w-full px-4 py-3 bg-dark-200 border border-dark-50 rounded-lg text-white focus:outline-none focus:border-cyber-blue transition-all"
-          >
-            {availableDomains.map((domain) => (
-              <option key={domain} value={domain}>{domain}</option>
-            ))}
-          </select>
-        )}
-      </div>
-
-      {/* Overview Mode - Just Metrics */}
-      {selectedDomain && mergedData.length > 0 && viewMode === 'overview' && (
+      {/* Overview Mode */}
+      {viewMode === 'overview' && (
         <>
-          {/* Key Metrics Grid */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <div className="bg-gradient-to-br from-red-500/10 to-red-500/5 border border-red-500/30 rounded-xl p-5">
-              <div className="flex items-center justify-between mb-3">
-                <AlertTriangle className="text-red-400" size={24} />
-                <Shield className="text-red-400/50" size={16} />
-              </div>
-              <div className="text-3xl font-bold text-red-400 mb-1">{stats.critical_targets}</div>
-              <div className="text-sm text-gray-400">CRITICAL Tier</div>
-              <div className="text-xs text-red-400 mt-2">
-                Drop everything and test! 🎯
-              </div>
-            </div>
-
-            <div className="bg-gradient-to-br from-orange-500/10 to-orange-500/5 border border-orange-500/30 rounded-xl p-5">
-              <div className="flex items-center justify-between mb-3">
-                <Zap className="text-orange-400" size={24} />
-                <TrendingUp className="text-orange-400/50" size={16} />
-              </div>
-              <div className="text-3xl font-bold text-orange-400 mb-1">{stats.high_targets}</div>
-              <div className="text-sm text-gray-400">HIGH Priority</div>
-              <div className="text-xs text-orange-400 mt-2">
-                Priority testing targets
-              </div>
-            </div>
-
-            <div className="bg-gradient-to-br from-yellow-500/10 to-yellow-500/5 border border-yellow-500/30 rounded-xl p-5">
-              <div className="flex items-center justify-between mb-3">
-                <Eye className="text-yellow-400" size={24} />
-                <Activity className="text-yellow-400/50" size={16} />
-              </div>
-              <div className="text-3xl font-bold text-yellow-400 mb-1">{stats.medium_targets}</div>
-              <div className="text-sm text-gray-400">MEDIUM Tier</div>
-              <div className="text-xs text-yellow-400 mt-2">
-                Worth investigating
-              </div>
-            </div>
-
-            <div className="bg-gradient-to-br from-cyber-blue/10 to-cyber-blue/5 border border-cyber-blue/30 rounded-xl p-5">
-              <div className="flex items-center justify-between mb-3">
-                <Globe className="text-cyber-blue" size={24} />
-                <BarChart3 className="text-cyber-blue/50" size={16} />
-              </div>
-              <div className="text-3xl font-bold text-white mb-1">{stats.total}</div>
-              <div className="text-sm text-gray-400">Total Assets</div>
-              <div className="text-xs text-cyber-blue mt-2">
-                {stats.active > 0 ? `${((stats.active / stats.total) * 100).toFixed(1)}% active` : 'No active hosts'}
-              </div>
-            </div>
-          </div>
-
-          {/* Attack Surface Summary */}
-          {attackSurface.length > 0 && (
-            <div className="bg-dark-100 border border-dark-50 rounded-xl p-6">
+          {/* Attack Surface Score */}
+          <div className="bg-dark-200 rounded-lg p-6 border border-dark-300">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-semibold text-white flex items-center gap-2">
+                <Target className="w-6 h-6 text-cyber-pink" />
+                Attack Surface Score
+              </h2>
               <button
-                onClick={() => toggleSection('attack_vectors')}
-                className="w-full flex items-center justify-between mb-4"
+                onClick={() => toggleSection('metrics')}
+                className="text-gray-400 hover:text-white"
               >
-                <h3 className="text-lg font-semibold text-white flex items-center gap-2">
-                  <Shield className="text-cyber-pink" size={20} />
-                  Attack Surface Analysis
-                </h3>
-                {expandedSections.attack_vectors ? <ChevronUp size={20} className="text-gray-400" /> : <ChevronDown size={20} className="text-gray-400" />}
+                {expandedSections.metrics ? <ChevronUp /> : <ChevronDown />}
               </button>
-
-              {expandedSections.attack_vectors && (
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                  {attackSurface.map((svc, idx) => (
-                    <div
-                      key={idx}
-                      className="p-4 bg-dark-200 border border-dark-50 rounded-lg hover:border-cyber-pink transition-all"
-                    >
-                      <div className="flex items-center justify-between mb-2">
-                        <div className="p-2 bg-cyber-pink/10 rounded">
-                          <Server size={16} className="text-cyber-pink" />
-                        </div>
-                        <span className="text-xs font-mono text-gray-400">:{svc.port}</span>
+            </div>
+            
+            {expandedSections.metrics && (
+              <>
+                <div className="flex items-center gap-6 mb-6">
+                  <div className="relative w-32 h-32">
+                    <svg className="w-full h-full transform -rotate-90">
+                      <circle
+                        cx="64"
+                        cy="64"
+                        r="56"
+                        fill="none"
+                        stroke="rgba(255, 255, 255, 0.1)"
+                        strokeWidth="8"
+                      />
+                      <circle
+                        cx="64"
+                        cy="64"
+                        r="56"
+                        fill="none"
+                        stroke={
+                          attackSurfaceScore >= 75 ? '#ef4444' :
+                          attackSurfaceScore >= 50 ? '#f97316' :
+                          attackSurfaceScore >= 25 ? '#eab308' :
+                          '#22c55e'
+                        }
+                        strokeWidth="8"
+                        strokeDasharray={`${attackSurfaceScore * 3.51} 351`}
+                        strokeLinecap="round"
+                      />
+                    </svg>
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <span className={`text-3xl font-bold ${
+                        attackSurfaceScore >= 75 ? 'text-red-500' :
+                        attackSurfaceScore >= 50 ? 'text-orange-500' :
+                        attackSurfaceScore >= 25 ? 'text-yellow-500' :
+                        'text-green-500'
+                      }`}>
+                        {attackSurfaceScore}
+                      </span>
+                    </div>
+                  </div>
+                  
+                  <div className="flex-1">
+                    <div className="grid grid-cols-3 gap-4">
+                      <div>
+                        <div className="text-2xl font-bold text-red-500">{stats.high_risk}</div>
+                        <div className="text-sm text-gray-400">High Risk</div>
                       </div>
-                      <div className="text-sm font-medium text-white capitalize mb-1">
-                        {svc.service}
+                      <div>
+                        <div className="text-2xl font-bold text-orange-500">{stats.medium_risk}</div>
+                        <div className="text-sm text-gray-400">Medium Risk</div>
                       </div>
-                      <div className="text-xs text-gray-400">
-                        {svc.count} {svc.count === 1 ? 'instance' : 'instances'}
+                      <div>
+                        <div className="text-2xl font-bold text-green-500">{stats.low_risk}</div>
+                        <div className="text-sm text-gray-400">Low Risk</div>
                       </div>
                     </div>
-                  ))}
+                  </div>
                 </div>
-              )}
-            </div>
-          )}
 
-          {/* Data Source Summary */}
-          <div className="bg-dark-100 border border-dark-50 rounded-xl p-6">
-            <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
-              <BarChart3 className="text-cyber-blue" size={20} />
-              Reconnaissance Summary
-            </h3>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <div className="p-4 bg-dark-200 border border-dark-50 rounded-lg">
-                <div className="text-2xl font-bold text-cyber-blue mb-1">{stats.with_subdomain_data}</div>
-                <div className="text-xs text-gray-400">Subdomain Scan</div>
-              </div>
-              <div className="p-4 bg-dark-200 border border-dark-50 rounded-lg">
-                <div className="text-2xl font-bold text-cyber-green mb-1">{stats.with_probe_data}</div>
-                <div className="text-xs text-gray-400">Live Hosts</div>
-              </div>
-              <div className="p-4 bg-dark-200 border border-dark-50 rounded-lg">
-                <div className="text-2xl font-bold text-cyber-pink mb-1">{stats.with_port_data}</div>
-                <div className="text-xs text-gray-400">Port Scanned</div>
-              </div>
-              <div className="p-4 bg-dark-200 border border-dark-50 rounded-lg">
-                <div className="text-2xl font-bold text-cyber-purple mb-1">{stats.with_content_discovery}</div>
-                <div className="text-xs text-gray-400">Content Discovery</div>
-              </div>
-            </div>
-          </div>
-        </>
-      )}
+                {/* Key Metrics */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div
+                    onClick={() => navigate('/subdomain-scanner')}
+                    className="bg-gradient-to-br from-cyber-blue/10 to-cyber-blue/5 border border-cyber-blue/30 rounded-lg p-4 cursor-pointer hover:border-cyber-blue transition-colors group"
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <Globe className="w-5 h-5 text-cyber-blue" />
+                      <ChevronRight className="w-4 h-4 text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity" />
+                    </div>
+                    <div className="text-2xl font-bold text-white">{stats.total_subdomains}</div>
+                    <div className="text-sm text-gray-400">Subdomains</div>
+                  </div>
 
-      {/* Attack Surface Mode - Validation & Exploitation Focus */}
-      {selectedDomain && mergedData.length > 0 && viewMode === 'attack-surface' && (
-        <>
-          {/* Validation Status Summary */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <div className="bg-gradient-to-br from-purple-500/10 to-purple-500/5 border border-purple-500/30 rounded-xl p-5">
-              <div className="flex items-center justify-between mb-3">
-                <Shield className="text-purple-400" size={24} />
-                <CheckCircle className="text-purple-400/50" size={16} />
-              </div>
-              <div className="text-3xl font-bold text-purple-400 mb-1">
-                {mergedData.filter(t => t.validated).length}
-              </div>
-              <div className="text-sm text-gray-400">Validated Targets</div>
-              <div className="text-xs text-purple-400 mt-2">
-                Vulnerability checks completed
-              </div>
-            </div>
+                  <div
+                    onClick={() => navigate('/live-hosts')}
+                    className="bg-gradient-to-br from-green-500/10 to-green-500/5 border border-green-500/30 rounded-lg p-4 cursor-pointer hover:border-green-500 transition-colors group"
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <Activity className="w-5 h-5 text-green-500" />
+                      <ChevronRight className="w-4 h-4 text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity" />
+                    </div>
+                    <div className="text-2xl font-bold text-white">{stats.active_hosts}</div>
+                    <div className="text-sm text-gray-400">Active Hosts</div>
+                  </div>
 
-            <div className="bg-gradient-to-br from-red-500/10 to-red-500/5 border border-red-500/30 rounded-xl p-5">
-              <div className="flex items-center justify-between mb-3">
-                <AlertTriangle className="text-red-400" size={24} />
-                <Zap className="text-red-400/50" size={16} />
-              </div>
-              <div className="text-3xl font-bold text-red-400 mb-1">
-                {mergedData.filter(t => t.confirmed_vulns && t.confirmed_vulns > 0).length}
-              </div>
-              <div className="text-sm text-gray-400">Exploitable Targets</div>
-              <div className="text-xs text-red-400 mt-2">
-                Confirmed vulnerabilities found
-              </div>
-            </div>
+                  <div
+                    onClick={() => navigate('/port-scanner')}
+                    className="bg-gradient-to-br from-cyber-pink/10 to-cyber-pink/5 border border-cyber-pink/30 rounded-lg p-4 cursor-pointer hover:border-cyber-pink transition-colors group"
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <Server className="w-5 h-5 text-cyber-pink" />
+                      <ChevronRight className="w-4 h-4 text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity" />
+                    </div>
+                    <div className="text-2xl font-bold text-white">{stats.total_ports}</div>
+                    <div className="text-sm text-gray-400">Open Ports</div>
+                    {stats.critical_ports > 0 && (
+                      <div className="text-xs text-red-500 mt-1">
+                        {stats.critical_ports} critical
+                      </div>
+                    )}
+                  </div>
 
-            <div className="bg-gradient-to-br from-yellow-500/10 to-yellow-500/5 border border-yellow-500/30 rounded-xl p-5">
-              <div className="flex items-center justify-between mb-3">
-                <Target className="text-yellow-400" size={24} />
-                <Activity className="text-yellow-400/50" size={16} />
-              </div>
-              <div className="text-3xl font-bold text-yellow-400 mb-1">
-                {highValueTargets.filter(t => !t.validated).length}
-              </div>
-              <div className="text-sm text-gray-400">Pending Validation</div>
-              <div className="text-xs text-yellow-400 mt-2">
-                High-value targets to check
-              </div>
-            </div>
-
-            <div className="bg-gradient-to-br from-cyber-blue/10 to-cyber-blue/5 border border-cyber-blue/30 rounded-xl p-5">
-              <div className="flex items-center justify-between mb-3">
-                <Layers className="text-cyber-blue" size={24} />
-                <BarChart3 className="text-cyber-blue/50" size={16} />
-              </div>
-              <div className="text-3xl font-bold text-white mb-1">
-                {mergedData.reduce((sum, t) => sum + (t.confirmed_vulns || 0), 0)}
-              </div>
-              <div className="text-sm text-gray-400">Total Vulnerabilities</div>
-              <div className="text-xs text-cyber-blue mt-2">
-                Across all validated targets
-              </div>
-            </div>
+                  <div
+                    onClick={() => navigate('/content-discovery')}
+                    className="bg-gradient-to-br from-cyber-purple/10 to-cyber-purple/5 border border-cyber-purple/30 rounded-lg p-4 cursor-pointer hover:border-cyber-purple transition-colors group"
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <Network className="w-5 h-5 text-cyber-purple" />
+                      <ChevronRight className="w-4 h-4 text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity" />
+                    </div>
+                    <div className="text-2xl font-bold text-white">{stats.total_endpoints}</div>
+                    <div className="text-sm text-gray-400">Endpoints</div>
+                    {stats.interesting_endpoints > 0 && (
+                      <div className="text-xs text-yellow-500 mt-1">
+                        {stats.interesting_endpoints} interesting
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </>
+            )}
           </div>
 
-          {/* High Value Targets with Validation */}
-          {highValueTargets.length > 0 && (
-            <div className="bg-dark-100 border border-dark-50 rounded-xl p-6">
+          {/* High-Value Targets */}
+          <div className="bg-dark-200 rounded-lg p-6 border border-dark-300">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-semibold text-white flex items-center gap-2">
+                <Target className="w-6 h-6 text-red-500" />
+                High-Value Targets
+                <span className="text-sm text-gray-400 font-normal">
+                  ({highValueTargets.length} found)
+                </span>
+              </h2>
               <button
-                onClick={() => toggleSection('high_value_targets')}
-                className="w-full flex items-center justify-between mb-4"
+                onClick={() => toggleSection('highValue')}
+                className="text-gray-400 hover:text-white"
               >
-                <h3 className="text-lg font-semibold text-white flex items-center gap-2">
-                  <Target className="text-red-400" size={20} />
-                  🎯 Top Priority Targets
-                  <span className="ml-2 px-2 py-0.5 bg-red-500/20 rounded-full text-xs text-red-400">
-                    {highValueTargets.length}
-                  </span>
-                </h3>
-                {expandedSections.high_value_targets ? <ChevronUp size={20} className="text-gray-400" /> : <ChevronDown size={20} className="text-gray-400" />}
+                {expandedSections.highValue ? <ChevronUp /> : <ChevronDown />}
               </button>
+            </div>
 
-              {expandedSections.high_value_targets && (
-                <div className="space-y-3">
-                  {highValueTargets.map((target, idx) => (
+            {expandedSections.highValue && (
+              <div className="space-y-3">
+                {highValueTargets.length === 0 ? (
+                  <div className="text-center py-8 text-gray-400">
+                    <Target className="w-12 h-12 mx-auto mb-2 opacity-50" />
+                    <p>No high-value targets identified</p>
+                  </div>
+                ) : (
+                  highValueTargets.map((target, idx) => (
                     <div
-                      key={idx}
-                      className={`border rounded-lg p-4 hover:border-opacity-100 transition-all ${
-                        target.risk_tier === 'CRITICAL' 
-                          ? 'bg-red-500/5 border-red-500/30 hover:border-red-500/50' 
-                          : 'bg-orange-500/5 border-orange-500/30 hover:border-orange-500/50'
-                      }`}
+                      key={target.subdomain}
+                      className="bg-dark-100 rounded-lg p-4 border border-red-500/20 hover:border-red-500/40 transition-colors"
                     >
-                      <div className="flex items-start gap-4">
-                        {/* Rank Badge */}
-                        <div className={`w-12 h-12 rounded-lg flex items-center justify-center flex-shrink-0 ${
-                          target.risk_tier === 'CRITICAL' ? 'bg-red-500/20' : 'bg-orange-500/20'
-                        }`}>
-                          <span className={`text-xl font-bold ${
-                            target.risk_tier === 'CRITICAL' ? 'text-red-400' : 'text-orange-400'
-                          }`}>
-                            #{idx + 1}
-                          </span>
-                        </div>
-                        
-                        {/* Target Info */}
-                        <div className="flex-1 min-w-0">
-                          {/* Subdomain and Tier */}
-                          <div className="flex items-center gap-2 mb-2">
-                            <span className="text-white font-mono text-base font-semibold truncate">
+                      <div className="flex items-start justify-between">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-3 mb-2">
+                            <span className="text-sm font-mono text-gray-400">#{idx + 1}</span>
+                            <a
+                              href={target.final_url || `https://${target.subdomain}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-white hover:text-cyber-blue transition-colors font-medium"
+                            >
                               {target.subdomain}
+                            </a>
+                            <ExternalLink className="w-3 h-3 text-gray-400" />
+                            <span className={`text-xs px-2 py-1 rounded border ${getTierColor(target.tier)}`}>
+                              {target.tier.toUpperCase()}
                             </span>
-                            {target.is_active && (
-                              <CheckCircle size={14} className="text-green-400 flex-shrink-0" />
-                            )}
-                            <span className={`px-2 py-1 rounded text-xs font-bold ${getTierColor(target.risk_tier)}`}>
-                              {target.risk_tier}
+                            <span className="text-sm font-bold text-red-500">
+                              Risk: {target.risk_score}
                             </span>
                           </div>
-
-                          {/* Risk Findings */}
-                          {target.risk_findings && target.risk_findings.length > 0 && (
-                            <div className="space-y-1 mb-3">
-                              {target.risk_findings.slice(0, 3).map((finding, fidx) => (
-                                <div key={fidx} className="flex items-start gap-2 text-xs">
-                                  <div className={`mt-1 w-1.5 h-1.5 rounded-full flex-shrink-0 ${
-                                    finding.type === 'combo_bonus' || finding.severity >= 25 
-                                      ? 'bg-red-400' 
-                                      : finding.severity >= 15 
-                                      ? 'bg-orange-400' 
-                                      : 'bg-yellow-400'
-                                  }`} />
-                                  <div>
-                                    <div className="text-gray-300">{finding.description}</div>
-                                    <div className="text-gray-500 text-xs">{finding.impact}</div>
-                                  </div>
-                                </div>
-                              ))}
-                              {target.risk_findings.length > 3 && (
-                                <div className="text-xs text-gray-500 ml-3">
-                                  +{target.risk_findings.length - 3} more findings
+                          
+                          <div className="grid grid-cols-4 gap-4 text-sm">
+                            <div>
+                              <div className="text-gray-400">Ports</div>
+                              <div className="text-white font-medium">{target.ports.length}</div>
+                              {target.critical_services.length > 0 && (
+                                <div className="text-xs text-red-500">
+                                  {target.critical_services.length} critical
                                 </div>
                               )}
                             </div>
-                          )}
-
-                          {/* Quick Stats */}
-                          <div className="flex items-center gap-3 text-xs text-gray-400">
-                            {target.open_ports && target.open_ports.length > 0 && (
-                              <span className="flex items-center gap-1">
-                                <Network size={12} />
-                                {target.open_ports.length} ports
-                              </span>
-                            )}
-                            {target.discovered_paths > 0 && (
-                              <span className="flex items-center gap-1">
-                                <Search size={12} />
-                                {target.discovered_paths} paths
-                              </span>
-                            )}
-                            {target.protocol && (
-                              <span className={`px-1.5 py-0.5 rounded text-xs ${
-                                target.protocol === 'https' ? 'bg-green-500/20 text-green-400' : 'bg-yellow-500/20 text-yellow-400'
-                              }`}>
-                                {target.protocol.toUpperCase()}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-
-                        {/* Score and Actions */}
-                        <div className="flex items-center gap-3">
-                          <div className="text-right">
-                            <div className="text-xs text-gray-500 mb-1">Risk Score</div>
-                            <div className={`text-2xl font-bold ${
-                              target.risk_tier === 'CRITICAL' ? 'text-red-400' : 'text-orange-400'
-                            }`}>
-                              {target.risk_score}
+                            <div>
+                              <div className="text-gray-400">Endpoints</div>
+                              <div className="text-white font-medium">{target.endpoints.length}</div>
+                              {target.interesting_endpoints.length > 0 && (
+                                <div className="text-xs text-yellow-500">
+                                  {target.interesting_endpoints.length} interesting
+                                </div>
+                              )}
+                            </div>
+                            <div>
+                              <div className="text-gray-400">Status</div>
+                              <div className="text-white font-medium">{target.status_code || 'N/A'}</div>
+                            </div>
+                            <div>
+                              <div className="text-gray-400">Response</div>
+                              <div className="text-white font-medium">
+                                {target.response_time ? `${target.response_time}ms` : 'N/A'}
+                              </div>
                             </div>
                           </div>
-                          
-                          {/* Validation Button */}
-                          <button
-                            onClick={() => handleValidateTarget(target)}
-                            disabled={validating[target.subdomain]}
-                            className="p-2 bg-cyber-purple/20 rounded hover:bg-cyber-purple/30 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
-                            title="Validate vulnerabilities"
-                          >
-                            {validating[target.subdomain] ? (
-                              <Loader size={16} className="animate-spin text-cyber-purple" />
-                            ) : (
-                              <Shield size={16} className="text-cyber-purple" />
-                            )}
-                          </button>
-                          
-                          {target.is_active && (
-                            <a
-                              href={`${target.protocol || 'https'}://${target.subdomain}`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="p-2 hover:bg-dark-200 rounded transition-all"
-                            >
-                              <ExternalLink size={16} className={
-                                target.risk_tier === 'CRITICAL' ? 'text-red-400' : 'text-orange-400'
-                              } />
-                            </a>
+
+                          {target.critical_services.length > 0 && (
+                            <div className="mt-3 flex items-center gap-2 flex-wrap">
+                              <AlertTriangle className="w-4 h-4 text-red-500" />
+                              <span className="text-sm text-gray-400">Critical Services:</span>
+                              {target.critical_services.map(port => (
+                                <span
+                                  key={port.port}
+                                  className="text-xs px-2 py-1 bg-red-500/10 text-red-500 rounded border border-red-500/30"
+                                >
+                                  {CRITICAL_SERVICES[port.port]?.name || port.service} ({port.port})
+                                </span>
+                              ))}
+                            </div>
                           )}
                         </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
 
-          {/* Attack Surface Summary */}
-          {attackSurface.length > 0 && (
-            <div className="bg-dark-100 border border-dark-50 rounded-xl p-6">
-              <button
-                onClick={() => toggleSection('attack_vectors')}
-                className="w-full flex items-center justify-between mb-4"
-              >
-                <h3 className="text-lg font-semibold text-white flex items-center gap-2">
-                  <Shield className="text-cyber-pink" size={20} />
-                  Attack Surface Analysis
-                </h3>
-                {expandedSections.attack_vectors ? <ChevronUp size={20} className="text-gray-400" /> : <ChevronDown size={20} className="text-gray-400" />}
-              </button>
-
-              {expandedSections.attack_vectors && (
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                  {attackSurface.map((svc, idx) => (
-                    <div
-                      key={idx}
-                      className="p-4 bg-dark-200 border border-dark-50 rounded-lg hover:border-cyber-pink transition-all"
-                    >
-                      <div className="flex items-center justify-between mb-2">
-                        <div className="p-2 bg-cyber-pink/10 rounded">
-                          <Server size={16} className="text-cyber-pink" />
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => handleValidate(target.subdomain, true)}
+                            disabled={validatingTargets.has(target.subdomain)}
+                            className="p-2 bg-cyber-blue/20 text-cyber-blue rounded hover:bg-cyber-blue/30 transition-colors disabled:opacity-50"
+                            title="Quick Validate"
+                          >
+                            {validatingTargets.has(target.subdomain) ? (
+                              <Loader className="w-4 h-4 animate-spin" />
+                            ) : (
+                              <Zap className="w-4 h-4" />
+                            )}
+                          </button>
+                          <button
+                            onClick={() => handleValidate(target.subdomain, false)}
+                            disabled={validatingTargets.has(target.subdomain)}
+                            className="p-2 bg-cyber-purple/20 text-cyber-purple rounded hover:bg-cyber-purple/30 transition-colors disabled:opacity-50"
+                            title="Full Validate"
+                          >
+                            {validatingTargets.has(target.subdomain) ? (
+                              <Loader className="w-4 h-4 animate-spin" />
+                            ) : (
+                              <Shield className="w-4 h-4" />
+                            )}
+                          </button>
                         </div>
-                        <span className="text-xs font-mono text-gray-400">:{svc.port}</span>
                       </div>
-                      <div className="text-sm font-medium text-white capitalize mb-1">
-                        {svc.service}
-                      </div>
-                      <div className="text-xs text-gray-400">
-                        {svc.count} {svc.count === 1 ? 'instance' : 'instances'}
-                      </div>
+
+                      {target.validation_result && (
+                        <div className="mt-3 p-3 bg-dark-200 rounded border border-dark-300">
+                          <div className="flex items-center gap-2 mb-2">
+                            {target.validation_result.has_vulnerabilities ? (
+                              <XCircle className="w-4 h-4 text-red-500" />
+                            ) : (
+                              <CheckCircle className="w-4 h-4 text-green-500" />
+                            )}
+                            <span className="text-sm font-medium text-white">
+                              Validation Result
+                            </span>
+                          </div>
+                          <div className="text-sm text-gray-400">
+                            {target.validation_result.summary || 'Validation complete'}
+                          </div>
+                        </div>
+                      )}
                     </div>
-                  ))}
+                  ))
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Attack Surface Breakdown */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* Critical Findings */}
+            <div className="bg-dark-200 rounded-lg p-6 border border-dark-300">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-xl font-semibold text-white flex items-center gap-2">
+                  <AlertTriangle className="w-6 h-6 text-red-500" />
+                  Critical Findings
+                </h2>
+                <button
+                  onClick={() => toggleSection('criticalFindings')}
+                  className="text-gray-400 hover:text-white"
+                >
+                  {expandedSections.criticalFindings ? <ChevronUp /> : <ChevronDown />}
+                </button>
+              </div>
+
+              {expandedSections.criticalFindings && (
+                <div className="space-y-4">
+                  {stats.critical_ports > 0 ? (
+                    <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-4">
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-2">
+                          <Server className="w-5 h-5 text-red-500" />
+                          <span className="font-medium text-white">Critical Services Exposed</span>
+                        </div>
+                        <span className="text-2xl font-bold text-red-500">{stats.critical_ports}</span>
+                      </div>
+                      <p className="text-sm text-gray-400 mb-3">
+                        High-risk services detected (RDP, VNC, databases)
+                      </p>
+                      <button
+                        onClick={() => {
+                          updateFilters({ hasPorts: true })
+                          setViewMode('detailed')
+                        }}
+                        className="text-sm text-red-500 hover:text-red-400 flex items-center gap-1"
+                      >
+                        Investigate <ArrowRight className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ) : null}
+
+                  {stats.interesting_endpoints > 0 ? (
+                    <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-4">
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-2">
+                          <Eye className="w-5 h-5 text-yellow-500" />
+                          <span className="font-medium text-white">Interesting Endpoints</span>
+                        </div>
+                        <span className="text-2xl font-bold text-yellow-500">{stats.interesting_endpoints}</span>
+                      </div>
+                      <p className="text-sm text-gray-400 mb-3">
+                        Admin panels, configs, or sensitive paths found
+                      </p>
+                      <button
+                        onClick={() => navigate('/content-discovery')}
+                        className="text-sm text-yellow-500 hover:text-yellow-400 flex items-center gap-1"
+                      >
+                        Investigate <ArrowRight className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ) : null}
+
+                  {stats.with_vulnerabilities > 0 ? (
+                    <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-4">
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-2">
+                          <Shield className="w-5 h-5 text-red-500" />
+                          <span className="font-medium text-white">Validated Vulnerabilities</span>
+                        </div>
+                        <span className="text-2xl font-bold text-red-500">{stats.with_vulnerabilities}</span>
+                      </div>
+                      <p className="text-sm text-gray-400 mb-3">
+                        Confirmed security issues from validation scans
+                      </p>
+                      <button
+                        onClick={() => {
+                          updateFilters({ hasVulnerabilities: true })
+                          setViewMode('detailed')
+                        }}
+                        className="text-sm text-red-500 hover:text-red-400 flex items-center gap-1"
+                      >
+                        Review <ArrowRight className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ) : null}
+
+                  {stats.critical_ports === 0 && stats.interesting_endpoints === 0 && stats.with_vulnerabilities === 0 && (
+                    <div className="text-center py-8">
+                      <CheckCircle className="w-12 h-12 text-green-500 mx-auto mb-2" />
+                      <p className="text-green-500 font-medium">No Critical Issues Detected</p>
+                      <p className="text-sm text-gray-400 mt-1">
+                        Continue monitoring for new findings
+                      </p>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
-          )}
+
+            {/* Top Services */}
+            <div className="bg-dark-200 rounded-lg p-6 border border-dark-300">
+              <h2 className="text-xl font-semibold text-white mb-4 flex items-center gap-2">
+                <Database className="w-6 h-6 text-cyber-purple" />
+                Top Services Exposed
+              </h2>
+              
+              <div className="space-y-3">
+                {topServices.length === 0 ? (
+                  <div className="text-center py-8 text-gray-400">
+                    <Server className="w-12 h-12 mx-auto mb-2 opacity-50" />
+                    <p>No services detected</p>
+                  </div>
+                ) : (
+                  topServices.map((item, idx) => (
+                    <div key={item.service} className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-full bg-cyber-purple/20 text-cyber-purple flex items-center justify-center text-sm font-bold">
+                        {idx + 1}
+                      </div>
+                      <div className="flex-1">
+                        <div className="text-white font-medium capitalize">{item.service}</div>
+                        <div className="text-sm text-gray-400">{item.count} instances</div>
+                      </div>
+                      <div className="w-24 bg-dark-100 rounded-full h-2">
+                        <div
+                          className="bg-cyber-purple h-2 rounded-full"
+                          style={{ width: `${(item.count / topServices[0].count) * 100}%` }}
+                        />
+                      </div>
+                    </div>
+                  ))
+                )}
+                
+                {topServices.length > 0 && (
+                  <button
+                    onClick={() => navigate('/port-scanner')}
+                    className="w-full mt-4 text-sm text-cyber-purple hover:text-cyber-purple/80 flex items-center justify-center gap-1"
+                  >
+                    View All Services <ArrowRight className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Reconnaissance Coverage */}
+          <div className="bg-dark-200 rounded-lg p-6 border border-dark-300">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-semibold text-white flex items-center gap-2">
+                <Target className="w-6 h-6 text-cyber-green" />
+                Reconnaissance Coverage
+              </h2>
+              <button
+                onClick={() => toggleSection('reconnaissance')}
+                className="text-gray-400 hover:text-white"
+              >
+                {expandedSections.reconnaissance ? <ChevronUp /> : <ChevronDown />}
+              </button>
+            </div>
+
+            {expandedSections.reconnaissance && (
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="text-center">
+                  <div className={`w-16 h-16 rounded-full mx-auto mb-2 flex items-center justify-center ${
+                    stats.total_subdomains > 0 ? 'bg-green-500/20 text-green-500' : 'bg-gray-500/20 text-gray-500'
+                  }`}>
+                    <Globe className="w-8 h-8" />
+                  </div>
+                  <div className="text-white font-medium">Subdomain Enumeration</div>
+                  <div className={`text-sm mt-1 ${stats.total_subdomains > 0 ? 'text-green-500' : 'text-gray-500'}`}>
+                    {stats.total_subdomains > 0 ? 'Complete' : 'Pending'}
+                  </div>
+                </div>
+
+                <div className="text-center">
+                  <div className={`w-16 h-16 rounded-full mx-auto mb-2 flex items-center justify-center ${
+                    stats.active_hosts > 0 ? 'bg-green-500/20 text-green-500' : 'bg-gray-500/20 text-gray-500'
+                  }`}>
+                    <Activity className="w-8 h-8" />
+                  </div>
+                  <div className="text-white font-medium">Live Host Probing</div>
+                  <div className={`text-sm mt-1 ${stats.active_hosts > 0 ? 'text-green-500' : 'text-gray-500'}`}>
+                    {stats.active_hosts > 0 ? 'Complete' : 'Pending'}
+                  </div>
+                </div>
+
+                <div className="text-center">
+                  <div className={`w-16 h-16 rounded-full mx-auto mb-2 flex items-center justify-center ${
+                    stats.total_ports > 0 ? 'bg-green-500/20 text-green-500' : 'bg-gray-500/20 text-gray-500'
+                  }`}>
+                    <Server className="w-8 h-8" />
+                  </div>
+                  <div className="text-white font-medium">Port Scanning</div>
+                  <div className={`text-sm mt-1 ${stats.total_ports > 0 ? 'text-green-500' : 'text-gray-500'}`}>
+                    {stats.total_ports > 0 ? 'Complete' : 'Pending'}
+                  </div>
+                </div>
+
+                <div className="text-center">
+                  <div className={`w-16 h-16 rounded-full mx-auto mb-2 flex items-center justify-center ${
+                    stats.total_endpoints > 0 ? 'bg-green-500/20 text-green-500' : 'bg-gray-500/20 text-gray-500'
+                  }`}>
+                    <Network className="w-8 h-8" />
+                  </div>
+                  <div className="text-white font-medium">Content Discovery</div>
+                  <div className={`text-sm mt-1 ${stats.total_endpoints > 0 ? 'text-green-500' : 'text-gray-500'}`}>
+                    {stats.total_endpoints > 0 ? 'Complete' : 'Pending'}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Quick Actions */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <button
+              onClick={() => navigate('/visualization')}
+              className="bg-gradient-to-br from-cyber-purple/10 to-cyber-purple/5 border border-cyber-purple/30 rounded-lg p-6 hover:border-cyber-purple transition-colors text-left group"
+            >
+              <BarChart3 className="w-8 h-8 text-cyber-purple mb-3" />
+              <div className="text-white font-medium mb-1">View Analytics</div>
+              <div className="text-sm text-gray-400">Detailed visualizations</div>
+              <ChevronRight className="w-5 h-5 text-gray-400 mt-2 opacity-0 group-hover:opacity-100 transition-opacity" />
+            </button>
+
+            <button
+              onClick={() => navigate('/exports')}
+              className="bg-gradient-to-br from-cyber-green/10 to-cyber-green/5 border border-cyber-green/30 rounded-lg p-6 hover:border-cyber-green transition-colors text-left group"
+            >
+              <Layers className="w-8 h-8 text-cyber-green mb-3" />
+              <div className="text-white font-medium mb-1">Export Data</div>
+              <div className="text-sm text-gray-400">Download reports</div>
+              <ChevronRight className="w-5 h-5 text-gray-400 mt-2 opacity-0 group-hover:opacity-100 transition-opacity" />
+            </button>
+
+            <button
+              onClick={() => navigate('/subdomain-scanner')}
+              className="bg-gradient-to-br from-cyber-blue/10 to-cyber-blue/5 border border-cyber-blue/30 rounded-lg p-6 hover:border-cyber-blue transition-colors text-left group"
+            >
+              <Globe className="w-8 h-8 text-cyber-blue mb-3" />
+              <div className="text-white font-medium mb-1">New Scan</div>
+              <div className="text-sm text-gray-400">Start reconnaissance</div>
+              <ChevronRight className="w-5 h-5 text-gray-400 mt-2 opacity-0 group-hover:opacity-100 transition-opacity" />
+            </button>
+
+            <button
+              onClick={() => navigate('/live-hosts')}
+              className="bg-gradient-to-br from-green-500/10 to-green-500/5 border border-green-500/30 rounded-lg p-6 hover:border-green-500 transition-colors text-left group"
+            >
+              <Activity className="w-8 h-8 text-green-500 mb-3" />
+              <div className="text-white font-medium mb-1">Probe Hosts</div>
+              <div className="text-sm text-gray-400">Check availability</div>
+              <ChevronRight className="w-5 h-5 text-gray-400 mt-2 opacity-0 group-hover:opacity-100 transition-opacity" />
+            </button>
+          </div>
         </>
       )}
-      
-      {/* Data Source Indicators */}
-      {selectedDomain && mergedData.length > 0 && (
-        <div className="bg-dark-100 border border-dark-50 rounded-xl p-4">
-          <div className="flex items-center gap-6 text-xs flex-wrap">
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-3 bg-cyber-blue rounded-full"></div>
-              <span className="text-gray-400">Subdomain Scan: <span className="text-white font-medium">{stats.with_subdomain_data}</span></span>
+
+      {/* Detailed View Mode */}
+      {viewMode === 'detailed' && (
+        <div className="space-y-6">
+          {/* Filters */}
+          <div className="bg-dark-200 rounded-lg p-6 border border-dark-300">
+            <div className="flex items-center gap-2 mb-4">
+              <Filter className="w-5 h-5 text-cyber-blue" />
+              <h3 className="text-lg font-semibold text-white">Filters & Search</h3>
             </div>
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-3 bg-cyber-green rounded-full"></div>
-              <span className="text-gray-400">Live Probe: <span className="text-white font-medium">{stats.with_probe_data}</span></span>
+
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              {/* Search */}
+              <div className="md:col-span-2">
+                <label className="block text-sm text-gray-400 mb-2">Search Subdomains</label>
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
+                  <input
+                    type="text"
+                    value={filters.search}
+                    onChange={(e) => updateFilters({ search: e.target.value })}
+                    placeholder="Filter by subdomain..."
+                    className="w-full bg-dark-100 text-white pl-10 pr-4 py-2 rounded-lg border border-dark-300 focus:border-cyber-blue focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              {/* Status Filter */}
+              <div>
+                <label className="block text-sm text-gray-400 mb-2">Status</label>
+                <select
+                  value={filters.status}
+                  onChange={(e) => updateFilters({ status: e.target.value })}
+                  className="w-full bg-dark-100 text-white px-4 py-2 rounded-lg border border-dark-300 focus:border-cyber-blue focus:outline-none"
+                >
+                  <option value="all">All</option>
+                  <option value="active">Active Only</option>
+                  <option value="inactive">Inactive Only</option>
+                </select>
+              </div>
+
+              {/* Protocol Filter */}
+              <div>
+                <label className="block text-sm text-gray-400 mb-2">Protocol</label>
+                <select
+                  value={filters.protocol}
+                  onChange={(e) => updateFilters({ protocol: e.target.value })}
+                  className="w-full bg-dark-100 text-white px-4 py-2 rounded-lg border border-dark-300 focus:border-cyber-blue focus:outline-none"
+                >
+                  <option value="all">All</option>
+                  <option value="http">HTTP</option>
+                  <option value="https">HTTPS</option>
+                </select>
+              </div>
+
+              {/* Tier Filter */}
+              <div>
+                <label className="block text-sm text-gray-400 mb-2">Risk Tier</label>
+                <select
+                  value={filters.tier}
+                  onChange={(e) => updateFilters({ tier: e.target.value })}
+                  className="w-full bg-dark-100 text-white px-4 py-2 rounded-lg border border-dark-300 focus:border-cyber-blue focus:outline-none"
+                >
+                  <option value="all">All Tiers</option>
+                  <option value="high">High Risk</option>
+                  <option value="medium">Medium Risk</option>
+                  <option value="low">Low Risk</option>
+                </select>
+              </div>
+
+              {/* Advanced Filters */}
+              <div className="md:col-span-3 flex items-center gap-4">
+                <label className="flex items-center gap-2 text-sm text-gray-400 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={filters.interesting}
+                    onChange={(e) => updateFilters({ interesting: e.target.checked })}
+                    className="form-checkbox bg-dark-100 border-dark-300 text-cyber-blue rounded focus:ring-cyber-blue"
+                  />
+                  Interesting Endpoints Only
+                </label>
+                <label className="flex items-center gap-2 text-sm text-gray-400 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={filters.hasVulnerabilities}
+                    onChange={(e) => updateFilters({ hasVulnerabilities: e.target.checked })}
+                    className="form-checkbox bg-dark-100 border-dark-300 text-cyber-blue rounded focus:ring-cyber-blue"
+                  />
+                  Has Vulnerabilities
+                </label>
+                <label className="flex items-center gap-2 text-sm text-gray-400 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={filters.hasPorts}
+                    onChange={(e) => updateFilters({ hasPorts: e.target.checked })}
+                    className="form-checkbox bg-dark-100 border-dark-300 text-cyber-blue rounded focus:ring-cyber-blue"
+                  />
+                  Has Open Ports
+                </label>
+                <label className="flex items-center gap-2 text-sm text-gray-400 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={filters.hasEndpoints}
+                    onChange={(e) => updateFilters({ hasEndpoints: e.target.checked })}
+                    className="form-checkbox bg-dark-100 border-dark-300 text-cyber-blue rounded focus:ring-cyber-blue"
+                  />
+                  Has Endpoints
+                </label>
+              </div>
+
+              {/* Reset Filters */}
+              <div className="flex items-end">
+                <button
+                  onClick={() => {
+                    const resetFilters = {
+                      search: '',
+                      status: 'all',
+                      protocol: 'all',
+                      tier: 'all',
+                      interesting: false,
+                      hasVulnerabilities: false,
+                      hasPorts: false,
+                      hasEndpoints: false
+                    }
+                    setFilters(resetFilters)
+                    localStorage.setItem(STORAGE_KEYS.FILTER_STATE, JSON.stringify(resetFilters))
+                  }}
+                  className="px-4 py-2 bg-dark-100 text-gray-400 rounded-lg hover:text-white hover:bg-dark-300 transition-colors"
+                >
+                  Reset Filters
+                </button>
+              </div>
             </div>
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-3 bg-cyber-pink rounded-full"></div>
-              <span className="text-gray-400">Port Scan: <span className="text-white font-medium">{stats.with_port_data}</span></span>
+
+            <div className="mt-4 text-sm text-gray-400">
+              Showing {filteredData.length} of {mergedData.length} targets
             </div>
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-3 bg-cyber-purple rounded-full"></div>
-              <span className="text-gray-400">Content Discovery: <span className="text-white font-medium">{stats.with_content_discovery}</span></span>
+          </div>
+
+          {/* Data Table */}
+          <div className="bg-dark-200 rounded-lg border border-dark-300 overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="bg-dark-100 border-b border-dark-300">
+                    <th
+                      onClick={() => handleSort('subdomain')}
+                      className="px-4 py-3 text-left text-sm font-medium text-gray-400 cursor-pointer hover:text-white"
+                    >
+                      <div className="flex items-center gap-2">
+                        Subdomain
+                        {sortConfig.field === 'subdomain' && (
+                          sortConfig.direction === 'asc' ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />
+                        )}
+                      </div>
+                    </th>
+                    <th
+                      onClick={() => handleSort('status')}
+                      className="px-4 py-3 text-left text-sm font-medium text-gray-400 cursor-pointer hover:text-white"
+                    >
+                      <div className="flex items-center gap-2">
+                        Status
+                        {sortConfig.field === 'status' && (
+                          sortConfig.direction === 'asc' ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />
+                        )}
+                      </div>
+                    </th>
+                    <th
+                      onClick={() => handleSort('protocol')}
+                      className="px-4 py-3 text-left text-sm font-medium text-gray-400 cursor-pointer hover:text-white"
+                    >
+                      <div className="flex items-center gap-2">
+                        Protocol
+                        {sortConfig.field === 'protocol' && (
+                          sortConfig.direction === 'asc' ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />
+                        )}
+                      </div>
+                    </th>
+                    <th
+                      onClick={() => handleSort('response_time')}
+                      className="px-4 py-3 text-left text-sm font-medium text-gray-400 cursor-pointer hover:text-white"
+                    >
+                      <div className="flex items-center gap-2">
+                        Response
+                        {sortConfig.field === 'response_time' && (
+                          sortConfig.direction === 'asc' ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />
+                        )}
+                      </div>
+                    </th>
+                    <th
+                      onClick={() => handleSort('risk_score')}
+                      className="px-4 py-3 text-left text-sm font-medium text-gray-400 cursor-pointer hover:text-white"
+                    >
+                      <div className="flex items-center gap-2">
+                        Risk Score
+                        {sortConfig.field === 'risk_score' && (
+                          sortConfig.direction === 'asc' ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />
+                        )}
+                      </div>
+                    </th>
+                    <th
+                      onClick={() => handleSort('ports')}
+                      className="px-4 py-3 text-left text-sm font-medium text-gray-400 cursor-pointer hover:text-white"
+                    >
+                      <div className="flex items-center gap-2">
+                        Ports
+                        {sortConfig.field === 'ports' && (
+                          sortConfig.direction === 'asc' ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />
+                        )}
+                      </div>
+                    </th>
+                    <th
+                      onClick={() => handleSort('endpoints')}
+                      className="px-4 py-3 text-left text-sm font-medium text-gray-400 cursor-pointer hover:text-white"
+                    >
+                      <div className="flex items-center gap-2">
+                        Endpoints
+                        {sortConfig.field === 'endpoints' && (
+                          sortConfig.direction === 'asc' ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />
+                        )}
+                      </div>
+                    </th>
+                    <th className="px-4 py-3 text-right text-sm font-medium text-gray-400">
+                      Actions
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {paginatedData.map((item) => (
+                    <tr
+                      key={item.subdomain}
+                      className="border-b border-dark-300 hover:bg-dark-100 transition-colors"
+                    >
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2">
+                          <a
+                            href={item.final_url || `https://${item.subdomain}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-white hover:text-cyber-blue transition-colors font-mono text-sm"
+                          >
+                            {item.subdomain}
+                          </a>
+                          <ExternalLink className="w-3 h-3 text-gray-400" />
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2">
+                          {item.is_active ? (
+                            <>
+                              <CheckCircle className="w-4 h-4 text-green-500" />
+                              <span className="text-sm text-green-500">Active</span>
+                            </>
+                          ) : (
+                            <>
+                              <XCircle className="w-4 h-4 text-gray-500" />
+                              <span className="text-sm text-gray-500">Inactive</span>
+                            </>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2">
+                          {item.final_url?.startsWith('https://') ? (
+                            <>
+                              <Lock className="w-4 h-4 text-green-500" />
+                              <span className="text-sm text-green-500">HTTPS</span>
+                            </>
+                          ) : item.final_url?.startsWith('http://') ? (
+                            <>
+                              <Lock className="w-4 h-4 text-gray-500" />
+                              <span className="text-sm text-gray-500">HTTP</span>
+                            </>
+                          ) : (
+                            <span className="text-sm text-gray-500">N/A</span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="text-sm text-white">
+                          {item.response_time ? `${item.response_time}ms` : 'N/A'}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2">
+                          <span className={`text-sm px-2 py-1 rounded border ${getTierColor(item.tier)}`}>
+                            {item.tier.toUpperCase()}
+                          </span>
+                          <span className={`text-sm font-bold ${
+                            item.risk_score >= 70 ? 'text-red-500' :
+                            item.risk_score >= 40 ? 'text-orange-500' :
+                            'text-green-500'
+                          }`}>
+                            {item.risk_score}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm text-white">{item.ports.length}</span>
+                          {item.critical_services.length > 0 && (
+                            <span className="text-xs px-2 py-1 bg-red-500/10 text-red-500 rounded border border-red-500/30">
+                              {item.critical_services.length} critical
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm text-white">{item.endpoints.length}</span>
+                          {item.interesting_endpoints.length > 0 && (
+                            <span className="text-xs px-2 py-1 bg-yellow-500/10 text-yellow-500 rounded border border-yellow-500/30">
+                              {item.interesting_endpoints.length} interesting
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center justify-end gap-2">
+                          <button
+                            onClick={() => handleValidate(item.subdomain, true)}
+                            disabled={validatingTargets.has(item.subdomain)}
+                            className="p-2 bg-cyber-blue/20 text-cyber-blue rounded hover:bg-cyber-blue/30 transition-colors disabled:opacity-50"
+                            title="Quick Validate"
+                          >
+                            {validatingTargets.has(item.subdomain) ? (
+                              <Loader className="w-4 h-4 animate-spin" />
+                            ) : (
+                              <Zap className="w-4 h-4" />
+                            )}
+                          </button>
+                          <button
+                            onClick={() => handleValidate(item.subdomain, false)}
+                            disabled={validatingTargets.has(item.subdomain)}
+                            className="p-2 bg-cyber-purple/20 text-cyber-purple rounded hover:bg-cyber-purple/30 transition-colors disabled:opacity-50"
+                            title="Full Validate"
+                          >
+                            {validatingTargets.has(item.subdomain) ? (
+                              <Loader className="w-4 h-4 animate-spin" />
+                            ) : (
+                              <Shield className="w-4 h-4" />
+                            )}
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
-            <div className="ml-auto flex items-center gap-2">
-              <Shield className="text-red-400" size={14} />
-              <span className="text-gray-400">Risk Scoring: <span className="text-white font-medium">Elite BB Hunter Methodology</span></span>
+
+            {/* Pagination */}
+            {totalPages > 1 && (
+              <div className="flex items-center justify-between px-6 py-4 bg-dark-100 border-t border-dark-300">
+                <div className="text-sm text-gray-400">
+                  Page {currentPage} of {totalPages}
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                    disabled={currentPage === 1}
+                    className="px-4 py-2 bg-dark-200 text-white rounded-lg hover:bg-dark-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Previous
+                  </button>
+                  <button
+                    onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                    disabled={currentPage === totalPages}
+                    className="px-4 py-2 bg-dark-200 text-white rounded-lg hover:bg-dark-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Attack Surface View Mode */}
+      {viewMode === 'attack-surface' && (
+        <div className="space-y-6">
+          <div className="bg-dark-200 rounded-lg p-6 border border-dark-300">
+            <h2 className="text-xl font-semibold text-white mb-6">Attack Surface Analysis</h2>
+            
+            {/* Coming soon placeholder */}
+            <div className="text-center py-12">
+              <Target className="w-16 h-16 text-gray-600 mx-auto mb-4" />
+              <h3 className="text-xl font-semibold text-white mb-2">Advanced Analysis View</h3>
+              <p className="text-gray-400 mb-6">
+                Visual attack surface mapping with relationship graphs and threat modeling
+              </p>
+              <button
+                onClick={() => setViewMode('overview')}
+                className="px-6 py-3 bg-cyber-blue text-white rounded-lg hover:bg-cyber-blue/80 transition-colors"
+              >
+                Back to Overview
+              </button>
             </div>
           </div>
         </div>
@@ -1183,5 +1595,3 @@ const Dashboard = () => {
     </div>
   )
 }
-
-export default Dashboard

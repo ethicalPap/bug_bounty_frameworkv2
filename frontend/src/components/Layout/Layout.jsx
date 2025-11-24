@@ -41,6 +41,7 @@ const Layout = () => {
       section: 'analyze',
       children: [
         { path: '/visualization', label: 'Visualization', icon: BarChart3 },
+        { path: '/visualization', label: 'Explore', icon: BarChart3 },
       ]
     },
     {
