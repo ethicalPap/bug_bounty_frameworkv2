@@ -39,10 +39,7 @@ const SubdomainScanner = () => {
   const [isCancelled, setIsCancelled] = useState(false)
   const [dataRestoredFromCache, setDataRestoredFromCache] = useState(false)
   
-  const [isScanning, setIsScanning] = useState(() => {
-    // Don't restore scanning state - always start fresh
-    return false
-  })
+  const [isScanning, setIsScanning] = useState(false)
 
   const queryClient = useQueryClient()
   const progressIntervalRef = useRef(null)
@@ -70,31 +67,44 @@ const SubdomainScanner = () => {
   // Check if we have cached data on mount
   useEffect(() => {
     if (!hasCheckedCache.current && lastScanDomain) {
-      // Check if React Query has cached data for this domain
       const cachedData = queryClient.getQueryData(['subdomains', lastScanDomain])
       if (cachedData?.data && cachedData.data.length > 0) {
         console.log('✅ Found cached data for:', lastScanDomain, '- Count:', cachedData.data.length)
         setDataRestoredFromCache(true)
-      } else {
-        console.log('⚠️ No cached data found for:', lastScanDomain, '- Will fetch from backend')
       }
       hasCheckedCache.current = true
     }
   }, [lastScanDomain, queryClient])
 
-  // Mutation for starting scan
+  // Mutation for starting scan - THIS IS THE FIX
+  // The scan completion is now handled here, not in the polling query
   const scanMutation = useMutation({
     mutationFn: startSubdomainScan,
     onSuccess: (data) => {
       setLastScanDomain(domain)
-      // Don't set isScanning to false here - let the results query handle it
-      console.log('Scan started:', data.data)
+      console.log('✅ Scan completed on backend:', data.data)
+      
+      // The scan is complete! Backend has finished processing
+      // Stop polling and show results immediately
+      setScanProgress(100)
+      setCompletedTools(enabledTools)
+      setIsScanning(false)
+      setDataRestoredFromCache(false)
+      
+      // Clear the progress interval
+      if (progressIntervalRef.current) {
+        clearInterval(progressIntervalRef.current)
+        progressIntervalRef.current = null
+      }
+      
+      // Invalidate and refetch the subdomains query to get fresh data
+      queryClient.invalidateQueries(['subdomains', domain])
     },
     onError: (error) => {
-      console.error('Scan failed:', error)
+      console.error('❌ Scan failed:', error)
       setScanProgress(0)
       setIsCancelled(false)
-      setIsScanning(false) // Stop scanning on error
+      setIsScanning(false)
       
       // Clear the interval on error
       if (progressIntervalRef.current) {
@@ -104,9 +114,8 @@ const SubdomainScanner = () => {
     },
   })
 
-  // Handle progress simulation - cleaner approach
+  // Handle progress simulation cleanup
   useEffect(() => {
-    // Clean up interval on unmount
     return () => {
       if (progressIntervalRef.current) {
         clearInterval(progressIntervalRef.current)
@@ -116,7 +125,7 @@ const SubdomainScanner = () => {
 
   // Start progress when scan begins
   useEffect(() => {
-    if ((scanMutation.isLoading || isScanning) && !isCancelled) {
+    if (isScanning && !isCancelled) {
       // Initialize scanning state
       setScanningTools(enabledTools)
       setCompletedTools([])
@@ -127,12 +136,12 @@ const SubdomainScanner = () => {
       }
       
       // Start progress simulation
-      let currentProgress = scanProgress || 0
-      let toolsCompleted = completedTools.length
+      let currentProgress = 0
+      let toolsCompleted = 0
       
       progressIntervalRef.current = setInterval(() => {
-        // Update progress
-        currentProgress = Math.min(currentProgress + (100 / totalTools / 10), 95)
+        // Update progress (cap at 95% until mutation completes)
+        currentProgress = Math.min(currentProgress + (95 / totalTools / 10), 95)
         setScanProgress(currentProgress)
 
         // Simulate tools completing
@@ -142,57 +151,31 @@ const SubdomainScanner = () => {
         }
       }, 3000)
     } else {
-      // Clear interval when not loading
+      // Clear interval when not scanning
       if (progressIntervalRef.current) {
         clearInterval(progressIntervalRef.current)
         progressIntervalRef.current = null
       }
-      
-      if (!isScanning && !scanMutation.isLoading && !isCancelled) {
-        setScanProgress(0)
-        setScanningTools([])
-        setCompletedTools([])
-      }
     }
-  }, [scanMutation.isLoading, isScanning, isCancelled])
+  }, [isScanning, isCancelled, enabledTools, totalTools])
 
-  // Query for fetching results
+  // Query for fetching results - no longer handles scan completion
   const { data: subdomains, isLoading: isLoadingResults, refetch, dataUpdatedAt, isFetching } = useQuery({
     queryKey: ['subdomains', lastScanDomain],
     queryFn: () => getSubdomains(lastScanDomain),
     enabled: !!lastScanDomain && !isCancelled,
-    refetchInterval: isScanning ? 3000 : false, // Keep polling while scanning
-    refetchOnMount: false, // Don't refetch when component remounts
-    refetchOnWindowFocus: false, // Don't refetch when window regains focus
-    refetchOnReconnect: false, // Don't refetch on network reconnect
-    staleTime: Infinity, // Data never becomes stale
-    cacheTime: 1000 * 60 * 60 * 24, // Keep in cache for 24 hours
-    keepPreviousData: true, // Keep showing old data while fetching new
+    refetchInterval: false, // No polling needed - mutation handles scan completion
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    staleTime: Infinity,
+    cacheTime: 1000 * 60 * 60 * 24,
+    keepPreviousData: true,
     onSuccess: (data) => {
-      console.log('📥 Query onSuccess called:', {
-        hasData: !!data?.data,
-        count: data?.data?.length || 0,
-        isScanning,
-        domain: lastScanDomain
-      })
+      console.log('📥 Query onSuccess - Subdomains:', data?.data?.length || 0)
       
-      // Check if we have results
-      if (data?.data && data.data.length > 0 && isScanning) {
-        // Results received! Complete the scan
-        console.log('✅ Scan complete! Found', data.data.length, 'subdomains')
-        setScanProgress(100)
-        setCompletedTools(enabledTools)
-        setIsScanning(false)
-        setDataRestoredFromCache(false)
-        
-        // Clear interval
-        if (progressIntervalRef.current) {
-          clearInterval(progressIntervalRef.current)
-          progressIntervalRef.current = null
-        }
-      } else if (data?.data && data.data.length > 0 && !isScanning && !isFetching) {
-        // Data was restored from cache or localStorage
-        console.log('🎉 Data restored from cache:', data.data.length, 'subdomains')
+      // Only update cache indicator when not scanning
+      if (data?.data && data.data.length > 0 && !isScanning && !isFetching) {
         setDataRestoredFromCache(true)
       }
     },
@@ -210,13 +193,15 @@ const SubdomainScanner = () => {
 
   const handleSubmit = (e) => {
     e.preventDefault()
-    if (!domain.trim() || isScanning) return // Prevent multiple submissions
+    if (!domain.trim() || isScanning) return
 
-    // Clear previous results
+    // Clear previous state
     setLastScanDomain(null)
     setScanProgress(0)
     setIsCancelled(false)
-    setIsScanning(true) // Start scanning
+    setIsScanning(true)
+    setCompletedTools([])
+    setScanningTools([])
 
     // Start scan
     scanMutation.mutate({
@@ -232,33 +217,26 @@ const SubdomainScanner = () => {
     setScanningTools([])
     setCompletedTools([])
     
-    // Clear interval
     if (progressIntervalRef.current) {
       clearInterval(progressIntervalRef.current)
       progressIntervalRef.current = null
     }
     
-    // Cancel queries
     queryClient.cancelQueries(['subdomains', domain])
   }
 
   const clearResults = () => {
-    // Clear all state
     setLastScanDomain(null)
     setScanProgress(0)
     setIsCancelled(false)
     setIsScanning(false)
-    
-    // Clear localStorage
     localStorage.removeItem(STORAGE_KEYS.LAST_SCAN_DOMAIN)
-    
-    // Clear query cache
     queryClient.removeQueries(['subdomains'])
   }
 
   const results = subdomains?.data || []
 
-  // Export to CSV - now exports all results
+  // Export to CSV
   const exportToCSV = () => {
     const headers = ['Subdomain', 'Status', 'IP Address', 'HTTP Code']
     const rows = results.map(s => [
@@ -309,7 +287,7 @@ const SubdomainScanner = () => {
           <p className="text-gray-400 mt-2">Discover subdomains using multiple reconnaissance tools</p>
         </div>
         
-        {lastScanDomain && results.length > 0 && !scanMutation.isLoading && (
+        {lastScanDomain && results.length > 0 && !isScanning && (
           <div className="flex gap-2">
             <button
               onClick={copyToClipboard}
@@ -361,8 +339,8 @@ const SubdomainScanner = () => {
               onChange={(e) => setDomain(e.target.value)}
               placeholder="example.com"
               className="w-full px-4 py-3 bg-dark-200 border border-dark-50 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-cyber-blue transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-              disabled={isScanning || scanMutation.isLoading}
-              readOnly={isScanning || scanMutation.isLoading}
+              disabled={isScanning}
+              readOnly={isScanning}
             />
           </div>
 
@@ -376,7 +354,7 @@ const SubdomainScanner = () => {
                 <label
                   key={tool}
                   className={`flex items-center gap-3 p-3 rounded-lg border transition-all ${
-                    isScanning || scanMutation.isLoading
+                    isScanning
                       ? 'opacity-50 cursor-not-allowed' 
                       : 'cursor-pointer'
                   } ${
@@ -390,7 +368,7 @@ const SubdomainScanner = () => {
                     checked={scanConfig[tool]}
                     onChange={(e) => setScanConfig({ ...scanConfig, [tool]: e.target.checked })}
                     className="w-4 h-4 text-cyber-blue bg-dark-200 border-gray-600 rounded focus:ring-cyber-blue disabled:opacity-50 disabled:cursor-not-allowed"
-                    disabled={isScanning || scanMutation.isLoading}
+                    disabled={isScanning}
                   />
                   <span className="text-sm text-white capitalize">
                     {tool.replace('use_', '').replace('_', ' ')}
@@ -398,7 +376,7 @@ const SubdomainScanner = () => {
                 </label>
               ))}
             </div>
-            {isScanning || scanMutation.isLoading ? (
+            {isScanning ? (
               <p className="text-xs text-orange-400 mt-2 flex items-center gap-2">
                 <Loader className="animate-spin" size={12} />
                 Scan in progress - settings locked
@@ -412,7 +390,7 @@ const SubdomainScanner = () => {
 
           {/* Submit/Cancel Buttons */}
           <div className="flex gap-3">
-            {!isScanning && !scanMutation.isLoading ? (
+            {!isScanning ? (
               <button
                 type="submit"
                 disabled={!domain.trim() || totalTools === 0}
@@ -446,7 +424,7 @@ const SubdomainScanner = () => {
         </form>
 
         {/* Progress Bar */}
-        {(isScanning || scanMutation.isLoading) && !isCancelled && (
+        {isScanning && !isCancelled && (
           <div className="mt-6 space-y-4">
             {/* Progress Bar */}
             <div>
@@ -459,7 +437,6 @@ const SubdomainScanner = () => {
                   className="h-full bg-gradient-to-r from-cyber-blue to-cyber-purple transition-all duration-500 ease-out rounded-full relative overflow-hidden"
                   style={{ width: `${scanProgress}%` }}
                 >
-                  {/* Animated shimmer effect */}
                   <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent animate-shimmer"></div>
                 </div>
               </div>
@@ -471,27 +448,27 @@ const SubdomainScanner = () => {
               <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
                 {enabledTools.map((tool) => {
                   const isComplete = completedTools.includes(tool)
-                  const isScanning = scanningTools.includes(tool) && !isComplete
+                  const isCurrentlyScanning = scanningTools.includes(tool) && !isComplete
                   
                   return (
                     <div
                       key={tool}
                       className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-all ${
                         isComplete ? 'bg-green-500/10 border border-green-500/30' :
-                        isScanning ? 'bg-cyber-blue/10 border border-cyber-blue/30' :
+                        isCurrentlyScanning ? 'bg-cyber-blue/10 border border-cyber-blue/30' :
                         'bg-dark-100 border border-dark-50'
                       }`}
                     >
                       {isComplete ? (
                         <CheckCircle className="text-green-400 flex-shrink-0" size={16} />
-                      ) : isScanning ? (
+                      ) : isCurrentlyScanning ? (
                         <Loader className="text-cyber-blue animate-spin flex-shrink-0" size={16} />
                       ) : (
                         <div className="w-4 h-4 rounded-full border-2 border-gray-600 flex-shrink-0"></div>
                       )}
                       <span className={`capitalize truncate ${
                         isComplete ? 'text-green-400' :
-                        isScanning ? 'text-cyber-blue' :
+                        isCurrentlyScanning ? 'text-cyber-blue' :
                         'text-gray-500'
                       }`}>
                         {tool.replace('use_', '').replace('_', ' ')}
@@ -514,7 +491,7 @@ const SubdomainScanner = () => {
         )}
 
         {/* Scan Status Messages */}
-        {!isScanning && scanMutation.isSuccess && !scanMutation.isLoading && (
+        {!isScanning && scanMutation.isSuccess && (
           <div className="mt-4 p-4 bg-green-500/10 border border-green-500/30 rounded-lg flex items-start gap-3">
             <CheckCircle className="text-green-400 flex-shrink-0 mt-0.5" size={20} />
             <div>
@@ -598,7 +575,7 @@ const SubdomainScanner = () => {
             </div>
           </div>
 
-          {/* Results Summary - No Table */}
+          {/* Results Summary */}
           {results.length === 0 ? (
             <div className="text-center py-16">
               <Globe className="mx-auto text-gray-600 mb-4" size={64} />
@@ -607,7 +584,7 @@ const SubdomainScanner = () => {
               {isLoadingResults && (
                 <div className="mt-4 flex items-center justify-center gap-2 text-cyber-blue">
                   <Loader className="animate-spin" size={16} />
-                  <span className="text-sm">Scanning...</span>
+                  <span className="text-sm">Loading...</span>
                 </div>
               )}
             </div>
