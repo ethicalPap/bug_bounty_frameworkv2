@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useSearchParams, useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import { getSubdomains, validateTarget, quickValidateTarget } from '../../api/client'
 import { 
   Globe, 
@@ -35,11 +35,15 @@ import {
   Terminal
 } from 'lucide-react'
 
+// Shared storage key for validation - MUST match ValidationResults page
+const VALIDATION_STORAGE_KEY = 'validation_results'
+
 const STORAGE_KEYS = {
   SUBDOMAIN_RESULTS: 'subdomain_scanner_last_domain',
   LIVE_HOSTS_RESULTS: 'live_hosts_results',
   PORT_SCAN_RESULTS: 'port_scan_results',
   CONTENT_DISCOVERY_RESULTS: 'content_discovery_results',
+  VALIDATION_RESULTS: VALIDATION_STORAGE_KEY,
   FILTER_STATE: 'dashboard_filter_state',
   SORT_STATE: 'dashboard_sort_state',
   VIEW_MODE: 'dashboard_view_mode',
@@ -71,7 +75,6 @@ const CRITICAL_SERVICES = {
 export default function Dashboard() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
-  const [searchParams, setSearchParams] = useSearchParams()
   
   // State management
   const [selectedDomain, setSelectedDomain] = useState(
@@ -87,6 +90,9 @@ export default function Dashboard() {
     criticalFindings: true,
     reconnaissance: true
   })
+  
+  // Force refresh counter to trigger re-reads from localStorage
+  const [refreshCounter, setRefreshCounter] = useState(0)
   
   // Filter state
   const [filters, setFilters] = useState(() => {
@@ -138,11 +144,30 @@ export default function Dashboard() {
   const [currentPage, setCurrentPage] = useState(1)
   const itemsPerPage = 50
   
-  // Validation state
+  // Validation state - load from shared localStorage
   const [validatingTargets, setValidatingTargets] = useState(new Set())
-  const [validationResults, setValidationResults] = useState({})
+  const [validationResults, setValidationResults] = useState(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEYS.VALIDATION_RESULTS)
+      return saved ? JSON.parse(saved) : {}
+    } catch { return {} }
+  })
 
-  // Fetch data from various sources
+  // Sync validation results from localStorage (when ValidationResults page updates)
+  useEffect(() => {
+    const interval = setInterval(() => {
+      try {
+        const saved = localStorage.getItem(STORAGE_KEYS.VALIDATION_RESULTS)
+        const parsed = saved ? JSON.parse(saved) : {}
+        if (Object.keys(parsed).length !== Object.keys(validationResults).length) {
+          setValidationResults(parsed)
+        }
+      } catch {}
+    }, 2000)
+    return () => clearInterval(interval)
+  }, [validationResults])
+
+  // Fetch subdomain data from API/cache
   const { data: subdomainDataRaw, isLoading } = useQuery({
     queryKey: ['subdomains', selectedDomain],
     queryFn: () => getSubdomains(selectedDomain),
@@ -151,56 +176,93 @@ export default function Dashboard() {
     cacheTime: Infinity
   })
 
-  // Ensure subdomainData is always an array
+  // Normalize subdomain data - handle all possible formats
   const subdomainData = useMemo(() => {
     if (!subdomainDataRaw) return []
+    
+    // If it's already an array
     if (Array.isArray(subdomainDataRaw)) return subdomainDataRaw
+    
+    // If it has a 'data' property that's an array
+    if (subdomainDataRaw.data && Array.isArray(subdomainDataRaw.data)) {
+      return subdomainDataRaw.data
+    }
+    
+    // If it has a 'subdomains' property
     if (subdomainDataRaw.subdomains && Array.isArray(subdomainDataRaw.subdomains)) {
       return subdomainDataRaw.subdomains
     }
+    
+    console.warn('Unexpected subdomain data format:', subdomainDataRaw)
     return []
   }, [subdomainDataRaw])
 
+  // Read live hosts data from localStorage - FIXED to handle all formats
   const liveHostsData = useMemo(() => {
     try {
       const stored = localStorage.getItem(STORAGE_KEYS.LIVE_HOSTS_RESULTS)
-      if (!stored) return []
+      if (!stored) {
+        console.log('📊 Dashboard: No live hosts data in localStorage')
+        return []
+      }
       const parsed = JSON.parse(stored)
-      return Array.isArray(parsed) ? parsed : []
+      const result = Array.isArray(parsed) ? parsed : []
+      console.log(`📊 Dashboard: Loaded ${result.length} live hosts from localStorage`)
+      return result
     } catch (error) {
       console.error('Error parsing live hosts data:', error)
       return []
     }
-  }, [])
+  }, [refreshCounter]) // Re-read when refresh counter changes
 
+  // Read port scan data from localStorage
   const portScanData = useMemo(() => {
     try {
       const stored = localStorage.getItem(STORAGE_KEYS.PORT_SCAN_RESULTS)
-      if (!stored) return []
+      if (!stored) {
+        console.log('📊 Dashboard: No port scan data in localStorage')
+        return []
+      }
       const parsed = JSON.parse(stored)
-      return Array.isArray(parsed) ? parsed : []
+      const result = Array.isArray(parsed) ? parsed : []
+      console.log(`📊 Dashboard: Loaded ${result.length} port scan results from localStorage`)
+      return result
     } catch (error) {
       console.error('Error parsing port scan data:', error)
       return []
     }
-  }, [])
+  }, [refreshCounter])
 
+  // Read content discovery data from localStorage
   const contentDiscoveryData = useMemo(() => {
     try {
       const stored = localStorage.getItem(STORAGE_KEYS.CONTENT_DISCOVERY_RESULTS)
-      if (!stored) return []
+      if (!stored) {
+        console.log('📊 Dashboard: No content discovery data in localStorage')
+        return []
+      }
       const parsed = JSON.parse(stored)
-      return Array.isArray(parsed) ? parsed : []
+      const result = Array.isArray(parsed) ? parsed : []
+      console.log(`📊 Dashboard: Loaded ${result.length} content discoveries from localStorage`)
+      return result
     } catch (error) {
       console.error('Error parsing content discovery data:', error)
       return []
     }
-  }, [])
+  }, [refreshCounter])
+
+  // Helper function to get subdomain identifier
+  const getSubdomainKey = (item) => {
+    return item.full_domain || item.subdomain || item.host || item.target || ''
+  }
 
   // Calculate risk score for a subdomain
-  const calculateRiskScore = (subdomain) => {
+  const calculateRiskScore = (subdomainName, ports = [], endpoints = [], isActive = false) => {
     let score = 0
-    const subdomainLower = subdomain.toLowerCase()
+    const subdomainLower = subdomainName.toLowerCase()
+    
+    // Base score for active hosts
+    if (isActive) score += 10
     
     // Keyword analysis (0-40 points)
     if (RISK_KEYWORDS.HIGH.some(kw => subdomainLower.includes(kw))) score += 40
@@ -209,7 +271,6 @@ export default function Dashboard() {
     else score += 15 // Unknown/custom subdomain
     
     // Open ports analysis (0-30 points)
-    const ports = portScanData.filter(p => p.subdomain === subdomain)
     if (ports.length > 0) {
       const criticalPorts = ports.filter(p => CRITICAL_SERVICES[p.port]?.severity === 'critical')
       const highPorts = ports.filter(p => CRITICAL_SERVICES[p.port]?.severity === 'high')
@@ -221,7 +282,6 @@ export default function Dashboard() {
     }
     
     // Content discovery analysis (0-20 points)
-    const endpoints = contentDiscoveryData.filter(e => e.subdomain === subdomain)
     const interestingEndpoints = endpoints.filter(e => e.is_interesting)
     const apiEndpoints = endpoints.filter(e => 
       e.path?.includes('/api/') || e.path?.includes('/v1/') || e.path?.includes('/v2/')
@@ -232,41 +292,70 @@ export default function Dashboard() {
     else if (endpoints.length > 20) score += 10
     else if (endpoints.length > 0) score += 5
     
-    // Staging/development indicators (0-10 points)
-    if (subdomainLower.includes('staging') || 
-        subdomainLower.includes('dev') || 
-        subdomainLower.includes('test')) {
-      score += 10
-    }
-    
     return Math.min(100, score)
   }
 
-  // Merge all data sources
+  // Merge all data sources - FIXED matching logic
   const mergedData = useMemo(() => {
+    console.log('📊 Merging data sources:')
+    console.log('  - Subdomains:', subdomainData.length)
+    console.log('  - Live hosts:', liveHostsData.length)
+    console.log('  - Port scans:', portScanData.length)
+    console.log('  - Content discoveries:', contentDiscoveryData.length)
+
     return subdomainData.map(sub => {
-      const hostInfo = liveHostsData.find(h => h.subdomain === sub.subdomain)
-      const ports = portScanData.filter(p => p.subdomain === sub.subdomain)
-      const endpoints = contentDiscoveryData.filter(e => e.subdomain === sub.subdomain)
+      // Get the subdomain name - handle both formats
+      const subdomainName = sub.full_domain || sub.subdomain || ''
       
-      const riskScore = calculateRiskScore(sub.subdomain)
+      // Match live host data - check multiple possible field names
+      const hostInfo = liveHostsData.find(h => {
+        const hostName = h.subdomain || h.full_domain || h.host || h.target || ''
+        return hostName === subdomainName || 
+               hostName === sub.subdomain ||
+               hostName === sub.full_domain
+      })
+      
+      // Match port data
+      const ports = portScanData.filter(p => {
+        const portTarget = p.target || p.subdomain || p.host || ''
+        return portTarget === subdomainName || 
+               portTarget === sub.subdomain ||
+               portTarget === sub.full_domain
+      })
+      
+      // Match endpoint data
+      const endpoints = contentDiscoveryData.filter(e => {
+        const endpointTarget = e.subdomain || e.target || e.host || ''
+        return endpointTarget === subdomainName || 
+               endpointTarget === sub.subdomain ||
+               endpointTarget === sub.full_domain ||
+               e.target_url?.includes(subdomainName)
+      })
+      
+      // Determine if active from multiple sources
+      const isActive = hostInfo?.is_active || sub.is_active || false
+      
+      const riskScore = calculateRiskScore(subdomainName, ports, endpoints, isActive)
       const tier = riskScore >= 70 ? 'high' : riskScore >= 40 ? 'medium' : 'low'
       
       return {
         ...sub,
-        is_active: hostInfo?.is_active || false,
-        status_code: hostInfo?.status_code,
-        final_url: hostInfo?.final_url,
+        subdomain: subdomainName, // Normalize the field name
+        is_active: isActive,
+        status_code: hostInfo?.status_code || sub.status_code,
+        final_url: hostInfo?.final_url || (isActive ? `https://${subdomainName}` : null),
         response_time: hostInfo?.response_time,
-        server: hostInfo?.server,
+        server: hostInfo?.server || sub.server,
         content_type: hostInfo?.content_type,
+        protocol: hostInfo?.protocol,
+        ip_address: hostInfo?.ip_address || sub.ip_address,
         ports: ports,
         endpoints: endpoints,
         interesting_endpoints: endpoints.filter(e => e.is_interesting),
         risk_score: riskScore,
         tier: tier,
         critical_services: ports.filter(p => CRITICAL_SERVICES[p.port]?.severity === 'critical'),
-        validation_result: validationResults[sub.subdomain]
+        validation_result: validationResults[subdomainName]
       }
     })
   }, [subdomainData, liveHostsData, portScanData, contentDiscoveryData, validationResults])
@@ -287,9 +376,10 @@ export default function Dashboard() {
       
       // Protocol filter
       if (filters.protocol !== 'all') {
+        const protocol = item.protocol || ''
         const url = item.final_url || ''
-        if (filters.protocol === 'http' && !url.startsWith('http://')) return false
-        if (filters.protocol === 'https' && !url.startsWith('https://')) return false
+        if (filters.protocol === 'http' && protocol !== 'http' && !url.startsWith('http://')) return false
+        if (filters.protocol === 'https' && protocol !== 'https' && !url.startsWith('https://')) return false
       }
       
       // Tier filter
@@ -327,12 +417,12 @@ export default function Dashboard() {
           bVal = b.is_active ? 1 : 0
           break
         case 'protocol':
-          aVal = a.final_url?.startsWith('https://') ? 1 : 0
-          bVal = b.final_url?.startsWith('https://') ? 1 : 0
+          aVal = a.protocol === 'https' || a.final_url?.startsWith('https://') ? 1 : 0
+          bVal = b.protocol === 'https' || b.final_url?.startsWith('https://') ? 1 : 0
           break
         case 'response_time':
-          aVal = a.response_time || 0
-          bVal = b.response_time || 0
+          aVal = a.response_time || 9999
+          bVal = b.response_time || 9999
           break
         case 'risk_score':
           aVal = a.risk_score
@@ -372,6 +462,7 @@ export default function Dashboard() {
       total_subdomains: mergedData.length,
       active_hosts: mergedData.filter(d => d.is_active).length,
       total_ports: portScanData.length,
+      unique_ports_count: mergedData.reduce((sum, d) => sum + d.ports.length, 0),
       critical_ports: portScanData.filter(p => CRITICAL_SERVICES[p.port]?.severity === 'critical').length,
       total_endpoints: contentDiscoveryData.length,
       interesting_endpoints: contentDiscoveryData.filter(e => e.is_interesting).length,
@@ -379,25 +470,28 @@ export default function Dashboard() {
       medium_risk: mergedData.filter(d => d.tier === 'medium').length,
       low_risk: mergedData.filter(d => d.tier === 'low').length,
       validated: Object.keys(validationResults).length,
-      with_vulnerabilities: Object.values(validationResults).filter(r => r.has_vulnerabilities).length
+      with_vulnerabilities: Object.values(validationResults).filter(r => r.has_vulnerabilities).length,
+      // Additional stats from live hosts
+      https_count: liveHostsData.filter(h => h.protocol === 'https').length,
+      http_count: liveHostsData.filter(h => h.protocol === 'http').length,
     }
-  }, [mergedData, portScanData, contentDiscoveryData, validationResults])
+  }, [mergedData, portScanData, contentDiscoveryData, validationResults, liveHostsData])
 
   // Attack surface score (0-100)
   const attackSurfaceScore = useMemo(() => {
     let score = 0
     score += Math.min(25, mergedData.length * 0.5)
     score += Math.min(20, stats.active_hosts * 2)
-    score += Math.min(25, portScanData.length * 0.5)
+    score += Math.min(25, stats.unique_ports_count * 0.5)
     score += Math.min(20, contentDiscoveryData.length * 0.1)
     score += Math.min(10, stats.critical_ports * 5)
     return Math.round(score)
-  }, [mergedData, stats, portScanData, contentDiscoveryData])
+  }, [mergedData, stats, contentDiscoveryData])
 
   // High-value targets
   const highValueTargets = useMemo(() => {
     return mergedData
-      .filter(d => d.tier === 'high' && d.is_active)
+      .filter(d => d.tier === 'high' || d.risk_score >= 50)
       .sort((a, b) => b.risk_score - a.risk_score)
       .slice(0, 10)
   }, [mergedData])
@@ -406,7 +500,7 @@ export default function Dashboard() {
   const topServices = useMemo(() => {
     const serviceCounts = {}
     portScanData.forEach(port => {
-      const service = port.service || `Port ${port.port}`
+      const service = port.service || CRITICAL_SERVICES[port.port]?.name || `Port ${port.port}`
       serviceCounts[service] = (serviceCounts[service] || 0) + 1
     })
     
@@ -416,21 +510,50 @@ export default function Dashboard() {
       .slice(0, 6)
   }, [portScanData])
 
+  // Handle refresh - force re-read localStorage
+  const handleRefresh = () => {
+    setRefreshCounter(prev => prev + 1)
+    queryClient.invalidateQueries(['subdomains'])
+  }
+
   // Handle validation
   const handleValidate = async (subdomain, quick = false) => {
     setValidatingTargets(prev => new Set([...prev, subdomain]))
     
     try {
+      const targetUrl = `https://${subdomain}`
       const result = quick 
-        ? await quickValidateTarget(subdomain)
-        : await validateTarget(subdomain)
+        ? await quickValidateTarget(targetUrl)
+        : await validateTarget(targetUrl)
       
-      setValidationResults(prev => ({
-        ...prev,
-        [subdomain]: result
-      }))
+      const newResult = {
+        ...result,
+        target: subdomain,
+        validated_at: new Date().toISOString(),
+        validation_type: quick ? 'quick' : 'full'
+      }
+      
+      setValidationResults(prev => {
+        const updated = { ...prev, [subdomain]: newResult }
+        // Save to localStorage for cross-component sync
+        localStorage.setItem(STORAGE_KEYS.VALIDATION_RESULTS, JSON.stringify(updated))
+        return updated
+      })
+      
+      console.log(`✅ Validation complete for ${subdomain}:`, result)
     } catch (error) {
       console.error('Validation failed:', error)
+      const errorResult = {
+        target: subdomain,
+        error: error.message || 'Validation failed',
+        validated_at: new Date().toISOString(),
+        validation_type: quick ? 'quick' : 'full'
+      }
+      setValidationResults(prev => {
+        const updated = { ...prev, [subdomain]: errorResult }
+        localStorage.setItem(STORAGE_KEYS.VALIDATION_RESULTS, JSON.stringify(updated))
+        return updated
+      })
     } finally {
       setValidatingTargets(prev => {
         const newSet = new Set(prev)
@@ -467,6 +590,9 @@ export default function Dashboard() {
       subdomain: item.subdomain,
       active: item.is_active,
       status_code: item.status_code,
+      protocol: item.protocol,
+      ip_address: item.ip_address,
+      response_time: item.response_time,
       risk_score: item.risk_score,
       tier: item.tier,
       ports: item.ports.length,
@@ -480,7 +606,7 @@ export default function Dashboard() {
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = `dashboard-export-${Date.now()}.json`
+      a.download = `dashboard-export-${selectedDomain}-${Date.now()}.json`
       a.click()
     } else if (format === 'csv') {
       const headers = Object.keys(dataToExport[0] || {}).join(',')
@@ -490,7 +616,7 @@ export default function Dashboard() {
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = `dashboard-export-${Date.now()}.csv`
+      a.download = `dashboard-export-${selectedDomain}-${Date.now()}.csv`
       a.click()
     }
   }
@@ -509,15 +635,6 @@ export default function Dashboard() {
     }))
   }
 
-  const getSeverityColor = (severity) => {
-    switch (severity) {
-      case 'critical': return 'text-red-500'
-      case 'high': return 'text-orange-500'
-      case 'medium': return 'text-yellow-500'
-      default: return 'text-gray-400'
-    }
-  }
-
   const getTierColor = (tier) => {
     switch (tier) {
       case 'high': return 'text-red-500 bg-red-500/10 border-red-500/30'
@@ -529,14 +646,14 @@ export default function Dashboard() {
 
   if (!selectedDomain) {
     return (
-      <div className="flex items-center justify-center h-full">
+      <div className="flex items-center justify-center h-full p-8">
         <div className="text-center">
           <Globe className="w-16 h-16 text-gray-600 mx-auto mb-4" />
           <h3 className="text-xl font-semibold text-white mb-2">No Domain Selected</h3>
           <p className="text-gray-400 mb-6">Start by scanning a domain to see the dashboard</p>
           <button
             onClick={() => navigate('/subdomain-scanner')}
-            className="px-6 py-3 bg-cyber-blue text-white rounded-lg hover:bg-cyber-blue/80 transition-colors"
+            className="px-6 py-3 bg-emerald-500 text-white rounded-lg hover:bg-emerald-500/80 transition-colors"
           >
             Start Scanning
           </button>
@@ -547,9 +664,9 @@ export default function Dashboard() {
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center h-full">
+      <div className="flex items-center justify-center h-full p-8">
         <div className="text-center">
-          <Loader className="w-16 h-16 text-cyber-blue mx-auto mb-4 animate-spin" />
+          <Loader className="w-16 h-16 text-emerald-400 mx-auto mb-4 animate-spin" />
           <h3 className="text-xl font-semibold text-white mb-2">Loading Dashboard</h3>
           <p className="text-gray-400">Gathering reconnaissance data...</p>
         </div>
@@ -558,22 +675,22 @@ export default function Dashboard() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="p-8 space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold text-white flex items-center gap-3">
-            <Shield className="w-8 h-8 text-cyber-blue" />
+            <Shield className="w-8 h-8 text-emerald-400" />
             Attack Surface Dashboard
           </h1>
           <p className="text-gray-400 mt-1">
-            Analyzing <span className="text-cyber-blue font-medium">{selectedDomain}</span>
+            Analyzing <span className="text-emerald-400 font-medium">{selectedDomain}</span>
           </p>
         </div>
         
         <div className="flex items-center gap-3">
           {/* View Mode Toggle */}
-          <div className="flex gap-2 bg-dark-200 rounded-lg p-1">
+          <div className="flex gap-2 bg-[#0a0a0a] rounded-lg p-1">
             <button
               onClick={() => {
                 setViewMode('overview')
@@ -581,7 +698,7 @@ export default function Dashboard() {
               }}
               className={`px-4 py-2 rounded-md transition-colors ${
                 viewMode === 'overview'
-                  ? 'bg-cyber-blue text-white'
+                  ? 'bg-emerald-500 text-white'
                   : 'text-gray-400 hover:text-white'
               }`}
             >
@@ -594,7 +711,7 @@ export default function Dashboard() {
               }}
               className={`px-4 py-2 rounded-md transition-colors ${
                 viewMode === 'detailed'
-                  ? 'bg-cyber-blue text-white'
+                  ? 'bg-emerald-500 text-white'
                   : 'text-gray-400 hover:text-white'
               }`}
             >
@@ -607,7 +724,7 @@ export default function Dashboard() {
               }}
               className={`px-4 py-2 rounded-md transition-colors ${
                 viewMode === 'attack-surface'
-                  ? 'bg-cyber-blue text-white'
+                  ? 'bg-emerald-500 text-white'
                   : 'text-gray-400 hover:text-white'
               }`}
             >
@@ -618,24 +735,59 @@ export default function Dashboard() {
           {/* Actions */}
           <button
             onClick={() => handleExport('json')}
-            className="p-2 bg-dark-200 text-gray-400 rounded-lg hover:text-white hover:bg-dark-300 transition-colors"
+            className="p-2 bg-[#0a0a0a] text-gray-400 rounded-lg hover:text-white hover:bg-[#111111] transition-colors"
             title="Export JSON"
           >
             <Download className="w-5 h-5" />
           </button>
           <button
             onClick={handleCopy}
-            className="p-2 bg-dark-200 text-gray-400 rounded-lg hover:text-white hover:bg-dark-300 transition-colors"
+            className="p-2 bg-[#0a0a0a] text-gray-400 rounded-lg hover:text-white hover:bg-[#111111] transition-colors"
             title="Copy Subdomains"
           >
             <Copy className="w-5 h-5" />
           </button>
           <button
-            onClick={() => queryClient.invalidateQueries(['subdomains'])}
-            className="p-2 bg-dark-200 text-gray-400 rounded-lg hover:text-white hover:bg-dark-300 transition-colors"
-            title="Refresh"
+            onClick={handleRefresh}
+            className="p-2 bg-[#0a0a0a] text-gray-400 rounded-lg hover:text-white hover:bg-[#111111] transition-colors"
+            title="Refresh Data"
           >
             <RefreshCw className="w-5 h-5" />
+          </button>
+        </div>
+      </div>
+
+      {/* Data Source Status */}
+      <div className="bg-[#111111] border border-[#1f1f1f] rounded-lg p-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-6 text-sm">
+            <div className="flex items-center gap-2">
+              <div className={`w-2 h-2 rounded-full ${subdomainData.length > 0 ? 'bg-green-500' : 'bg-gray-500'}`}></div>
+              <span className="text-gray-400">Subdomains:</span>
+              <span className="text-white font-medium">{subdomainData.length}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className={`w-2 h-2 rounded-full ${liveHostsData.length > 0 ? 'bg-green-500' : 'bg-gray-500'}`}></div>
+              <span className="text-gray-400">Live Hosts:</span>
+              <span className="text-white font-medium">{liveHostsData.length}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className={`w-2 h-2 rounded-full ${portScanData.length > 0 ? 'bg-green-500' : 'bg-gray-500'}`}></div>
+              <span className="text-gray-400">Port Scans:</span>
+              <span className="text-white font-medium">{portScanData.length}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className={`w-2 h-2 rounded-full ${contentDiscoveryData.length > 0 ? 'bg-green-500' : 'bg-gray-500'}`}></div>
+              <span className="text-gray-400">Endpoints:</span>
+              <span className="text-white font-medium">{contentDiscoveryData.length}</span>
+            </div>
+          </div>
+          <button
+            onClick={handleRefresh}
+            className="text-sm text-emerald-400 hover:text-emerald-400/80 flex items-center gap-1"
+          >
+            <RefreshCw className="w-4 h-4" />
+            Refresh Data
           </button>
         </div>
       </div>
@@ -644,7 +796,7 @@ export default function Dashboard() {
       {viewMode === 'overview' && (
         <>
           {/* Attack Surface Score */}
-          <div className="bg-dark-200 rounded-lg p-6 border border-dark-300">
+          <div className="bg-[#111111] border border-[#1f1f1f] rounded-xl p-6">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-xl font-semibold text-white flex items-center gap-2">
                 <Target className="w-6 h-6 text-cyber-pink" />
@@ -724,7 +876,7 @@ export default function Dashboard() {
                     className="bg-gradient-to-br from-cyber-blue/10 to-cyber-blue/5 border border-cyber-blue/30 rounded-lg p-4 cursor-pointer hover:border-cyber-blue transition-colors group"
                   >
                     <div className="flex items-center justify-between mb-2">
-                      <Globe className="w-5 h-5 text-cyber-blue" />
+                      <Globe className="w-5 h-5 text-emerald-400" />
                       <ChevronRight className="w-4 h-4 text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity" />
                     </div>
                     <div className="text-2xl font-bold text-white">{stats.total_subdomains}</div>
@@ -741,6 +893,11 @@ export default function Dashboard() {
                     </div>
                     <div className="text-2xl font-bold text-white">{stats.active_hosts}</div>
                     <div className="text-sm text-gray-400">Active Hosts</div>
+                    {stats.https_count > 0 && (
+                      <div className="text-xs text-green-400 mt-1">
+                        {stats.https_count} HTTPS
+                      </div>
+                    )}
                   </div>
 
                   <div
@@ -782,7 +939,7 @@ export default function Dashboard() {
           </div>
 
           {/* High-Value Targets */}
-          <div className="bg-dark-200 rounded-lg p-6 border border-dark-300">
+          <div className="bg-[#111111] border border-[#1f1f1f] rounded-xl p-6">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-xl font-semibold text-white flex items-center gap-2">
                 <Target className="w-6 h-6 text-red-500" />
@@ -804,13 +961,14 @@ export default function Dashboard() {
                 {highValueTargets.length === 0 ? (
                   <div className="text-center py-8 text-gray-400">
                     <Target className="w-12 h-12 mx-auto mb-2 opacity-50" />
-                    <p>No high-value targets identified</p>
+                    <p>No high-value targets identified yet</p>
+                    <p className="text-sm mt-2">Run Live Hosts scan to identify active targets</p>
                   </div>
                 ) : (
                   highValueTargets.map((target, idx) => (
                     <div
                       key={target.subdomain}
-                      className="bg-dark-100 rounded-lg p-4 border border-red-500/20 hover:border-red-500/40 transition-colors"
+                      className="bg-[#0a0a0a] rounded-lg p-4 border border-red-500/20 hover:border-red-500/40 transition-colors"
                     >
                       <div className="flex items-start justify-between">
                         <div className="flex-1">
@@ -820,11 +978,16 @@ export default function Dashboard() {
                               href={target.final_url || `https://${target.subdomain}`}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="text-white hover:text-cyber-blue transition-colors font-medium"
+                              className="text-white hover:text-emerald-400 transition-colors font-medium"
                             >
                               {target.subdomain}
                             </a>
                             <ExternalLink className="w-3 h-3 text-gray-400" />
+                            {target.is_active && (
+                              <span className="text-xs px-2 py-1 bg-green-500/10 text-green-400 rounded border border-green-500/30">
+                                ACTIVE
+                              </span>
+                            )}
                             <span className={`text-xs px-2 py-1 rounded border ${getTierColor(target.tier)}`}>
                               {target.tier.toUpperCase()}
                             </span>
@@ -835,24 +998,6 @@ export default function Dashboard() {
                           
                           <div className="grid grid-cols-4 gap-4 text-sm">
                             <div>
-                              <div className="text-gray-400">Ports</div>
-                              <div className="text-white font-medium">{target.ports.length}</div>
-                              {target.critical_services.length > 0 && (
-                                <div className="text-xs text-red-500">
-                                  {target.critical_services.length} critical
-                                </div>
-                              )}
-                            </div>
-                            <div>
-                              <div className="text-gray-400">Endpoints</div>
-                              <div className="text-white font-medium">{target.endpoints.length}</div>
-                              {target.interesting_endpoints.length > 0 && (
-                                <div className="text-xs text-yellow-500">
-                                  {target.interesting_endpoints.length} interesting
-                                </div>
-                              )}
-                            </div>
-                            <div>
                               <div className="text-gray-400">Status</div>
                               <div className="text-white font-medium">{target.status_code || 'N/A'}</div>
                             </div>
@@ -861,6 +1006,14 @@ export default function Dashboard() {
                               <div className="text-white font-medium">
                                 {target.response_time ? `${target.response_time}ms` : 'N/A'}
                               </div>
+                            </div>
+                            <div>
+                              <div className="text-gray-400">Ports</div>
+                              <div className="text-white font-medium">{target.ports.length}</div>
+                            </div>
+                            <div>
+                              <div className="text-gray-400">Endpoints</div>
+                              <div className="text-white font-medium">{target.endpoints.length}</div>
                             </div>
                           </div>
 
@@ -884,7 +1037,7 @@ export default function Dashboard() {
                           <button
                             onClick={() => handleValidate(target.subdomain, true)}
                             disabled={validatingTargets.has(target.subdomain)}
-                            className="p-2 bg-cyber-blue/20 text-cyber-blue rounded hover:bg-cyber-blue/30 transition-colors disabled:opacity-50"
+                            className="p-2 bg-emerald-500/20 text-emerald-400 rounded hover:bg-emerald-500/30 transition-colors disabled:opacity-50"
                             title="Quick Validate"
                           >
                             {validatingTargets.has(target.subdomain) ? (
@@ -907,241 +1060,9 @@ export default function Dashboard() {
                           </button>
                         </div>
                       </div>
-
-                      {target.validation_result && (
-                        <div className="mt-3 p-3 bg-dark-200 rounded border border-dark-300">
-                          <div className="flex items-center gap-2 mb-2">
-                            {target.validation_result.has_vulnerabilities ? (
-                              <XCircle className="w-4 h-4 text-red-500" />
-                            ) : (
-                              <CheckCircle className="w-4 h-4 text-green-500" />
-                            )}
-                            <span className="text-sm font-medium text-white">
-                              Validation Result
-                            </span>
-                          </div>
-                          <div className="text-sm text-gray-400">
-                            {target.validation_result.summary || 'Validation complete'}
-                          </div>
-                        </div>
-                      )}
                     </div>
                   ))
                 )}
-              </div>
-            )}
-          </div>
-
-          {/* Attack Surface Breakdown */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {/* Critical Findings */}
-            <div className="bg-dark-200 rounded-lg p-6 border border-dark-300">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-xl font-semibold text-white flex items-center gap-2">
-                  <AlertTriangle className="w-6 h-6 text-red-500" />
-                  Critical Findings
-                </h2>
-                <button
-                  onClick={() => toggleSection('criticalFindings')}
-                  className="text-gray-400 hover:text-white"
-                >
-                  {expandedSections.criticalFindings ? <ChevronUp /> : <ChevronDown />}
-                </button>
-              </div>
-
-              {expandedSections.criticalFindings && (
-                <div className="space-y-4">
-                  {stats.critical_ports > 0 ? (
-                    <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-4">
-                      <div className="flex items-center justify-between mb-2">
-                        <div className="flex items-center gap-2">
-                          <Server className="w-5 h-5 text-red-500" />
-                          <span className="font-medium text-white">Critical Services Exposed</span>
-                        </div>
-                        <span className="text-2xl font-bold text-red-500">{stats.critical_ports}</span>
-                      </div>
-                      <p className="text-sm text-gray-400 mb-3">
-                        High-risk services detected (RDP, VNC, databases)
-                      </p>
-                      <button
-                        onClick={() => {
-                          updateFilters({ hasPorts: true })
-                          setViewMode('detailed')
-                        }}
-                        className="text-sm text-red-500 hover:text-red-400 flex items-center gap-1"
-                      >
-                        Investigate <ArrowRight className="w-4 h-4" />
-                      </button>
-                    </div>
-                  ) : null}
-
-                  {stats.interesting_endpoints > 0 ? (
-                    <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-4">
-                      <div className="flex items-center justify-between mb-2">
-                        <div className="flex items-center gap-2">
-                          <Eye className="w-5 h-5 text-yellow-500" />
-                          <span className="font-medium text-white">Interesting Endpoints</span>
-                        </div>
-                        <span className="text-2xl font-bold text-yellow-500">{stats.interesting_endpoints}</span>
-                      </div>
-                      <p className="text-sm text-gray-400 mb-3">
-                        Admin panels, configs, or sensitive paths found
-                      </p>
-                      <button
-                        onClick={() => navigate('/content-discovery')}
-                        className="text-sm text-yellow-500 hover:text-yellow-400 flex items-center gap-1"
-                      >
-                        Investigate <ArrowRight className="w-4 h-4" />
-                      </button>
-                    </div>
-                  ) : null}
-
-                  {stats.with_vulnerabilities > 0 ? (
-                    <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-4">
-                      <div className="flex items-center justify-between mb-2">
-                        <div className="flex items-center gap-2">
-                          <Shield className="w-5 h-5 text-red-500" />
-                          <span className="font-medium text-white">Validated Vulnerabilities</span>
-                        </div>
-                        <span className="text-2xl font-bold text-red-500">{stats.with_vulnerabilities}</span>
-                      </div>
-                      <p className="text-sm text-gray-400 mb-3">
-                        Confirmed security issues from validation scans
-                      </p>
-                      <button
-                        onClick={() => {
-                          updateFilters({ hasVulnerabilities: true })
-                          setViewMode('detailed')
-                        }}
-                        className="text-sm text-red-500 hover:text-red-400 flex items-center gap-1"
-                      >
-                        Review <ArrowRight className="w-4 h-4" />
-                      </button>
-                    </div>
-                  ) : null}
-
-                  {stats.critical_ports === 0 && stats.interesting_endpoints === 0 && stats.with_vulnerabilities === 0 && (
-                    <div className="text-center py-8">
-                      <CheckCircle className="w-12 h-12 text-green-500 mx-auto mb-2" />
-                      <p className="text-green-500 font-medium">No Critical Issues Detected</p>
-                      <p className="text-sm text-gray-400 mt-1">
-                        Continue monitoring for new findings
-                      </p>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-
-            {/* Top Services */}
-            <div className="bg-dark-200 rounded-lg p-6 border border-dark-300">
-              <h2 className="text-xl font-semibold text-white mb-4 flex items-center gap-2">
-                <Database className="w-6 h-6 text-cyber-purple" />
-                Top Services Exposed
-              </h2>
-              
-              <div className="space-y-3">
-                {topServices.length === 0 ? (
-                  <div className="text-center py-8 text-gray-400">
-                    <Server className="w-12 h-12 mx-auto mb-2 opacity-50" />
-                    <p>No services detected</p>
-                  </div>
-                ) : (
-                  topServices.map((item, idx) => (
-                    <div key={item.service} className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-full bg-cyber-purple/20 text-cyber-purple flex items-center justify-center text-sm font-bold">
-                        {idx + 1}
-                      </div>
-                      <div className="flex-1">
-                        <div className="text-white font-medium capitalize">{item.service}</div>
-                        <div className="text-sm text-gray-400">{item.count} instances</div>
-                      </div>
-                      <div className="w-24 bg-dark-100 rounded-full h-2">
-                        <div
-                          className="bg-cyber-purple h-2 rounded-full"
-                          style={{ width: `${(item.count / topServices[0].count) * 100}%` }}
-                        />
-                      </div>
-                    </div>
-                  ))
-                )}
-                
-                {topServices.length > 0 && (
-                  <button
-                    onClick={() => navigate('/port-scanner')}
-                    className="w-full mt-4 text-sm text-cyber-purple hover:text-cyber-purple/80 flex items-center justify-center gap-1"
-                  >
-                    View All Services <ArrowRight className="w-4 h-4" />
-                  </button>
-                )}
-              </div>
-            </div>
-          </div>
-
-          {/* Reconnaissance Coverage */}
-          <div className="bg-dark-200 rounded-lg p-6 border border-dark-300">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-semibold text-white flex items-center gap-2">
-                <Target className="w-6 h-6 text-cyber-green" />
-                Reconnaissance Coverage
-              </h2>
-              <button
-                onClick={() => toggleSection('reconnaissance')}
-                className="text-gray-400 hover:text-white"
-              >
-                {expandedSections.reconnaissance ? <ChevronUp /> : <ChevronDown />}
-              </button>
-            </div>
-
-            {expandedSections.reconnaissance && (
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <div className="text-center">
-                  <div className={`w-16 h-16 rounded-full mx-auto mb-2 flex items-center justify-center ${
-                    stats.total_subdomains > 0 ? 'bg-green-500/20 text-green-500' : 'bg-gray-500/20 text-gray-500'
-                  }`}>
-                    <Globe className="w-8 h-8" />
-                  </div>
-                  <div className="text-white font-medium">Subdomain Enumeration</div>
-                  <div className={`text-sm mt-1 ${stats.total_subdomains > 0 ? 'text-green-500' : 'text-gray-500'}`}>
-                    {stats.total_subdomains > 0 ? 'Complete' : 'Pending'}
-                  </div>
-                </div>
-
-                <div className="text-center">
-                  <div className={`w-16 h-16 rounded-full mx-auto mb-2 flex items-center justify-center ${
-                    stats.active_hosts > 0 ? 'bg-green-500/20 text-green-500' : 'bg-gray-500/20 text-gray-500'
-                  }`}>
-                    <Activity className="w-8 h-8" />
-                  </div>
-                  <div className="text-white font-medium">Live Host Probing</div>
-                  <div className={`text-sm mt-1 ${stats.active_hosts > 0 ? 'text-green-500' : 'text-gray-500'}`}>
-                    {stats.active_hosts > 0 ? 'Complete' : 'Pending'}
-                  </div>
-                </div>
-
-                <div className="text-center">
-                  <div className={`w-16 h-16 rounded-full mx-auto mb-2 flex items-center justify-center ${
-                    stats.total_ports > 0 ? 'bg-green-500/20 text-green-500' : 'bg-gray-500/20 text-gray-500'
-                  }`}>
-                    <Server className="w-8 h-8" />
-                  </div>
-                  <div className="text-white font-medium">Port Scanning</div>
-                  <div className={`text-sm mt-1 ${stats.total_ports > 0 ? 'text-green-500' : 'text-gray-500'}`}>
-                    {stats.total_ports > 0 ? 'Complete' : 'Pending'}
-                  </div>
-                </div>
-
-                <div className="text-center">
-                  <div className={`w-16 h-16 rounded-full mx-auto mb-2 flex items-center justify-center ${
-                    stats.total_endpoints > 0 ? 'bg-green-500/20 text-green-500' : 'bg-gray-500/20 text-gray-500'
-                  }`}>
-                    <Network className="w-8 h-8" />
-                  </div>
-                  <div className="text-white font-medium">Content Discovery</div>
-                  <div className={`text-sm mt-1 ${stats.total_endpoints > 0 ? 'text-green-500' : 'text-gray-500'}`}>
-                    {stats.total_endpoints > 0 ? 'Complete' : 'Pending'}
-                  </div>
-                </div>
               </div>
             )}
           </div>
@@ -1172,7 +1093,7 @@ export default function Dashboard() {
               onClick={() => navigate('/subdomain-scanner')}
               className="bg-gradient-to-br from-cyber-blue/10 to-cyber-blue/5 border border-cyber-blue/30 rounded-lg p-6 hover:border-cyber-blue transition-colors text-left group"
             >
-              <Globe className="w-8 h-8 text-cyber-blue mb-3" />
+              <Globe className="w-8 h-8 text-emerald-400 mb-3" />
               <div className="text-white font-medium mb-1">New Scan</div>
               <div className="text-sm text-gray-400">Start reconnaissance</div>
               <ChevronRight className="w-5 h-5 text-gray-400 mt-2 opacity-0 group-hover:opacity-100 transition-opacity" />
@@ -1195,9 +1116,9 @@ export default function Dashboard() {
       {viewMode === 'detailed' && (
         <div className="space-y-6">
           {/* Filters */}
-          <div className="bg-dark-200 rounded-lg p-6 border border-dark-300">
+          <div className="bg-[#111111] border border-[#1f1f1f] rounded-xl p-6">
             <div className="flex items-center gap-2 mb-4">
-              <Filter className="w-5 h-5 text-cyber-blue" />
+              <Filter className="w-5 h-5 text-emerald-400" />
               <h3 className="text-lg font-semibold text-white">Filters & Search</h3>
             </div>
 
@@ -1212,7 +1133,7 @@ export default function Dashboard() {
                     value={filters.search}
                     onChange={(e) => updateFilters({ search: e.target.value })}
                     placeholder="Filter by subdomain..."
-                    className="w-full bg-dark-100 text-white pl-10 pr-4 py-2 rounded-lg border border-dark-300 focus:border-cyber-blue focus:outline-none"
+                    className="w-full bg-[#0a0a0a] text-white pl-10 pr-4 py-2 rounded-lg border border-[#1f1f1f] focus:border-cyber-blue focus:outline-none"
                   />
                 </div>
               </div>
@@ -1223,25 +1144,11 @@ export default function Dashboard() {
                 <select
                   value={filters.status}
                   onChange={(e) => updateFilters({ status: e.target.value })}
-                  className="w-full bg-dark-100 text-white px-4 py-2 rounded-lg border border-dark-300 focus:border-cyber-blue focus:outline-none"
+                  className="w-full bg-[#0a0a0a] text-white px-4 py-2 rounded-lg border border-[#1f1f1f] focus:border-cyber-blue focus:outline-none"
                 >
                   <option value="all">All</option>
                   <option value="active">Active Only</option>
                   <option value="inactive">Inactive Only</option>
-                </select>
-              </div>
-
-              {/* Protocol Filter */}
-              <div>
-                <label className="block text-sm text-gray-400 mb-2">Protocol</label>
-                <select
-                  value={filters.protocol}
-                  onChange={(e) => updateFilters({ protocol: e.target.value })}
-                  className="w-full bg-dark-100 text-white px-4 py-2 rounded-lg border border-dark-300 focus:border-cyber-blue focus:outline-none"
-                >
-                  <option value="all">All</option>
-                  <option value="http">HTTP</option>
-                  <option value="https">HTTPS</option>
                 </select>
               </div>
 
@@ -1251,7 +1158,7 @@ export default function Dashboard() {
                 <select
                   value={filters.tier}
                   onChange={(e) => updateFilters({ tier: e.target.value })}
-                  className="w-full bg-dark-100 text-white px-4 py-2 rounded-lg border border-dark-300 focus:border-cyber-blue focus:outline-none"
+                  className="w-full bg-[#0a0a0a] text-white px-4 py-2 rounded-lg border border-[#1f1f1f] focus:border-cyber-blue focus:outline-none"
                 >
                   <option value="all">All Tiers</option>
                   <option value="high">High Risk</option>
@@ -1259,69 +1166,56 @@ export default function Dashboard() {
                   <option value="low">Low Risk</option>
                 </select>
               </div>
+            </div>
 
-              {/* Advanced Filters */}
-              <div className="md:col-span-3 flex items-center gap-4">
-                <label className="flex items-center gap-2 text-sm text-gray-400 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={filters.interesting}
-                    onChange={(e) => updateFilters({ interesting: e.target.checked })}
-                    className="form-checkbox bg-dark-100 border-dark-300 text-cyber-blue rounded focus:ring-cyber-blue"
-                  />
-                  Interesting Endpoints Only
-                </label>
-                <label className="flex items-center gap-2 text-sm text-gray-400 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={filters.hasVulnerabilities}
-                    onChange={(e) => updateFilters({ hasVulnerabilities: e.target.checked })}
-                    className="form-checkbox bg-dark-100 border-dark-300 text-cyber-blue rounded focus:ring-cyber-blue"
-                  />
-                  Has Vulnerabilities
-                </label>
-                <label className="flex items-center gap-2 text-sm text-gray-400 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={filters.hasPorts}
-                    onChange={(e) => updateFilters({ hasPorts: e.target.checked })}
-                    className="form-checkbox bg-dark-100 border-dark-300 text-cyber-blue rounded focus:ring-cyber-blue"
-                  />
-                  Has Open Ports
-                </label>
-                <label className="flex items-center gap-2 text-sm text-gray-400 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={filters.hasEndpoints}
-                    onChange={(e) => updateFilters({ hasEndpoints: e.target.checked })}
-                    className="form-checkbox bg-dark-100 border-dark-300 text-cyber-blue rounded focus:ring-cyber-blue"
-                  />
-                  Has Endpoints
-                </label>
-              </div>
-
-              {/* Reset Filters */}
-              <div className="flex items-end">
-                <button
-                  onClick={() => {
-                    const resetFilters = {
-                      search: '',
-                      status: 'all',
-                      protocol: 'all',
-                      tier: 'all',
-                      interesting: false,
-                      hasVulnerabilities: false,
-                      hasPorts: false,
-                      hasEndpoints: false
-                    }
-                    setFilters(resetFilters)
-                    localStorage.setItem(STORAGE_KEYS.FILTER_STATE, JSON.stringify(resetFilters))
-                  }}
-                  className="px-4 py-2 bg-dark-100 text-gray-400 rounded-lg hover:text-white hover:bg-dark-300 transition-colors"
-                >
-                  Reset Filters
-                </button>
-              </div>
+            {/* Checkbox Filters */}
+            <div className="mt-4 flex flex-wrap items-center gap-4">
+              <label className="flex items-center gap-2 text-sm text-gray-400 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={filters.hasPorts}
+                  onChange={(e) => updateFilters({ hasPorts: e.target.checked })}
+                  className="form-checkbox bg-[#0a0a0a] border-[#1f1f1f] text-emerald-400 rounded focus:ring-cyber-blue"
+                />
+                Has Open Ports
+              </label>
+              <label className="flex items-center gap-2 text-sm text-gray-400 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={filters.hasEndpoints}
+                  onChange={(e) => updateFilters({ hasEndpoints: e.target.checked })}
+                  className="form-checkbox bg-[#0a0a0a] border-[#1f1f1f] text-emerald-400 rounded focus:ring-cyber-blue"
+                />
+                Has Endpoints
+              </label>
+              <label className="flex items-center gap-2 text-sm text-gray-400 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={filters.interesting}
+                  onChange={(e) => updateFilters({ interesting: e.target.checked })}
+                  className="form-checkbox bg-[#0a0a0a] border-[#1f1f1f] text-emerald-400 rounded focus:ring-cyber-blue"
+                />
+                Interesting Endpoints Only
+              </label>
+              <button
+                onClick={() => {
+                  const resetFilters = {
+                    search: '',
+                    status: 'all',
+                    protocol: 'all',
+                    tier: 'all',
+                    interesting: false,
+                    hasVulnerabilities: false,
+                    hasPorts: false,
+                    hasEndpoints: false
+                  }
+                  setFilters(resetFilters)
+                  localStorage.setItem(STORAGE_KEYS.FILTER_STATE, JSON.stringify(resetFilters))
+                }}
+                className="px-4 py-2 bg-[#0a0a0a] text-gray-400 rounded-lg hover:text-white hover:bg-[#1a1a1a] transition-colors"
+              >
+                Reset Filters
+              </button>
             </div>
 
             <div className="mt-4 text-sm text-gray-400">
@@ -1330,11 +1224,11 @@ export default function Dashboard() {
           </div>
 
           {/* Data Table */}
-          <div className="bg-dark-200 rounded-lg border border-dark-300 overflow-hidden">
+          <div className="bg-[#111111] border border-[#1f1f1f] rounded-xl overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead>
-                  <tr className="bg-dark-100 border-b border-dark-300">
+                  <tr className="bg-[#0a0a0a] border-b border-[#1f1f1f]">
                     <th
                       onClick={() => handleSort('subdomain')}
                       className="px-4 py-3 text-left text-sm font-medium text-gray-400 cursor-pointer hover:text-white"
@@ -1357,16 +1251,8 @@ export default function Dashboard() {
                         )}
                       </div>
                     </th>
-                    <th
-                      onClick={() => handleSort('protocol')}
-                      className="px-4 py-3 text-left text-sm font-medium text-gray-400 cursor-pointer hover:text-white"
-                    >
-                      <div className="flex items-center gap-2">
-                        Protocol
-                        {sortConfig.field === 'protocol' && (
-                          sortConfig.direction === 'asc' ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />
-                        )}
-                      </div>
+                    <th className="px-4 py-3 text-left text-sm font-medium text-gray-400">
+                      Protocol
                     </th>
                     <th
                       onClick={() => handleSort('response_time')}
@@ -1418,132 +1304,129 @@ export default function Dashboard() {
                   </tr>
                 </thead>
                 <tbody>
-                  {paginatedData.map((item) => (
-                    <tr
-                      key={item.subdomain}
-                      className="border-b border-dark-300 hover:bg-dark-100 transition-colors"
-                    >
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-2">
-                          <a
-                            href={item.final_url || `https://${item.subdomain}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-white hover:text-cyber-blue transition-colors font-mono text-sm"
-                          >
-                            {item.subdomain}
-                          </a>
-                          <ExternalLink className="w-3 h-3 text-gray-400" />
-                        </div>
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-2">
-                          {item.is_active ? (
-                            <>
-                              <CheckCircle className="w-4 h-4 text-green-500" />
-                              <span className="text-sm text-green-500">Active</span>
-                            </>
-                          ) : (
-                            <>
-                              <XCircle className="w-4 h-4 text-gray-500" />
-                              <span className="text-sm text-gray-500">Inactive</span>
-                            </>
-                          )}
-                        </div>
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-2">
-                          {item.final_url?.startsWith('https://') ? (
-                            <>
-                              <Lock className="w-4 h-4 text-green-500" />
-                              <span className="text-sm text-green-500">HTTPS</span>
-                            </>
-                          ) : item.final_url?.startsWith('http://') ? (
-                            <>
-                              <Lock className="w-4 h-4 text-gray-500" />
-                              <span className="text-sm text-gray-500">HTTP</span>
-                            </>
-                          ) : (
-                            <span className="text-sm text-gray-500">N/A</span>
-                          )}
-                        </div>
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className="text-sm text-white">
-                          {item.response_time ? `${item.response_time}ms` : 'N/A'}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-2">
-                          <span className={`text-sm px-2 py-1 rounded border ${getTierColor(item.tier)}`}>
-                            {item.tier.toUpperCase()}
-                          </span>
-                          <span className={`text-sm font-bold ${
-                            item.risk_score >= 70 ? 'text-red-500' :
-                            item.risk_score >= 40 ? 'text-orange-500' :
-                            'text-green-500'
-                          }`}>
-                            {item.risk_score}
-                          </span>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm text-white">{item.ports.length}</span>
-                          {item.critical_services.length > 0 && (
-                            <span className="text-xs px-2 py-1 bg-red-500/10 text-red-500 rounded border border-red-500/30">
-                              {item.critical_services.length} critical
-                            </span>
-                          )}
-                        </div>
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm text-white">{item.endpoints.length}</span>
-                          {item.interesting_endpoints.length > 0 && (
-                            <span className="text-xs px-2 py-1 bg-yellow-500/10 text-yellow-500 rounded border border-yellow-500/30">
-                              {item.interesting_endpoints.length} interesting
-                            </span>
-                          )}
-                        </div>
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center justify-end gap-2">
-                          <button
-                            onClick={() => handleValidate(item.subdomain, true)}
-                            disabled={validatingTargets.has(item.subdomain)}
-                            className="p-2 bg-cyber-blue/20 text-cyber-blue rounded hover:bg-cyber-blue/30 transition-colors disabled:opacity-50"
-                            title="Quick Validate"
-                          >
-                            {validatingTargets.has(item.subdomain) ? (
-                              <Loader className="w-4 h-4 animate-spin" />
-                            ) : (
-                              <Zap className="w-4 h-4" />
-                            )}
-                          </button>
-                          <button
-                            onClick={() => handleValidate(item.subdomain, false)}
-                            disabled={validatingTargets.has(item.subdomain)}
-                            className="p-2 bg-cyber-purple/20 text-cyber-purple rounded hover:bg-cyber-purple/30 transition-colors disabled:opacity-50"
-                            title="Full Validate"
-                          >
-                            {validatingTargets.has(item.subdomain) ? (
-                              <Loader className="w-4 h-4 animate-spin" />
-                            ) : (
-                              <Shield className="w-4 h-4" />
-                            )}
-                          </button>
-                        </div>
+                  {paginatedData.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} className="px-4 py-12 text-center text-gray-400">
+                        <Search className="w-12 h-12 mx-auto mb-2 opacity-50" />
+                        <p>No results match your filters</p>
                       </td>
                     </tr>
-                  ))}
+                  ) : (
+                    paginatedData.map((item) => (
+                      <tr
+                        key={item.subdomain}
+                        className="border-b border-[#1f1f1f] hover:bg-[#0a0a0a] transition-colors"
+                      >
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2">
+                            <a
+                              href={item.final_url || `https://${item.subdomain}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-white hover:text-emerald-400 transition-colors font-mono text-sm"
+                            >
+                              {item.subdomain}
+                            </a>
+                            <ExternalLink className="w-3 h-3 text-gray-400" />
+                          </div>
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2">
+                            {item.is_active ? (
+                              <>
+                                <CheckCircle className="w-4 h-4 text-green-500" />
+                                <span className="text-sm text-green-500">Active</span>
+                              </>
+                            ) : (
+                              <>
+                                <XCircle className="w-4 h-4 text-gray-500" />
+                                <span className="text-sm text-gray-500">Inactive</span>
+                              </>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2">
+                            {item.protocol === 'https' || item.final_url?.startsWith('https://') ? (
+                              <>
+                                <Lock className="w-4 h-4 text-green-500" />
+                                <span className="text-sm text-green-500">HTTPS</span>
+                              </>
+                            ) : item.protocol === 'http' || item.final_url?.startsWith('http://') ? (
+                              <>
+                                <Lock className="w-4 h-4 text-yellow-500" />
+                                <span className="text-sm text-yellow-500">HTTP</span>
+                              </>
+                            ) : (
+                              <span className="text-sm text-gray-500">N/A</span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className="text-sm text-white">
+                            {item.response_time ? `${item.response_time}ms` : 'N/A'}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2">
+                            <span className={`text-xs px-2 py-1 rounded border ${getTierColor(item.tier)}`}>
+                              {item.tier.toUpperCase()}
+                            </span>
+                            <span className={`text-sm font-bold ${
+                              item.risk_score >= 70 ? 'text-red-500' :
+                              item.risk_score >= 40 ? 'text-orange-500' :
+                              'text-green-500'
+                            }`}>
+                              {item.risk_score}
+                            </span>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm text-white">{item.ports.length}</span>
+                            {item.critical_services.length > 0 && (
+                              <span className="text-xs px-2 py-1 bg-red-500/10 text-red-500 rounded border border-red-500/30">
+                                {item.critical_services.length} critical
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm text-white">{item.endpoints.length}</span>
+                            {item.interesting_endpoints.length > 0 && (
+                              <span className="text-xs px-2 py-1 bg-yellow-500/10 text-yellow-500 rounded border border-yellow-500/30">
+                                {item.interesting_endpoints.length} interesting
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center justify-end gap-2">
+                            <button
+                              onClick={() => handleValidate(item.subdomain, true)}
+                              disabled={validatingTargets.has(item.subdomain)}
+                              className="p-2 bg-emerald-500/20 text-emerald-400 rounded hover:bg-emerald-500/30 transition-colors disabled:opacity-50"
+                              title="Quick Validate"
+                            >
+                              {validatingTargets.has(item.subdomain) ? (
+                                <Loader className="w-4 h-4 animate-spin" />
+                              ) : (
+                                <Zap className="w-4 h-4" />
+                              )}
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
                 </tbody>
               </table>
             </div>
 
             {/* Pagination */}
             {totalPages > 1 && (
-              <div className="flex items-center justify-between px-6 py-4 bg-dark-100 border-t border-dark-300">
+              <div className="flex items-center justify-between px-6 py-4 bg-[#0a0a0a] border-t border-[#1f1f1f]">
                 <div className="text-sm text-gray-400">
                   Page {currentPage} of {totalPages}
                 </div>
@@ -1551,14 +1434,14 @@ export default function Dashboard() {
                   <button
                     onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
                     disabled={currentPage === 1}
-                    className="px-4 py-2 bg-dark-200 text-white rounded-lg hover:bg-dark-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="px-4 py-2 bg-[#111111] text-white rounded-lg hover:bg-[#1a1a1a] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     Previous
                   </button>
                   <button
                     onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
                     disabled={currentPage === totalPages}
-                    className="px-4 py-2 bg-dark-200 text-white rounded-lg hover:bg-dark-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="px-4 py-2 bg-[#111111] text-white rounded-lg hover:bg-[#1a1a1a] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     Next
                   </button>
@@ -1572,10 +1455,9 @@ export default function Dashboard() {
       {/* Attack Surface View Mode */}
       {viewMode === 'attack-surface' && (
         <div className="space-y-6">
-          <div className="bg-dark-200 rounded-lg p-6 border border-dark-300">
+          <div className="bg-[#111111] border border-[#1f1f1f] rounded-xl p-6">
             <h2 className="text-xl font-semibold text-white mb-6">Attack Surface Analysis</h2>
             
-            {/* Coming soon placeholder */}
             <div className="text-center py-12">
               <Target className="w-16 h-16 text-gray-600 mx-auto mb-4" />
               <h3 className="text-xl font-semibold text-white mb-2">Advanced Analysis View</h3>
@@ -1584,7 +1466,7 @@ export default function Dashboard() {
               </p>
               <button
                 onClick={() => setViewMode('overview')}
-                className="px-6 py-3 bg-cyber-blue text-white rounded-lg hover:bg-cyber-blue/80 transition-colors"
+                className="px-6 py-3 bg-emerald-500 text-white rounded-lg hover:bg-emerald-500/80 transition-colors"
               >
                 Back to Overview
               </button>

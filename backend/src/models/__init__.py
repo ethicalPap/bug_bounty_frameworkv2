@@ -4,13 +4,16 @@
 from src.models.Subdomain import Subdomain
 from src.models.ContentDiscovery import ContentDiscovery, JSEndpoint, APIParameter
 from src.models.PortScan import PortScan
+from src.models.VulnScan import VulnScan, VulnFinding
 
 __all__ = [
     'Subdomain',
     'ContentDiscovery',
     'JSEndpoint', 
     'APIParameter',
-    'PortScan'
+    'PortScan',
+    'VulnScan',
+    'VulnFinding'
 ]
 
-__version__ = "2.0.0"
+__version__ = "2.1.0"

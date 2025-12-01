@@ -8,6 +8,8 @@ import PortScanner from './pages/PortScanner/PortScanner'
 import Visualization from './pages/Visualization/Visualization'
 import History from './pages/History/History'
 import Exports from './pages/Export/Exports'
+import ValidationResults from './pages/ValidationResults/ValidationResults'
+import VulnerabilityScanner from './pages/VulnerabilityScanner/VulnerabilityScanner'
 
 function App() {
   return (
@@ -18,6 +20,8 @@ function App() {
         <Route path="live-hosts" element={<LiveHosts />} />
         <Route path="content-discovery" element={<ContentDiscovery />} />
         <Route path="port-scanner" element={<PortScanner />} />
+        <Route path="validation" element={<ValidationResults />} />
+        <Route path="vuln-scanner" element={<VulnerabilityScanner />} />
         <Route path="visualization" element={<Visualization />} />
         <Route path="history" element={<History />} />
         <Route path="/exports" element={<Exports />} />

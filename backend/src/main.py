@@ -46,6 +46,7 @@ from src.controllers.visualization import (
     get_endpoint_tree,
     get_attack_surface_summary
 )
+from src.controllers.http_prober import HTTPProber
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -99,6 +100,18 @@ class SubdomainResponse(BaseModel):
     is_active: bool
     scan_id: Optional[str]
     created_at: Optional[str]
+
+# HTTP Probing Models
+class ProbeHostsRequest(BaseModel):
+    subdomains: List[str] = Field(..., description="List of subdomains to probe")
+    concurrency: int = Field(10, description="Number of concurrent probes", ge=1, le=50)
+    timeout: int = Field(10, description="Timeout per request in seconds", ge=1, le=30)
+
+class ProbeHostsResponse(BaseModel):
+    total: int
+    active: int
+    inactive: int
+    results: List[Dict]
 
 # Content Discovery Models
 class ContentDiscoveryRequest(BaseModel):
@@ -239,6 +252,7 @@ async def root():
         "version": "2.0.0",
         "features": [
             "subdomain_enumeration",
+            "http_probing",
             "content_discovery",
             "port_scanning",
             "vulnerability_validation",
@@ -247,6 +261,7 @@ async def root():
         "endpoints": {
             "health": "/health",
             "subdomain_scan": "/api/v1/scan",
+            "probe_hosts": "/api/v1/probe-hosts",
             "content_discovery": "/api/v1/content/scan",
             "port_scan": "/api/v1/ports/scan",
             "validation": "/api/v1/validation",
@@ -254,6 +269,75 @@ async def root():
             "docs": "/docs"
         }
     }
+
+# ==================== HTTP Probing Endpoints ====================
+
+@app.post("/api/v1/probe-hosts", response_model=ProbeHostsResponse)
+async def probe_hosts_endpoint(
+    request: ProbeHostsRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Probe a list of subdomains to check if they're live
+    Returns status, IP, response time, etc.
+    """
+    try:
+        logger.info(f"Starting HTTP probe for {len(request.subdomains)} subdomains")
+        
+        prober = HTTPProber(timeout=request.timeout)
+        results = await prober.probe_subdomains_batch(
+            request.subdomains, 
+            concurrency=request.concurrency
+        )
+        
+        active_count = sum(1 for r in results if r.get('is_active'))
+        
+        return {
+            "total": len(results),
+            "active": active_count,
+            "inactive": len(results) - active_count,
+            "results": results
+        }
+        
+    except Exception as e:
+        logger.error(f"HTTP probe failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Probe failed: {str(e)}")
+
+
+@app.post("/api/v1/probe-hosts/batch")
+async def probe_hosts_batch_endpoint(
+    request: ProbeHostsRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Probe hosts in batches with progress tracking
+    """
+    try:
+        logger.info(f"Starting batched HTTP probe for {len(request.subdomains)} subdomains")
+        
+        prober = HTTPProber(timeout=request.timeout)
+        
+        # Process in batches
+        batch_size = min(request.concurrency, 20)
+        all_results = []
+        
+        for i in range(0, len(request.subdomains), batch_size):
+            batch = request.subdomains[i:i + batch_size]
+            batch_results = await prober.probe_subdomains_batch(batch, concurrency=batch_size)
+            all_results.extend(batch_results)
+        
+        active_count = sum(1 for r in all_results if r.get('is_active'))
+        
+        return {
+            "total": len(all_results),
+            "active": active_count,
+            "inactive": len(all_results) - active_count,
+            "results": all_results
+        }
+        
+    except Exception as e:
+        logger.error(f"Batched HTTP probe failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Probe failed: {str(e)}")
 
 # ==================== Subdomain Enumeration Endpoints ====================
 
@@ -414,28 +498,6 @@ async def start_content_discovery_scan(
 ):
     """
     Start content discovery scan with custom tool configuration (frontend endpoint)
-    
-    Body:
-    {
-        "target_url": "https://example.com",
-        "scan_type": "full",
-        "use_ffuf": true,
-        "use_feroxbuster": true,
-        "use_waymore": true,
-        "use_gau": true,
-        "use_katana": true,
-        "use_gospider": false,
-        "use_linkfinder": false,
-        "use_arjun": true,
-        "use_unfurl": true,
-        "use_uro": true,
-        "use_nuclei": false,
-        "threads": 10,
-        "timeout": 600,
-        "rate_limit": 150,
-        "crawl_depth": 3,
-        "wordlist": "/opt/wordlists/common.txt"
-    }
     """
     try:
         target_url = request.get('target_url')
@@ -760,6 +822,283 @@ async def get_statistics(db: Session = Depends(get_db)):
     except Exception as e:
         logger.error(f"Failed to retrieve statistics: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to retrieve statistics: {str(e)}")
+
+
+# ==================== VULNERABILITY SCANNING ENDPOINTS ====================
+
+from src.controllers.vuln_scanner import (
+    run_vulnerability_scan,
+    get_vuln_scans_by_target,
+    get_vuln_scans_by_domain,
+    get_findings_by_severity,
+    get_findings_by_scan,
+    get_vuln_statistics,
+    update_finding_status
+)
+
+class VulnScanRequest(BaseModel):
+    target_url: str
+    templates: Optional[List[str]] = None
+    concurrency: int = Field(10, ge=1, le=50)
+    timeout: int = Field(300, ge=30, le=600)
+    rate_limit: int = Field(150, ge=10, le=500)
+    follow_redirects: bool = True
+    verify_ssl: bool = False
+    save_to_db: bool = Field(True, description="Save results to database")
+    scan_type: str = Field("quick", description="Scan type: quick, full, custom")
+
+class VulnScanResponse(BaseModel):
+    scanner: str
+    target: str
+    scan_id: str
+    vulnerabilities: List[Dict]
+    total_vulns: int
+    critical_count: int
+    high_count: int
+    medium_count: int
+    low_count: int
+    info_count: int
+    scan_duration: str
+    status: str
+    error: Optional[str] = None
+    db_id: Optional[int] = None
+
+class BatchVulnScanRequest(BaseModel):
+    targets: List[str]
+    scanners: List[str] = Field(["nuclei"], description="List of scanners to run")
+    templates: Optional[List[str]] = None
+    concurrency: int = Field(10, ge=1, le=50)
+    timeout: int = Field(300, ge=30, le=600)
+    save_to_db: bool = True
+
+class FindingUpdateRequest(BaseModel):
+    status: str = Field(..., description="open, confirmed, false_positive, fixed")
+    confirmed: Optional[bool] = None
+    notes: Optional[str] = None
+    confirmed_by: Optional[str] = None
+
+@app.post("/api/v1/vuln-scan/nuclei")
+async def nuclei_scan(request: VulnScanRequest, db: Session = Depends(get_db)):
+    """Run Nuclei vulnerability scanner against a target"""
+    try:
+        result = run_vulnerability_scan(
+            target_url=request.target_url,
+            scanner='nuclei',
+            templates=request.templates,
+            concurrency=request.concurrency,
+            timeout=request.timeout,
+            rate_limit=request.rate_limit,
+            scan_type=request.scan_type,
+            save_to_db=request.save_to_db
+        )
+        return result
+    except Exception as e:
+        logger.error(f"Nuclei scan failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/v1/vuln-scan/nikto")
+async def nikto_scan(request: VulnScanRequest, db: Session = Depends(get_db)):
+    """Run Nikto web server scanner against a target"""
+    try:
+        result = run_vulnerability_scan(
+            target_url=request.target_url,
+            scanner='nikto',
+            concurrency=request.concurrency,
+            timeout=request.timeout,
+            rate_limit=request.rate_limit,
+            scan_type=request.scan_type,
+            save_to_db=request.save_to_db
+        )
+        return result
+    except Exception as e:
+        logger.error(f"Nikto scan failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/v1/vuln-scan/sqlmap")
+async def sqlmap_scan(request: VulnScanRequest, db: Session = Depends(get_db)):
+    """Run SQLMap SQL injection scanner (simulated for safety)"""
+    try:
+        result = run_vulnerability_scan(
+            target_url=request.target_url,
+            scanner='sqlmap',
+            concurrency=request.concurrency,
+            timeout=request.timeout,
+            scan_type=request.scan_type,
+            save_to_db=request.save_to_db
+        )
+        return result
+    except Exception as e:
+        logger.error(f"SQLMap scan failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/v1/vuln-scan/xsstrike")
+async def xsstrike_scan(request: VulnScanRequest, db: Session = Depends(get_db)):
+    """Run XSStrike XSS scanner"""
+    try:
+        result = run_vulnerability_scan(
+            target_url=request.target_url,
+            scanner='xsstrike',
+            concurrency=request.concurrency,
+            timeout=request.timeout,
+            scan_type=request.scan_type,
+            save_to_db=request.save_to_db
+        )
+        return result
+    except Exception as e:
+        logger.error(f"XSStrike scan failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/v1/vuln-scan/wpscan")
+async def wpscan_scan(request: VulnScanRequest, db: Session = Depends(get_db)):
+    """Run WPScan WordPress scanner"""
+    try:
+        result = run_vulnerability_scan(
+            target_url=request.target_url,
+            scanner='wpscan',
+            concurrency=request.concurrency,
+            timeout=request.timeout,
+            scan_type=request.scan_type,
+            save_to_db=request.save_to_db
+        )
+        return result
+    except Exception as e:
+        logger.error(f"WPScan failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/v1/vuln-scan/sslyze")
+async def sslyze_scan(request: VulnScanRequest, db: Session = Depends(get_db)):
+    """Run SSLyze SSL/TLS analyzer"""
+    try:
+        result = run_vulnerability_scan(
+            target_url=request.target_url,
+            scanner='sslyze',
+            concurrency=request.concurrency,
+            timeout=request.timeout,
+            scan_type=request.scan_type,
+            save_to_db=request.save_to_db
+        )
+        return result
+    except Exception as e:
+        logger.error(f"SSLyze scan failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/v1/vuln-scan/batch")
+async def batch_vuln_scan(
+    request: BatchVulnScanRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db)
+):
+    """Run vulnerability scans on multiple targets with multiple scanners"""
+    import uuid
+    batch_id = str(uuid.uuid4())
+    
+    results = []
+    
+    for target in request.targets:
+        for scanner in request.scanners:
+            try:
+                result = run_vulnerability_scan(
+                    target_url=target,
+                    scanner=scanner,
+                    templates=request.templates,
+                    concurrency=request.concurrency,
+                    timeout=request.timeout,
+                    save_to_db=request.save_to_db,
+                    batch_id=batch_id
+                )
+                results.append(result)
+            except Exception as e:
+                logger.error(f"Batch scan failed for {target} with {scanner}: {e}")
+                results.append({
+                    'target': target,
+                    'scanner': scanner,
+                    'status': 'failed',
+                    'error': str(e)
+                })
+    
+    return {
+        'batch_id': batch_id,
+        'total_scans': len(results),
+        'successful': len([r for r in results if r.get('status') == 'completed']),
+        'failed': len([r for r in results if r.get('status') == 'failed']),
+        'results': results
+    }
+
+@app.get("/api/v1/vuln-scan/target/{target:path}")
+async def get_target_vuln_scans(target: str, db: Session = Depends(get_db)):
+    """Get all vulnerability scans for a specific target"""
+    try:
+        scans = get_vuln_scans_by_target(target, db)
+        return scans
+    except Exception as e:
+        logger.error(f"Failed to get vuln scans: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/v1/vuln-scan/domain/{domain}")
+async def get_domain_vuln_scans(domain: str, db: Session = Depends(get_db)):
+    """Get all vulnerability scans for a domain's subdomains"""
+    try:
+        scans = get_vuln_scans_by_domain(domain, db)
+        return scans
+    except Exception as e:
+        logger.error(f"Failed to get domain vuln scans: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/v1/vuln-scan/findings/{scan_id}")
+async def get_scan_findings(scan_id: str, db: Session = Depends(get_db)):
+    """Get all findings for a specific scan"""
+    try:
+        findings = get_findings_by_scan(scan_id, db)
+        return findings
+    except Exception as e:
+        logger.error(f"Failed to get scan findings: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/v1/vuln-scan/findings/severity/{severity}")
+async def get_findings_by_sev(
+    severity: str,
+    limit: int = Query(100, ge=1, le=500),
+    db: Session = Depends(get_db)
+):
+    """Get vulnerability findings by severity level"""
+    try:
+        findings = get_findings_by_severity(severity, db, limit)
+        return findings
+    except Exception as e:
+        logger.error(f"Failed to get findings by severity: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.put("/api/v1/vuln-scan/finding/{finding_id}")
+async def update_finding(
+    finding_id: int,
+    request: FindingUpdateRequest,
+    db: Session = Depends(get_db)
+):
+    """Update the status of a vulnerability finding"""
+    try:
+        result = update_finding_status(
+            finding_id=finding_id,
+            status=request.status,
+            confirmed=request.confirmed,
+            notes=request.notes,
+            confirmed_by=request.confirmed_by,
+            db=db
+        )
+        return result
+    except Exception as e:
+        logger.error(f"Failed to update finding: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/v1/vuln-scan/statistics")
+async def get_vuln_stats(db: Session = Depends(get_db)):
+    """Get overall vulnerability scanning statistics"""
+    try:
+        stats = get_vuln_statistics(db)
+        return stats
+    except Exception as e:
+        logger.error(f"Failed to get vuln statistics: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 if __name__ == "__main__":
     import uvicorn

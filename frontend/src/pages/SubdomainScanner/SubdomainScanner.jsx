@@ -40,6 +40,9 @@ const SubdomainScanner = () => {
   const [dataRestoredFromCache, setDataRestoredFromCache] = useState(false)
   
   const [isScanning, setIsScanning] = useState(false)
+  
+  // Store scan result summary from backend
+  const [scanSummary, setScanSummary] = useState(null)
 
   const queryClient = useQueryClient()
   const progressIntervalRef = useRef(null)
@@ -68,24 +71,25 @@ const SubdomainScanner = () => {
   useEffect(() => {
     if (!hasCheckedCache.current && lastScanDomain) {
       const cachedData = queryClient.getQueryData(['subdomains', lastScanDomain])
-      if (cachedData?.data && cachedData.data.length > 0) {
-        console.log('✅ Found cached data for:', lastScanDomain, '- Count:', cachedData.data.length)
+      if (cachedData && cachedData.length > 0) {
+        console.log('✅ Found cached data for:', lastScanDomain, '- Count:', cachedData.length)
         setDataRestoredFromCache(true)
       }
       hasCheckedCache.current = true
     }
   }, [lastScanDomain, queryClient])
 
-  // Mutation for starting scan - THIS IS THE FIX
-  // The scan completion is now handled here, not in the polling query
+  // Mutation for starting scan
   const scanMutation = useMutation({
     mutationFn: startSubdomainScan,
     onSuccess: (data) => {
       setLastScanDomain(domain)
-      console.log('✅ Scan completed on backend:', data.data)
+      console.log('✅ Scan completed on backend:', data)
+      
+      // Store the scan summary - this contains total_unique_subdomains
+      setScanSummary(data)
       
       // The scan is complete! Backend has finished processing
-      // Stop polling and show results immediately
       setScanProgress(100)
       setCompletedTools(enabledTools)
       setIsScanning(false)
@@ -105,6 +109,7 @@ const SubdomainScanner = () => {
       setScanProgress(0)
       setIsCancelled(false)
       setIsScanning(false)
+      setScanSummary(null)
       
       // Clear the interval on error
       if (progressIntervalRef.current) {
@@ -159,12 +164,12 @@ const SubdomainScanner = () => {
     }
   }, [isScanning, isCancelled, enabledTools, totalTools])
 
-  // Query for fetching results - no longer handles scan completion
-  const { data: subdomains, isLoading: isLoadingResults, refetch, dataUpdatedAt, isFetching } = useQuery({
+  // Query for fetching results
+  const { data: subdomainsResponse, isLoading: isLoadingResults, refetch, dataUpdatedAt, isFetching } = useQuery({
     queryKey: ['subdomains', lastScanDomain],
     queryFn: () => getSubdomains(lastScanDomain),
     enabled: !!lastScanDomain && !isCancelled,
-    refetchInterval: false, // No polling needed - mutation handles scan completion
+    refetchInterval: false,
     refetchOnMount: false,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
@@ -172,10 +177,10 @@ const SubdomainScanner = () => {
     cacheTime: 1000 * 60 * 60 * 24,
     keepPreviousData: true,
     onSuccess: (data) => {
-      console.log('📥 Query onSuccess - Subdomains:', data?.data?.length || 0)
+      console.log('📥 Query onSuccess - Subdomains:', data?.length || 0)
       
       // Only update cache indicator when not scanning
-      if (data?.data && data.data.length > 0 && !isScanning && !isFetching) {
+      if (data && data.length > 0 && !isScanning && !isFetching) {
         setDataRestoredFromCache(true)
       }
     },
@@ -184,10 +189,34 @@ const SubdomainScanner = () => {
     }
   })
 
+  // Handle different response formats from the API
+  const results = useMemo(() => {
+    if (!subdomainsResponse) return []
+    
+    // If it's already an array, use it directly
+    if (Array.isArray(subdomainsResponse)) {
+      return subdomainsResponse
+    }
+    
+    // If it has a 'data' property that's an array
+    if (subdomainsResponse.data && Array.isArray(subdomainsResponse.data)) {
+      return subdomainsResponse.data
+    }
+    
+    // If it has a 'subdomains' property that's an array
+    if (subdomainsResponse.subdomains && Array.isArray(subdomainsResponse.subdomains)) {
+      return subdomainsResponse.subdomains
+    }
+    
+    console.warn('Unexpected subdomains response format:', subdomainsResponse)
+    return []
+  }, [subdomainsResponse])
+
   // Reset cache indicator when starting new scan
   useEffect(() => {
     if (isScanning) {
       setDataRestoredFromCache(false)
+      setScanSummary(null)
     }
   }, [isScanning])
 
@@ -202,6 +231,7 @@ const SubdomainScanner = () => {
     setIsScanning(true)
     setCompletedTools([])
     setScanningTools([])
+    setScanSummary(null)
 
     // Start scan
     scanMutation.mutate({
@@ -216,6 +246,7 @@ const SubdomainScanner = () => {
     setScanProgress(0)
     setScanningTools([])
     setCompletedTools([])
+    setScanSummary(null)
     
     if (progressIntervalRef.current) {
       clearInterval(progressIntervalRef.current)
@@ -230,17 +261,16 @@ const SubdomainScanner = () => {
     setScanProgress(0)
     setIsCancelled(false)
     setIsScanning(false)
+    setScanSummary(null)
     localStorage.removeItem(STORAGE_KEYS.LAST_SCAN_DOMAIN)
     queryClient.removeQueries(['subdomains'])
   }
-
-  const results = subdomains?.data || []
 
   // Export to CSV
   const exportToCSV = () => {
     const headers = ['Subdomain', 'Status', 'IP Address', 'HTTP Code']
     const rows = results.map(s => [
-      s.full_domain,
+      s.full_domain || s.subdomain,
       s.is_active ? 'Active' : 'Inactive',
       s.ip_address || 'N/A',
       s.status_code || 'N/A'
@@ -262,18 +292,21 @@ const SubdomainScanner = () => {
 
   // Copy all subdomains to clipboard
   const copyToClipboard = () => {
-    const text = results.map(s => s.full_domain).join('\n')
+    const text = results.map(s => s.full_domain || s.subdomain).join('\n')
     navigator.clipboard.writeText(text)
       .then(() => alert('Copied to clipboard!'))
       .catch(err => console.error('Failed to copy:', err))
   }
 
-  // Statistics
-  const stats = {
-    total: results.length,
-    active: results.filter(s => s.is_active).length,
-    inactive: results.filter(s => !s.is_active).length
-  }
+  // Statistics - use scan summary if available, otherwise use results
+  const stats = useMemo(() => {
+    // If we have scan summary from backend, use total_unique_subdomains
+    const total = scanSummary?.total_unique_subdomains || results.length
+    const active = results.filter(s => s.is_active).length
+    const inactive = results.filter(s => !s.is_active).length
+    
+    return { total, active, inactive }
+  }, [results, scanSummary])
 
   return (
     <div className="p-8 space-y-6">
@@ -497,8 +530,16 @@ const SubdomainScanner = () => {
             <div>
               <p className="text-green-400 font-medium">Scan completed successfully!</p>
               <p className="text-green-400/70 text-sm mt-1">
-                Found {results.length} subdomain{results.length !== 1 ? 's' : ''} for {lastScanDomain}
+                Found {scanSummary?.total_unique_subdomains || results.length} subdomain{(scanSummary?.total_unique_subdomains || results.length) !== 1 ? 's' : ''} for {lastScanDomain}
+                {scanSummary?.new_subdomains_saved !== undefined && scanSummary.new_subdomains_saved > 0 && (
+                  <span className="ml-2">({scanSummary.new_subdomains_saved} new)</span>
+                )}
               </p>
+              {scanSummary?.tool_results && (
+                <p className="text-green-400/50 text-xs mt-1">
+                  Tool results: {Object.entries(scanSummary.tool_results).map(([tool, count]) => `${tool}: ${count}`).join(', ')}
+                </p>
+              )}
             </div>
           </div>
         )}
@@ -521,7 +562,7 @@ const SubdomainScanner = () => {
             <div>
               <p className="text-red-400 font-medium">Scan failed</p>
               <p className="text-red-400/70 text-sm mt-1">
-                {scanMutation.error?.response?.data?.detail || 'Unknown error occurred'}
+                {scanMutation.error?.response?.data?.detail || scanMutation.error?.message || 'Unknown error occurred'}
               </p>
             </div>
           </div>
@@ -557,7 +598,7 @@ const SubdomainScanner = () => {
             <div>
               <h3 className="text-xl font-semibold text-white flex items-center gap-2">
                 Results for {lastScanDomain}
-                {isLoadingResults && (
+                {(isLoadingResults || isFetching) && (
                   <Loader className="animate-spin text-cyber-blue" size={20} />
                 )}
               </h3>
@@ -576,16 +617,33 @@ const SubdomainScanner = () => {
           </div>
 
           {/* Results Summary */}
-          {results.length === 0 ? (
+          {results.length === 0 && !isLoadingResults ? (
             <div className="text-center py-16">
               <Globe className="mx-auto text-gray-600 mb-4" size={64} />
-              <h3 className="text-xl font-semibold text-white mb-2">No subdomains found yet</h3>
-              <p className="text-gray-400">Start a scan to discover subdomains</p>
-              {isLoadingResults && (
+              <h3 className="text-xl font-semibold text-white mb-2">
+                {scanSummary?.total_unique_subdomains > 0 
+                  ? `${scanSummary.total_unique_subdomains} subdomains found - Loading results...` 
+                  : 'No subdomains found yet'}
+              </h3>
+              <p className="text-gray-400">
+                {scanSummary?.total_unique_subdomains > 0 
+                  ? 'Please wait while we fetch the results from the database'
+                  : 'Start a scan to discover subdomains'}
+              </p>
+              {(isLoadingResults || isFetching) && (
                 <div className="mt-4 flex items-center justify-center gap-2 text-cyber-blue">
                   <Loader className="animate-spin" size={16} />
                   <span className="text-sm">Loading...</span>
                 </div>
+              )}
+              {scanSummary?.total_unique_subdomains > 0 && !isLoadingResults && (
+                <button
+                  onClick={() => refetch()}
+                  className="mt-4 px-4 py-2 bg-cyber-blue/20 border border-cyber-blue/50 rounded-lg text-cyber-blue hover:bg-cyber-blue/30 transition-all"
+                >
+                  <RefreshCw size={16} className="inline mr-2" />
+                  Refresh Results
+                </button>
               )}
             </div>
           ) : (
@@ -599,7 +657,7 @@ const SubdomainScanner = () => {
                 <div className="bg-dark-200 border border-green-500/20 rounded-lg p-6 text-center">
                   <div className="text-3xl font-bold text-green-400 mb-2">{stats.active}</div>
                   <div className="text-sm text-gray-400">Active Hosts</div>
-                  {stats.active > 0 && (
+                  {stats.active > 0 && stats.total > 0 && (
                     <div className="text-xs text-green-400/70 mt-1">
                       {((stats.active / stats.total) * 100).toFixed(1)}% success rate
                     </div>

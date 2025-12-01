@@ -93,24 +93,20 @@ export const getScanResults = async (scanId) => {
 
 
 // ============================================================================
-// HTTP PROBING (PLACEHOLDER - NOT IMPLEMENTED IN BACKEND YET)
+// HTTP PROBING - FIXED IMPLEMENTATION
 // ============================================================================
 
 /**
- * Probe hosts with progress tracking (PLACEHOLDER - implement backend endpoint)
+ * Probe hosts with progress tracking via backend API
  * @param {string[]} subdomains - List of subdomains to probe
  * @param {function} onProgress - Progress callback function
- * @param {number} batchSize - Batch size (default: 20)
+ * @param {number} concurrency - Concurrency level (default: 10)
  */
-export const probeHostsWithProgress = async (subdomains, onProgress, batchSize = 20) => {
-  console.warn('probeHostsWithProgress: Backend endpoint not implemented yet')
-  
-  // Return mock data for now
-  return []
-  
-  /* TODO: Implement this endpoint in backend
+export const probeHostsWithProgress = async (subdomains, onProgress, concurrency = 10) => {
+  const batchSize = Math.min(concurrency, 20)
   const batches = []
   
+  // Split into batches
   for (let i = 0; i < subdomains.length; i += batchSize) {
     batches.push(subdomains.slice(i, i + batchSize))
   }
@@ -120,92 +116,117 @@ export const probeHostsWithProgress = async (subdomains, onProgress, batchSize =
   for (let i = 0; i < batches.length; i++) {
     const batch = batches[i]
     
-    // Probe this batch (backend endpoint needed)
-    const response = await api.post('/api/v1/probe-hosts', {
-      subdomains: batch,
-      max_concurrent: batchSize,
-      timeout: 10,
-      verify_ssl: false
-    })
-    const batchResults = response.data.results || []
-    
-    allResults.push(...batchResults)
-    
-    if (onProgress) {
-      onProgress({
-        completed: Math.min((i + 1) * batchSize, subdomains.length),
-        total: subdomains.length,
-        currentBatch: i + 1,
-        totalBatches: batches.length,
-        results: allResults,
-        stats: {
-          active: allResults.filter(r => r.is_active).length,
-          inactive: allResults.filter(r => !r.is_active).length
-        }
+    try {
+      // Call backend API for this batch
+      const response = await api.post('/api/v1/probe-hosts', {
+        subdomains: batch,
+        concurrency: batchSize,
+        timeout: 10
       })
+      
+      const batchResults = response.data.results || []
+      allResults.push(...batchResults)
+      
+      // Call progress callback
+      if (onProgress) {
+        onProgress({
+          completed: Math.min((i + 1) * batchSize, subdomains.length),
+          total: subdomains.length,
+          currentBatch: i + 1,
+          totalBatches: batches.length,
+          results: allResults,
+          stats: {
+            active: allResults.filter(r => r.is_active).length,
+            inactive: allResults.filter(r => !r.is_active).length
+          }
+        })
+      }
+      
+    } catch (error) {
+      console.error(`Batch ${i + 1} failed:`, error)
+      // Continue with next batch even if one fails
     }
   }
   
   return allResults
-  */
 }
 
 /**
- * Probe hosts through backend proxy (PLACEHOLDER)
+ * Probe hosts through backend (single batch)
  * @param {string[]} subdomains - List of subdomains to probe
- * @param {number} maxConcurrent - Max concurrent requests
+ * @param {number} concurrency - Max concurrent requests
  * @param {number} timeout - Timeout in seconds
  */
-export const probeHosts = async (subdomains, maxConcurrent = 10, timeout = 10) => {
-  console.warn('probeHosts: Backend endpoint not implemented yet')
-  return { results: [] }
-  
-  /* TODO: Implement this endpoint in backend
+export const probeHosts = async (subdomains, concurrency = 10, timeout = 10) => {
   try {
     const response = await api.post('/api/v1/probe-hosts', {
       subdomains: subdomains,
-      max_concurrent: maxConcurrent,
-      timeout: timeout,
-      verify_ssl: false
+      concurrency: concurrency,
+      timeout: timeout
     })
     return response.data
   } catch (error) {
     console.error('Error probing hosts:', error)
     throw error
   }
-  */
 }
 
 /**
- * Quick probe for a single host (PLACEHOLDER)
+ * Quick probe for a single host
  */
 export const quickProbe = async (subdomain, protocols = ['https', 'http']) => {
-  console.warn('quickProbe: Backend endpoint not implemented yet')
-  return {}
+  try {
+    const response = await api.post('/api/v1/probe-hosts', {
+      subdomains: [subdomain],
+      concurrency: 1,
+      timeout: 10
+    })
+    return response.data.results?.[0] || {}
+  } catch (error) {
+    console.error('Error in quick probe:', error)
+    throw error
+  }
 }
 
 /**
- * Probe all subdomains for a domain (PLACEHOLDER)
+ * Probe all subdomains for a domain
  */
 export const probeDomain = async (domain, concurrency = 10) => {
-  console.warn('probeDomain: Backend endpoint not implemented yet')
-  return {}
+  try {
+    // First get all subdomains for the domain
+    const subdomains = await getSubdomains(domain)
+    const subdomainList = subdomains?.data || subdomains || []
+    
+    if (subdomainList.length === 0) {
+      return { results: [], total: 0, active: 0, inactive: 0 }
+    }
+    
+    // Extract subdomain names
+    const names = subdomainList.map(s => s.full_domain || s.subdomain || s)
+    
+    // Probe them
+    return await probeHosts(names, concurrency)
+  } catch (error) {
+    console.error('Error probing domain:', error)
+    throw error
+  }
 }
 
 /**
- * Probe scan results by scan ID (PLACEHOLDER)
+ * Probe with batching endpoint
  */
-export const probeScan = async (scanId, concurrency = 10) => {
-  console.warn('probeScan: Backend endpoint not implemented yet')
-  return {}
-}
-
-/**
- * Probe with batching endpoint (PLACEHOLDER)
- */
-export const probeHostsBatched = async (subdomains, maxConcurrent = 10) => {
-  console.warn('probeHostsBatched: Backend endpoint not implemented yet')
-  return { results: [] }
+export const probeHostsBatched = async (subdomains, concurrency = 10) => {
+  try {
+    const response = await api.post('/api/v1/probe-hosts/batch', {
+      subdomains: subdomains,
+      concurrency: concurrency,
+      timeout: 10
+    })
+    return response.data
+  } catch (error) {
+    console.error('Error in batched probe:', error)
+    throw error
+  }
 }
 
 
@@ -368,11 +389,16 @@ export const getStats = async () => {
 }
 
 /**
- * Get domain statistics (PLACEHOLDER)
+ * Get domain statistics
  */
 export const getDomainStats = async (domain) => {
-  console.warn('getDomainStats: Backend endpoint not implemented yet')
-  return {}
+  try {
+    const response = await api.get(`/api/v1/visualization/${domain}/attack-surface`)
+    return response.data
+  } catch (error) {
+    console.error('Error fetching domain stats:', error)
+    throw error
+  }
 }
 
 
@@ -468,23 +494,40 @@ export const getTargetValidation = async (subdomain) => {
 
 
 // ============================================================================
-// EXPORT (PLACEHOLDER)
+// EXPORT
 // ============================================================================
 
 /**
- * Export results (PLACEHOLDER)
+ * Export results
  */
 export const exportResults = async (domain, format = 'json') => {
-  console.warn('exportResults: Backend endpoint not implemented yet')
-  return {}
+  try {
+    const response = await api.get(`/api/v1/visualization/${domain}`)
+    return response.data
+  } catch (error) {
+    console.error('Error exporting results:', error)
+    throw error
+  }
 }
 
 /**
- * Download export (PLACEHOLDER)
+ * Download export
  */
 export const downloadExport = async (domain, format = 'json') => {
-  console.warn('downloadExport: Backend endpoint not implemented yet')
-  return false
+  try {
+    const data = await exportResults(domain, format)
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+    const url = window.URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${domain}-export-${new Date().toISOString().split('T')[0]}.json`
+    a.click()
+    window.URL.revokeObjectURL(url)
+    return true
+  } catch (error) {
+    console.error('Error downloading export:', error)
+    return false
+  }
 }
 
 

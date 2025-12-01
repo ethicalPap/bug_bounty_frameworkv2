@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { getSubdomains, probeHostsWithProgress } from '../../api/client'
 import { Activity, Play, CheckCircle, XCircle, ExternalLink, Loader, Download, Copy, RefreshCw, AlertTriangle, X, Globe } from 'lucide-react'
@@ -40,7 +40,7 @@ const LiveHosts = () => {
     }
   }, [selectedDomain])
 
-  // Fetch available domains from subdomain scanner
+  // Fetch available domains from subdomain scanner cache
   useEffect(() => {
     const fetchAvailableDomains = async () => {
       try {
@@ -48,22 +48,68 @@ const LiveHosts = () => {
         const queryCache = queryClient.getQueryCache()
         const allQueries = queryCache.getAll()
         
+        console.log('🔍 Looking for cached subdomain queries...')
+        
         const domains = allQueries
-          .filter(query => query.queryKey[0] === 'subdomains' && query.state.data?.data?.length > 0)
+          .filter(query => {
+            if (query.queryKey[0] !== 'subdomains') return false
+            
+            const data = query.state.data
+            
+            // Handle different response formats:
+            // 1. Direct array: [...]
+            // 2. Object with data property: { data: [...] }
+            // 3. Object with subdomains property: { subdomains: [...] }
+            
+            if (Array.isArray(data) && data.length > 0) {
+              console.log(`✅ Found domain ${query.queryKey[1]} with ${data.length} subdomains (array format)`)
+              return true
+            }
+            
+            if (data?.data && Array.isArray(data.data) && data.data.length > 0) {
+              console.log(`✅ Found domain ${query.queryKey[1]} with ${data.data.length} subdomains (data.data format)`)
+              return true
+            }
+            
+            if (data?.subdomains && Array.isArray(data.subdomains) && data.subdomains.length > 0) {
+              console.log(`✅ Found domain ${query.queryKey[1]} with ${data.subdomains.length} subdomains (subdomains format)`)
+              return true
+            }
+            
+            return false
+          })
           .map(query => query.queryKey[1])
           .filter(Boolean)
         
+        console.log('📋 Available domains:', domains)
         setAvailableDomains([...new Set(domains)])
+        
+        // Auto-select if we have a saved domain or only one available
+        if (domains.length > 0 && !selectedDomain) {
+          const savedDomain = localStorage.getItem(STORAGE_KEYS.LIVE_HOSTS_DOMAIN)
+          if (savedDomain && domains.includes(savedDomain)) {
+            setSelectedDomain(savedDomain)
+          } else {
+            setSelectedDomain(domains[0])
+          }
+        }
       } catch (error) {
         console.error('Failed to fetch domains:', error)
       }
     }
 
     fetchAvailableDomains()
-  }, [queryClient])
+    
+    // Re-check when query cache changes
+    const unsubscribe = queryClient.getQueryCache().subscribe(() => {
+      fetchAvailableDomains()
+    })
+    
+    return () => unsubscribe()
+  }, [queryClient, selectedDomain])
 
   // Query for fetching subdomains
-  const { data: subdomains, isLoading: isLoadingSubdomains } = useQuery({
+  const { data: subdomainsResponse, isLoading: isLoadingSubdomains } = useQuery({
     queryKey: ['subdomains', selectedDomain],
     queryFn: () => getSubdomains(selectedDomain),
     enabled: !!selectedDomain,
@@ -71,9 +117,30 @@ const LiveHosts = () => {
     cacheTime: 1000 * 60 * 60 * 24,
   })
 
-  const subdomainsList = subdomains?.data || []
+  // Handle different response formats for subdomains list
+  const subdomainsList = useMemo(() => {
+    if (!subdomainsResponse) return []
+    
+    // If it's already an array, use it directly
+    if (Array.isArray(subdomainsResponse)) {
+      return subdomainsResponse
+    }
+    
+    // If it has a 'data' property that's an array
+    if (subdomainsResponse.data && Array.isArray(subdomainsResponse.data)) {
+      return subdomainsResponse.data
+    }
+    
+    // If it has a 'subdomains' property that's an array
+    if (subdomainsResponse.subdomains && Array.isArray(subdomainsResponse.subdomains)) {
+      return subdomainsResponse.subdomains
+    }
+    
+    console.warn('Unexpected subdomains response format:', subdomainsResponse)
+    return []
+  }, [subdomainsResponse])
 
-  // ✅ NEW: Start probing using backend API (NO CORS!)
+  // Start probing using backend API
   const startProbing = async () => {
     if (!selectedDomain || subdomainsList.length === 0 || isProbing) return
 
@@ -88,7 +155,7 @@ const LiveHosts = () => {
 
       console.log(`🚀 Starting probe for ${subdomainNames.length} subdomains via backend API`)
 
-      // ✅ Use backend API - NO CORS ERRORS!
+      // Use backend API
       const results = await probeHostsWithProgress(
         subdomainNames,
         (progressData) => {
@@ -107,7 +174,7 @@ const LiveHosts = () => {
             `Inactive: ${progressData.stats.inactive}`
           )
         },
-        concurrency // Use user-selected concurrency
+        concurrency
       )
 
       // Final update
@@ -132,10 +199,9 @@ const LiveHosts = () => {
 
   // Cancel probing
   const cancelProbing = () => {
-    // Note: We can't cancel backend requests easily, but we can stop updating the UI
     setIsProbing(false)
     setCurrentlyProbing('')
-    console.log('⚠️ Probing cancelled by user (backend may still be processing)')
+    console.log('⚠️ Probing cancelled by user')
   }
 
   // Clear results
@@ -145,12 +211,15 @@ const LiveHosts = () => {
     localStorage.removeItem(STORAGE_KEYS.LIVE_HOSTS_RESULTS)
   }
 
-  // Export to CSV - exports all results (Host and Status only)
+  // Export to CSV
   const exportToCSV = () => {
-    const headers = ['Host', 'Status']
+    const headers = ['Host', 'Status', 'Protocol', 'Status Code', 'Response Time']
     const rows = probeResults.map(r => [
       r.subdomain,
-      r.is_active ? 'Active' : 'Inactive'
+      r.is_active ? 'Active' : 'Inactive',
+      r.protocol || 'N/A',
+      r.status_code || 'N/A',
+      r.response_time ? `${r.response_time}ms` : 'N/A'
     ])
 
     const csvContent = [
@@ -284,13 +353,21 @@ const LiveHosts = () => {
               </div>
             </div>
           )}
+          
+          {/* Loading indicator for subdomains */}
+          {selectedDomain && isLoadingSubdomains && (
+            <div className="flex items-center justify-center p-4 bg-dark-200 border border-dark-50 rounded-lg">
+              <Loader className="animate-spin text-cyber-green mr-2" size={20} />
+              <span className="text-gray-400">Loading subdomains...</span>
+            </div>
+          )}
 
           {/* Action Buttons */}
           <div className="flex gap-3">
             {!isProbing ? (
               <button
                 onClick={startProbing}
-                disabled={!selectedDomain || subdomainsList.length === 0}
+                disabled={!selectedDomain || subdomainsList.length === 0 || isLoadingSubdomains}
                 className="w-full py-3 px-6 bg-gradient-to-r from-cyber-green to-cyber-blue rounded-lg font-medium text-white hover:from-cyber-green/90 hover:to-cyber-blue/90 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2"
               >
                 <Play size={20} />
@@ -436,9 +513,12 @@ const LiveHosts = () => {
                   <div className="flex gap-2 flex-wrap">
                     <span className="px-2 py-1 bg-dark-200 rounded text-xs text-white">Host</span>
                     <span className="px-2 py-1 bg-dark-200 rounded text-xs text-white">Status</span>
+                    <span className="px-2 py-1 bg-dark-200 rounded text-xs text-white">Protocol</span>
+                    <span className="px-2 py-1 bg-dark-200 rounded text-xs text-white">Status Code</span>
+                    <span className="px-2 py-1 bg-dark-200 rounded text-xs text-white">Response Time</span>
                   </div>
                   <div className="text-xs text-gray-500 mt-2">
-                    Simple format for easy integration with other tools
+                    Complete format for security analysis
                   </div>
                 </div>
               </div>
