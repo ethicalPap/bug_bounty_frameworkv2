@@ -41,58 +41,35 @@ const LiveHosts = () => {
   }, [selectedDomain])
 
   // Fetch available domains from subdomain scanner cache
+  // FIX: Removed selectedDomain from dependencies to prevent infinite loop
   useEffect(() => {
-    const fetchAvailableDomains = async () => {
+    let timeout = null
+    
+    const fetchAvailableDomains = () => {
       try {
-        // Get all cached subdomain queries
         const queryCache = queryClient.getQueryCache()
         const allQueries = queryCache.getAll()
-        
-        console.log('🔍 Looking for cached subdomain queries...')
         
         const domains = allQueries
           .filter(query => {
             if (query.queryKey[0] !== 'subdomains') return false
-            
             const data = query.state.data
-            
-            // Handle different response formats:
-            // 1. Direct array: [...]
-            // 2. Object with data property: { data: [...] }
-            // 3. Object with subdomains property: { subdomains: [...] }
-            
-            if (Array.isArray(data) && data.length > 0) {
-              console.log(`✅ Found domain ${query.queryKey[1]} with ${data.length} subdomains (array format)`)
-              return true
-            }
-            
-            if (data?.data && Array.isArray(data.data) && data.data.length > 0) {
-              console.log(`✅ Found domain ${query.queryKey[1]} with ${data.data.length} subdomains (data.data format)`)
-              return true
-            }
-            
-            if (data?.subdomains && Array.isArray(data.subdomains) && data.subdomains.length > 0) {
-              console.log(`✅ Found domain ${query.queryKey[1]} with ${data.subdomains.length} subdomains (subdomains format)`)
-              return true
-            }
-            
+            if (Array.isArray(data) && data.length > 0) return true
+            if (data?.data && Array.isArray(data.data) && data.data.length > 0) return true
+            if (data?.subdomains && Array.isArray(data.subdomains) && data.subdomains.length > 0) return true
             return false
           })
           .map(query => query.queryKey[1])
           .filter(Boolean)
         
-        console.log('📋 Available domains:', domains)
-        setAvailableDomains([...new Set(domains)])
+        const uniqueDomains = [...new Set(domains)]
         
-        // Auto-select if we have a saved domain or only one available
-        if (domains.length > 0 && !selectedDomain) {
-          const savedDomain = localStorage.getItem(STORAGE_KEYS.LIVE_HOSTS_DOMAIN)
-          if (savedDomain && domains.includes(savedDomain)) {
-            setSelectedDomain(savedDomain)
-          } else {
-            setSelectedDomain(domains[0])
-          }
-        }
+        // Only update if actually changed to prevent unnecessary renders
+        setAvailableDomains(prev => {
+          if (JSON.stringify(prev) === JSON.stringify(uniqueDomains)) return prev
+          console.log('📋 Available domains:', uniqueDomains)
+          return uniqueDomains
+        })
       } catch (error) {
         console.error('Failed to fetch domains:', error)
       }
@@ -100,13 +77,29 @@ const LiveHosts = () => {
 
     fetchAvailableDomains()
     
-    // Re-check when query cache changes
+    // Debounced subscription to prevent rapid re-renders
     const unsubscribe = queryClient.getQueryCache().subscribe(() => {
-      fetchAvailableDomains()
+      if (timeout) clearTimeout(timeout)
+      timeout = setTimeout(fetchAvailableDomains, 500)
     })
     
-    return () => unsubscribe()
-  }, [queryClient, selectedDomain])
+    return () => {
+      unsubscribe()
+      if (timeout) clearTimeout(timeout)
+    }
+  }, [queryClient]) // Removed selectedDomain from deps!
+
+  // Auto-select domain - SEPARATE effect to avoid infinite loop
+  useEffect(() => {
+    if (availableDomains.length > 0 && !selectedDomain) {
+      const savedDomain = localStorage.getItem(STORAGE_KEYS.LIVE_HOSTS_DOMAIN)
+      if (savedDomain && availableDomains.includes(savedDomain)) {
+        setSelectedDomain(savedDomain)
+      } else {
+        setSelectedDomain(availableDomains[0])
+      }
+    }
+  }, [availableDomains]) // Only runs when availableDomains changes, not selectedDomain
 
   // Query for fetching subdomains
   const { data: subdomainsResponse, isLoading: isLoadingSubdomains } = useQuery({

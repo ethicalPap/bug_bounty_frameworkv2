@@ -1,638 +1,521 @@
-import { useState, useEffect, useMemo } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
-import { 
-  Download, 
-  FileText, 
-  Globe, 
-  Activity, 
-  Search, 
-  Network,
-  CheckCircle,
-  AlertCircle,
-  Database,
+/**
+ * Exports Page
+ * Export all reconnaissance data with proper subdomain relationships
+ * Supports JSON, CSV, and text formats with hierarchical structure
+ */
+
+import { useState, useMemo } from 'react'
+import {
+  Download,
   FileJson,
-  FileSpreadsheet,
-  Settings,
-  Package
+  FileText,
+  Table,
+  Globe,
+  Database,
+  Link as LinkIcon,
+  FolderOpen,
+  FileCode,
+  CheckCircle,
+  Copy,
+  Check,
+  ChevronDown,
+  ChevronRight,
+  Eye
 } from 'lucide-react'
+import { useContentDiscovery, CONTENT_TYPES } from '../../stores/ContentDiscoveryStore'
 
-const STORAGE_KEYS = {
-  SUBDOMAIN_RESULTS: 'subdomain_scanner_last_domain',
-  LIVE_HOSTS_RESULTS: 'live_hosts_results',
-  PORT_SCAN_RESULTS: 'port_scan_results',
-  CONTENT_DISCOVERY_RESULTS: 'content_discovery_results',
-}
-
-const Exports = () => {
-  const queryClient = useQueryClient()
-  const [selectedDomain, setSelectedDomain] = useState('')
-  const [availableDomains, setAvailableDomains] = useState([])
-  const [exportFormat, setExportFormat] = useState('json')
+export default function Exports() {
+  const { items, stats, uniqueSubdomains } = useContentDiscovery()
   
-  // Export options
-  const [exportOptions, setExportOptions] = useState({
-    includeSubdomains: true,
-    includeLiveHosts: true,
-    includePortScans: true,
-    includeContentDiscovery: true,
-    includeMetadata: true,
-    includeTimestamps: true,
-    includeRelationships: true
-  })
-
-  // Fetch available domains
-  useEffect(() => {
-    const queryCache = queryClient.getQueryCache()
-    const allQueries = queryCache.getAll()
+  const [selectedFormat, setSelectedFormat] = useState('json')
+  const [selectedScope, setSelectedScope] = useState('all')
+  const [includeMetadata, setIncludeMetadata] = useState(true)
+  const [groupBySubdomain, setGroupBySubdomain] = useState(true)
+  const [exportSuccess, setExportSuccess] = useState(false)
+  const [copiedPreview, setCopiedPreview] = useState(false)
+  const [showMapping, setShowMapping] = useState(true)
+  
+  // Build the output mapping structure
+  const outputMapping = useMemo(() => {
+    const mapping = {
+      metadata: {
+        exported_at: new Date().toISOString(),
+        total_items: items.length,
+        total_subdomains: uniqueSubdomains.length,
+        content_types: {
+          apis: stats.apis || 0,
+          endpoints: stats.endpoints || 0,
+          directories: stats.directories || 0,
+          javascript: stats.javascript || 0
+        },
+        interesting_count: stats.interesting || 0
+      },
+      subdomains: {}
+    }
     
-    const domains = allQueries
-      .filter(query => query.queryKey[0] === 'subdomains' && query.state.data?.data?.length > 0)
-      .map(query => query.queryKey[1])
-      .filter(Boolean)
-    
-    const uniqueDomains = [...new Set(domains)]
-    setAvailableDomains(uniqueDomains)
-    
-    if (!selectedDomain && uniqueDomains.length > 0) {
-      setSelectedDomain(uniqueDomains[0])
-    }
-  }, [queryClient, selectedDomain])
-
-  // Get all data with relationships
-  const allData = useMemo(() => {
-    // Subdomains
-    const cachedData = queryClient.getQueryData(['subdomains', selectedDomain])
-    const subdomains = cachedData?.data || []
-
-    // Live Hosts
-    let liveHosts = []
-    try {
-      const saved = localStorage.getItem(STORAGE_KEYS.LIVE_HOSTS_RESULTS)
-      liveHosts = saved ? JSON.parse(saved) : []
-    } catch {
-      liveHosts = []
-    }
-
-    // Port Scans
-    let portScans = []
-    try {
-      const saved = localStorage.getItem(STORAGE_KEYS.PORT_SCAN_RESULTS)
-      portScans = saved ? JSON.parse(saved) : []
-    } catch {
-      portScans = []
-    }
-
-    // Content Discovery
-    let contentDiscovery = []
-    try {
-      const saved = localStorage.getItem(STORAGE_KEYS.CONTENT_DISCOVERY_RESULTS)
-      contentDiscovery = saved ? JSON.parse(saved) : []
-    } catch {
-      contentDiscovery = []
-    }
-
-    // Build relational structure - everything linked to subdomains
-    const subdomainsWithRelations = subdomains.map(subdomain => {
-      const subdomainName = subdomain.full_domain
-
-      // Find related live hosts
-      const relatedLiveHosts = liveHosts.filter(host => 
-        host.subdomain === subdomainName || host.subdomain?.includes(subdomainName)
-      )
-
-      // Find related port scans
-      const relatedPorts = portScans.filter(port =>
-        port.target === subdomainName || 
-        port.target?.includes(subdomainName) ||
-        relatedLiveHosts.some(host => host.ip_address === port.target)
-      )
-
-      // Find related content discovery
-      const relatedEndpoints = contentDiscovery.filter(endpoint =>
-        endpoint.discovered_url?.includes(subdomainName) ||
-        endpoint.base_url?.includes(subdomainName)
-      )
-
-      return {
+    // Group items by subdomain
+    uniqueSubdomains.forEach(subdomain => {
+      const subItems = items.filter(i => i.subdomain === subdomain)
+      
+      mapping.subdomains[subdomain] = {
         subdomain: subdomain,
-        live_hosts: relatedLiveHosts,
-        open_ports: relatedPorts,
-        discovered_endpoints: relatedEndpoints,
-        statistics: {
-          total_live_hosts: relatedLiveHosts.length,
-          active_hosts: relatedLiveHosts.filter(h => h.is_active).length,
-          total_open_ports: relatedPorts.length,
-          total_endpoints: relatedEndpoints.length
+        total_items: subItems.length,
+        content: {
+          apis: subItems
+            .filter(i => i.content_type === 'api')
+            .map(i => ({
+              url: i.discovered_url,
+              status_code: i.status_code,
+              is_interesting: i.is_interesting,
+              tool: i.tool_name,
+              discovered_at: i.created_at
+            })),
+          endpoints: subItems
+            .filter(i => i.content_type === 'endpoint')
+            .map(i => ({
+              url: i.discovered_url,
+              status_code: i.status_code,
+              is_interesting: i.is_interesting,
+              tool: i.tool_name,
+              discovered_at: i.created_at
+            })),
+          directories: subItems
+            .filter(i => i.content_type === 'directory')
+            .map(i => ({
+              url: i.discovered_url,
+              status_code: i.status_code,
+              is_interesting: i.is_interesting,
+              tool: i.tool_name,
+              discovered_at: i.created_at
+            })),
+          javascript: subItems
+            .filter(i => i.content_type === 'javascript')
+            .map(i => ({
+              url: i.discovered_url,
+              status_code: i.status_code,
+              is_interesting: i.is_interesting,
+              tool: i.tool_name,
+              discovered_at: i.created_at
+            }))
+        },
+        stats: {
+          apis: subItems.filter(i => i.content_type === 'api').length,
+          endpoints: subItems.filter(i => i.content_type === 'endpoint').length,
+          directories: subItems.filter(i => i.content_type === 'directory').length,
+          javascript: subItems.filter(i => i.content_type === 'javascript').length,
+          interesting: subItems.filter(i => i.is_interesting).length
         }
       }
     })
-
-    return {
-      raw: {
-        subdomains,
-        liveHosts,
-        portScans,
-        contentDiscovery
-      },
-      relational: subdomainsWithRelations
-    }
-  }, [selectedDomain, queryClient])
-
-  // Statistics
-  const stats = {
-    subdomains: allData.raw.subdomains.length,
-    liveHosts: allData.raw.liveHosts.filter(h => h.is_active).length,
-    ports: allData.raw.portScans.length,
-    endpoints: allData.raw.contentDiscovery.length,
-    lastScan: allData.raw.subdomains[0]?.created_at || null
-  }
-
-  // Main comprehensive export function
-  const handleExport = () => {
-    const timestamp = new Date().toISOString()
-    const dateStr = timestamp.split('T')[0]
-
-    if (exportFormat === 'json') {
-      const exportData = {
-        metadata: exportOptions.includeMetadata ? {
-          domain: selectedDomain,
-          exported_at: timestamp,
-          export_version: '1.0',
-          total_subdomains: stats.subdomains,
-          total_active_hosts: stats.liveHosts,
-          total_open_ports: stats.ports,
-          total_endpoints: stats.endpoints,
-          last_scan_date: stats.lastScan
-        } : undefined,
-
-        // Relational data structure - everything grouped by subdomain
-        reconnaissance: exportOptions.includeRelationships ? allData.relational.map(item => ({
-          subdomain: exportOptions.includeSubdomains ? {
-            full_domain: item.subdomain.full_domain,
-            is_active: item.subdomain.is_active,
-            ip_address: item.subdomain.ip_address,
-            status_code: item.subdomain.status_code,
-            title: item.subdomain.title,
-            server: item.subdomain.server,
-            technologies: item.subdomain.technologies,
-            screenshot_path: item.subdomain.screenshot_path,
-            created_at: exportOptions.includeTimestamps ? item.subdomain.created_at : undefined
-          } : undefined,
-
-          live_hosts: exportOptions.includeLiveHosts ? item.live_hosts.map(host => ({
-            subdomain: host.subdomain,
-            is_active: host.is_active,
-            protocol: host.protocol,
-            status_code: host.status_code,
-            response_time: host.response_time,
-            ip_address: host.ip_address,
-            content_length: host.content_length,
-            server: host.server,
-            checked_at: exportOptions.includeTimestamps ? host.checked_at : undefined
-          })) : undefined,
-
-          open_ports: exportOptions.includePortScans ? item.open_ports.map(port => ({
-            target: port.target,
-            port: port.port,
-            protocol: port.protocol,
-            state: port.state,
-            service: port.service,
-            version: port.version,
-            product: port.product,
-            extra_info: port.extra_info,
-            scanned_at: exportOptions.includeTimestamps ? port.scanned_at : undefined
-          })) : undefined,
-
-          discovered_endpoints: exportOptions.includeContentDiscovery ? item.discovered_endpoints.map(endpoint => ({
-            discovered_url: endpoint.discovered_url,
-            status_code: endpoint.status_code,
-            method: endpoint.method,
-            content_length: endpoint.content_length,
-            redirect_location: endpoint.redirect_location,
-            discovery_type: endpoint.discovery_type,
-            tool_name: endpoint.tool_name,
-            discovered_at: exportOptions.includeTimestamps ? endpoint.discovered_at : undefined
-          })) : undefined,
-
-          statistics: exportOptions.includeMetadata ? item.statistics : undefined
-        })) : undefined,
-
-        // Raw data structure - flat lists
-        raw_data: !exportOptions.includeRelationships ? {
-          subdomains: exportOptions.includeSubdomains ? allData.raw.subdomains : undefined,
-          live_hosts: exportOptions.includeLiveHosts ? allData.raw.liveHosts : undefined,
-          port_scans: exportOptions.includePortScans ? allData.raw.portScans : undefined,
-          content_discovery: exportOptions.includeContentDiscovery ? allData.raw.contentDiscovery : undefined
-        } : undefined
-      }
-
-      // Remove undefined fields
-      const cleanData = JSON.parse(JSON.stringify(exportData))
-
-      const blob = new Blob([JSON.stringify(cleanData, null, 2)], { type: 'application/json' })
-      const url = window.URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `${selectedDomain}-reconnaissance-${dateStr}.json`
-      a.click()
-      window.URL.revokeObjectURL(url)
-    } else if (exportFormat === 'csv') {
-      // CSV export with relational context
-      const csvSections = []
-
-      // Subdomains section
-      if (exportOptions.includeSubdomains && allData.raw.subdomains.length > 0) {
-        csvSections.push('=== SUBDOMAINS ===')
-        csvSections.push('Full Domain,Status,IP Address,HTTP Code,Title,Server,Technologies,Created At')
-        allData.raw.subdomains.forEach(s => {
-          csvSections.push([
-            s.full_domain,
-            s.is_active ? 'Active' : 'Inactive',
-            s.ip_address || 'N/A',
-            s.status_code || 'N/A',
-            `"${(s.title || 'N/A').replace(/"/g, '""')}"`,
-            s.server || 'N/A',
-            `"${(s.technologies?.join(', ') || 'N/A').replace(/"/g, '""')}"`,
-            exportOptions.includeTimestamps ? (s.created_at || 'N/A') : ''
-          ].filter(Boolean).join(','))
-        })
-        csvSections.push('')
-      }
-
-      // Live Hosts section with subdomain context
-      if (exportOptions.includeLiveHosts && allData.raw.liveHosts.length > 0) {
-        csvSections.push('=== LIVE HOSTS ===')
-        csvSections.push('Subdomain,Status,Protocol,HTTP Code,Response Time (ms),IP Address,Server,Checked At')
-        allData.raw.liveHosts.forEach(h => {
-          csvSections.push([
-            h.subdomain,
-            h.is_active ? 'Active' : 'Inactive',
-            h.protocol || 'N/A',
-            h.status_code || 'N/A',
-            h.response_time || 'N/A',
-            h.ip_address || 'N/A',
-            h.server || 'N/A',
-            exportOptions.includeTimestamps ? (h.checked_at || 'N/A') : ''
-          ].filter(Boolean).join(','))
-        })
-        csvSections.push('')
-      }
-
-      // Port Scans section with target context
-      if (exportOptions.includePortScans && allData.raw.portScans.length > 0) {
-        csvSections.push('=== OPEN PORTS ===')
-        csvSections.push('Target,Port,Protocol,State,Service,Version,Product,Extra Info,Scanned At')
-        allData.raw.portScans.forEach(p => {
-          csvSections.push([
-            p.target,
-            p.port,
-            p.protocol,
-            p.state,
-            p.service || 'unknown',
-            p.version || 'N/A',
-            p.product || 'N/A',
-            `"${(p.extra_info || 'N/A').replace(/"/g, '""')}"`,
-            exportOptions.includeTimestamps ? (p.scanned_at || 'N/A') : ''
-          ].filter(Boolean).join(','))
-        })
-        csvSections.push('')
-      }
-
-      // Content Discovery section with URL context
-      if (exportOptions.includeContentDiscovery && allData.raw.contentDiscovery.length > 0) {
-        csvSections.push('=== DISCOVERED ENDPOINTS ===')
-        csvSections.push('URL,Status Code,Method,Content Length,Redirect,Discovery Type,Tool,Discovered At')
-        allData.raw.contentDiscovery.forEach(c => {
-          csvSections.push([
-            c.discovered_url,
-            c.status_code || 'N/A',
-            c.method || 'GET',
-            c.content_length || 'N/A',
-            c.redirect_location || 'N/A',
-            c.discovery_type || 'N/A',
-            c.tool_name || 'N/A',
-            exportOptions.includeTimestamps ? (c.discovered_at || 'N/A') : ''
-          ].filter(Boolean).join(','))
-        })
-        csvSections.push('')
-      }
-
-      // Add metadata header if enabled
-      if (exportOptions.includeMetadata) {
-        csvSections.unshift(
-          '=== METADATA ===',
-          `Domain,${selectedDomain}`,
-          `Exported At,${timestamp}`,
-          `Total Subdomains,${stats.subdomains}`,
-          `Active Hosts,${stats.liveHosts}`,
-          `Open Ports,${stats.ports}`,
-          `Endpoints,${stats.endpoints}`,
-          ''
-        )
-      }
-
-      const csvContent = csvSections.join('\n')
-      const blob = new Blob([csvContent], { type: 'text/csv' })
-      const url = window.URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `${selectedDomain}-reconnaissance-${dateStr}.csv`
-      a.click()
-      window.URL.revokeObjectURL(url)
-    }
-  }
-
-  const toggleOption = (option) => {
-    setExportOptions(prev => ({ ...prev, [option]: !prev[option] }))
-  }
-
-  const hasAnyData = stats.subdomains > 0 || stats.liveHosts > 0 || stats.ports > 0 || stats.endpoints > 0
-
-  if (availableDomains.length === 0) {
-    return (
-      <div className="p-8">
-        <div className="mb-6">
-          <h2 className="text-3xl font-bold text-white flex items-center gap-3">
-            <Download className="text-cyber-blue" />
-            Exports
-          </h2>
-          <p className="text-gray-400 mt-2">Export reconnaissance data with full context</p>
-        </div>
+    
+    return mapping
+  }, [items, uniqueSubdomains, stats])
+  
+  // Generate flat list for CSV export
+  const flatItems = useMemo(() => {
+    return items.map(item => ({
+      subdomain: item.subdomain,
+      content_type: item.content_type,
+      url: item.discovered_url,
+      status_code: item.status_code || '',
+      is_interesting: item.is_interesting ? 'Yes' : 'No',
+      tool: item.tool_name || '',
+      discovered_at: item.created_at || ''
+    }))
+  }, [items])
+  
+  // Generate export data based on format
+  const generateExport = () => {
+    let data, filename, mimeType
+    
+    switch (selectedFormat) {
+      case 'json':
+        data = JSON.stringify(groupBySubdomain ? outputMapping : { items: flatItems }, null, 2)
+        filename = 'content-discovery-export.json'
+        mimeType = 'application/json'
+        break
         
-        <div className="bg-dark-100 border border-dark-50 rounded-xl p-12 text-center">
-          <Database className="mx-auto text-gray-600 mb-4" size={64} />
-          <h3 className="text-xl font-semibold text-white mb-2">No Data Available</h3>
-          <p className="text-gray-400">Run reconnaissance scans to generate exportable data</p>
-        </div>
-      </div>
-    )
+      case 'csv':
+        const headers = ['subdomain', 'content_type', 'url', 'status_code', 'is_interesting', 'tool', 'discovered_at']
+        const csvRows = [
+          headers.join(','),
+          ...flatItems.map(item => 
+            headers.map(h => `"${(item[h] || '').toString().replace(/"/g, '""')}"`).join(',')
+          )
+        ]
+        data = csvRows.join('\n')
+        filename = 'content-discovery-export.csv'
+        mimeType = 'text/csv'
+        break
+        
+      case 'txt':
+        let txtOutput = `# Content Discovery Export\n`
+        txtOutput += `# Generated: ${new Date().toISOString()}\n`
+        txtOutput += `# Total Items: ${items.length}\n\n`
+        
+        uniqueSubdomains.forEach(subdomain => {
+          const subItems = items.filter(i => i.subdomain === subdomain)
+          txtOutput += `\n## ${subdomain} (${subItems.length} items)\n`
+          txtOutput += `${'='.repeat(50)}\n\n`
+          
+          const types = ['api', 'endpoint', 'directory', 'javascript']
+          types.forEach(type => {
+            const typeItems = subItems.filter(i => i.content_type === type)
+            if (typeItems.length > 0) {
+              txtOutput += `### ${type.toUpperCase()}S (${typeItems.length})\n`
+              typeItems.forEach(item => {
+                const marker = item.is_interesting ? '★ ' : '  '
+                txtOutput += `${marker}${item.discovered_url}\n`
+              })
+              txtOutput += '\n'
+            }
+          })
+        })
+        data = txtOutput
+        filename = 'content-discovery-export.txt'
+        mimeType = 'text/plain'
+        break
+        
+      default:
+        return
+    }
+    
+    // Create and trigger download
+    const blob = new Blob([data], { type: mimeType })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+    
+    setExportSuccess(true)
+    setTimeout(() => setExportSuccess(false), 3000)
+  }
+  
+  const copyPreview = () => {
+    const preview = JSON.stringify(outputMapping, null, 2)
+    navigator.clipboard.writeText(preview)
+    setCopiedPreview(true)
+    setTimeout(() => setCopiedPreview(false), 2000)
   }
 
   return (
-    <div className="p-8 space-y-6">
+    <div className="p-6 space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-3xl font-bold text-white flex items-center gap-3">
-            <Download className="text-cyber-blue" />
-            Exports
-          </h2>
-          <p className="text-gray-400 mt-2">Export all reconnaissance data with relationships and context</p>
+          <h1 className="text-2xl font-bold text-white flex items-center gap-3">
+            <div className="p-2 rounded-xl bg-emerald-500/10">
+              <Download size={24} className="text-emerald-400" />
+            </div>
+            Export Data
+          </h1>
+          <p className="text-gray-500 mt-1">
+            Export reconnaissance data with subdomain relationships
+          </p>
         </div>
+        
+        {exportSuccess && (
+          <div className="flex items-center gap-2 px-4 py-2 bg-emerald-500/10 rounded-xl border border-emerald-500/30">
+            <CheckCircle size={16} className="text-emerald-400" />
+            <span className="text-emerald-400 font-medium">Export successful!</span>
+          </div>
+        )}
       </div>
 
-      {/* Domain & Format Selection */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* Domain Selection */}
-        <div className="bg-dark-100 border border-dark-50 rounded-xl p-6">
-          <label className="block text-sm font-medium text-gray-300 mb-3 flex items-center gap-2">
-            <Globe className="text-cyber-blue" size={18} />
-            Target Domain
-          </label>
-          <select
-            value={selectedDomain}
-            onChange={(e) => setSelectedDomain(e.target.value)}
-            className="w-full px-4 py-3 bg-dark-200 border border-dark-50 rounded-lg text-white focus:outline-none focus:border-cyber-blue transition-all"
-          >
-            {availableDomains.map((domain) => (
-              <option key={domain} value={domain}>{domain}</option>
-            ))}
-          </select>
-          <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
-            <div className="bg-dark-200 rounded-lg p-3 border border-dark-50">
-              <div className="text-gray-400 text-xs mb-1">Subdomains</div>
-              <div className="text-xl font-bold text-cyber-blue">{stats.subdomains}</div>
-            </div>
-            <div className="bg-dark-200 rounded-lg p-3 border border-green-500/20">
-              <div className="text-gray-400 text-xs mb-1">Live Hosts</div>
-              <div className="text-xl font-bold text-green-400">{stats.liveHosts}</div>
-            </div>
-            <div className="bg-dark-200 rounded-lg p-3 border border-cyber-pink/20">
-              <div className="text-gray-400 text-xs mb-1">Open Ports</div>
-              <div className="text-xl font-bold text-cyber-pink">{stats.ports}</div>
-            </div>
-            <div className="bg-dark-200 rounded-lg p-3 border border-cyber-purple/20">
-              <div className="text-gray-400 text-xs mb-1">Endpoints</div>
-              <div className="text-xl font-bold text-cyber-purple">{stats.endpoints}</div>
-            </div>
-          </div>
+      {/* Export Summary */}
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+        <div className="bg-[#111111] rounded-xl p-4 border border-[#1f1f1f]">
+          <div className="text-xs text-gray-500 uppercase tracking-wide">Total Items</div>
+          <div className="text-2xl font-bold text-white mt-1">{items.length}</div>
         </div>
-
-        {/* Format Selection */}
-        <div className="bg-dark-100 border border-dark-50 rounded-xl p-6">
-          <label className="block text-sm font-medium text-gray-300 mb-3 flex items-center gap-2">
-            <FileText className="text-cyber-blue" size={18} />
-            Export Format
-          </label>
-          <div className="space-y-3">
-            <button
-              onClick={() => setExportFormat('json')}
-              className={`w-full p-4 rounded-lg border-2 transition-all text-left ${
-                exportFormat === 'json'
-                  ? 'border-cyber-blue bg-cyber-blue/10'
-                  : 'border-dark-50 bg-dark-200 hover:border-cyber-blue/50'
-              }`}
-            >
-              <div className="flex items-center gap-3">
-                <FileJson className={exportFormat === 'json' ? 'text-cyber-blue' : 'text-gray-400'} size={24} />
-                <div>
-                  <div className="text-white font-semibold">JSON Format</div>
-                  <div className="text-xs text-gray-400 mt-1">
-                    Structured data with full relationships. Best for analysis and tool integration.
-                  </div>
-                </div>
-              </div>
-            </button>
-
-            <button
-              onClick={() => setExportFormat('csv')}
-              className={`w-full p-4 rounded-lg border-2 transition-all text-left ${
-                exportFormat === 'csv'
-                  ? 'border-cyber-blue bg-cyber-blue/10'
-                  : 'border-dark-50 bg-dark-200 hover:border-cyber-blue/50'
-              }`}
-            >
-              <div className="flex items-center gap-3">
-                <FileSpreadsheet className={exportFormat === 'csv' ? 'text-cyber-blue' : 'text-gray-400'} size={24} />
-                <div>
-                  <div className="text-white font-semibold">CSV Format</div>
-                  <div className="text-xs text-gray-400 mt-1">
-                    Spreadsheet-compatible with sections. Best for Excel/Sheets analysis.
-                  </div>
-                </div>
-              </div>
-            </button>
-          </div>
+        <div className="bg-[#111111] rounded-xl p-4 border border-[#1f1f1f]">
+          <div className="text-xs text-gray-500 uppercase tracking-wide">Subdomains</div>
+          <div className="text-2xl font-bold text-white mt-1">{uniqueSubdomains.length}</div>
+        </div>
+        <div className="bg-[#111111] rounded-xl p-4 border border-orange-500/30">
+          <div className="text-xs text-gray-500 uppercase tracking-wide">APIs</div>
+          <div className="text-2xl font-bold text-orange-400 mt-1">{stats.apis || 0}</div>
+        </div>
+        <div className="bg-[#111111] rounded-xl p-4 border border-blue-500/30">
+          <div className="text-xs text-gray-500 uppercase tracking-wide">Endpoints</div>
+          <div className="text-2xl font-bold text-blue-400 mt-1">{stats.endpoints || 0}</div>
+        </div>
+        <div className="bg-[#111111] rounded-xl p-4 border border-yellow-500/30">
+          <div className="text-xs text-gray-500 uppercase tracking-wide">Interesting</div>
+          <div className="text-2xl font-bold text-yellow-400 mt-1">{stats.interesting || 0}</div>
         </div>
       </div>
 
       {/* Export Options */}
-      <div className="bg-dark-100 border border-dark-50 rounded-xl p-6">
-        <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
-          <Settings className="text-cyber-blue" />
-          Export Options
-        </h3>
+      <div className="bg-[#111111] rounded-xl border border-[#1f1f1f] p-5">
+        <h3 className="text-lg font-semibold text-white mb-4">Export Options</h3>
         
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {/* Data Type Options */}
-          <div className="space-y-3">
-            <h4 className="text-sm font-medium text-gray-300 mb-3">Include Data Types</h4>
-            
-            <label className="flex items-center gap-3 p-3 bg-dark-200 rounded-lg cursor-pointer hover:bg-dark-50 transition-all">
-              <input
-                type="checkbox"
-                checked={exportOptions.includeSubdomains}
-                onChange={() => toggleOption('includeSubdomains')}
-                className="w-5 h-5 rounded border-dark-50 bg-dark-100 checked:bg-cyber-blue focus:ring-2 focus:ring-cyber-blue"
-              />
-              <Globe className="text-cyber-blue" size={18} />
-              <div className="flex-1">
-                <div className="text-white font-medium">Subdomains</div>
-                <div className="text-xs text-gray-400">{stats.subdomains} records</div>
-              </div>
-            </label>
-
-            <label className="flex items-center gap-3 p-3 bg-dark-200 rounded-lg cursor-pointer hover:bg-dark-50 transition-all">
-              <input
-                type="checkbox"
-                checked={exportOptions.includeLiveHosts}
-                onChange={() => toggleOption('includeLiveHosts')}
-                className="w-5 h-5 rounded border-dark-50 bg-dark-100 checked:bg-green-500 focus:ring-2 focus:ring-green-500"
-              />
-              <Activity className="text-green-400" size={18} />
-              <div className="flex-1">
-                <div className="text-white font-medium">Live Hosts</div>
-                <div className="text-xs text-gray-400">{stats.liveHosts} active</div>
-              </div>
-            </label>
-
-            <label className="flex items-center gap-3 p-3 bg-dark-200 rounded-lg cursor-pointer hover:bg-dark-50 transition-all">
-              <input
-                type="checkbox"
-                checked={exportOptions.includePortScans}
-                onChange={() => toggleOption('includePortScans')}
-                className="w-5 h-5 rounded border-dark-50 bg-dark-100 checked:bg-cyber-pink focus:ring-2 focus:ring-cyber-pink"
-              />
-              <Network className="text-cyber-pink" size={18} />
-              <div className="flex-1">
-                <div className="text-white font-medium">Port Scans</div>
-                <div className="text-xs text-gray-400">{stats.ports} open ports</div>
-              </div>
-            </label>
-
-            <label className="flex items-center gap-3 p-3 bg-dark-200 rounded-lg cursor-pointer hover:bg-dark-50 transition-all">
-              <input
-                type="checkbox"
-                checked={exportOptions.includeContentDiscovery}
-                onChange={() => toggleOption('includeContentDiscovery')}
-                className="w-5 h-5 rounded border-dark-50 bg-dark-100 checked:bg-cyber-purple focus:ring-2 focus:ring-cyber-purple"
-              />
-              <Search className="text-cyber-purple" size={18} />
-              <div className="flex-1">
-                <div className="text-white font-medium">Content Discovery</div>
-                <div className="text-xs text-gray-400">{stats.endpoints} endpoints</div>
-              </div>
-            </label>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+          {/* Format Selection */}
+          <div>
+            <label className="block text-sm text-gray-400 mb-2">Format</label>
+            <div className="flex gap-2">
+              {[
+                { id: 'json', icon: FileJson, label: 'JSON' },
+                { id: 'csv', icon: Table, label: 'CSV' },
+                { id: 'txt', icon: FileText, label: 'Text' }
+              ].map(format => (
+                <button
+                  key={format.id}
+                  onClick={() => setSelectedFormat(format.id)}
+                  className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-xl border transition-all ${
+                    selectedFormat === format.id
+                      ? 'bg-emerald-500/20 border-emerald-500/30 text-emerald-400'
+                      : 'bg-[#0a0a0a] border-[#1f1f1f] text-gray-400 hover:border-[#252525]'
+                  }`}
+                >
+                  <format.icon size={18} />
+                  {format.label}
+                </button>
+              ))}
+            </div>
           </div>
+          
+          {/* Options */}
+          <div className="md:col-span-2">
+            <label className="block text-sm text-gray-400 mb-2">Options</label>
+            <div className="flex flex-wrap gap-3">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={groupBySubdomain}
+                  onChange={(e) => setGroupBySubdomain(e.target.checked)}
+                  className="sr-only"
+                />
+                <div className={`w-10 h-6 rounded-full transition-colors ${groupBySubdomain ? 'bg-emerald-500' : 'bg-[#252525]'}`}>
+                  <div className={`w-4 h-4 bg-white rounded-full mt-1 transition-transform ${groupBySubdomain ? 'translate-x-5' : 'translate-x-1'}`} />
+                </div>
+                <span className="text-sm text-gray-400">Group by subdomain</span>
+              </label>
+              
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={includeMetadata}
+                  onChange={(e) => setIncludeMetadata(e.target.checked)}
+                  className="sr-only"
+                />
+                <div className={`w-10 h-6 rounded-full transition-colors ${includeMetadata ? 'bg-emerald-500' : 'bg-[#252525]'}`}>
+                  <div className={`w-4 h-4 bg-white rounded-full mt-1 transition-transform ${includeMetadata ? 'translate-x-5' : 'translate-x-1'}`} />
+                </div>
+                <span className="text-sm text-gray-400">Include metadata</span>
+              </label>
+            </div>
+          </div>
+        </div>
+        
+        {/* Export Button */}
+        <button
+          onClick={generateExport}
+          disabled={items.length === 0}
+          className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl font-medium shadow-lg shadow-emerald-500/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          <Download size={18} />
+          Export {items.length} Items
+        </button>
+      </div>
 
-          {/* Additional Options */}
-          <div className="space-y-3">
-            <h4 className="text-sm font-medium text-gray-300 mb-3">Additional Settings</h4>
-            
-            <label className="flex items-center gap-3 p-3 bg-dark-200 rounded-lg cursor-pointer hover:bg-dark-50 transition-all">
-              <input
-                type="checkbox"
-                checked={exportOptions.includeMetadata}
-                onChange={() => toggleOption('includeMetadata')}
-                className="w-5 h-5 rounded border-dark-50 bg-dark-100 checked:bg-cyber-blue focus:ring-2 focus:ring-cyber-blue"
-              />
-              <Database className="text-cyber-blue" size={18} />
-              <div className="flex-1">
-                <div className="text-white font-medium">Metadata & Statistics</div>
-                <div className="text-xs text-gray-400">Include export info and totals</div>
-              </div>
-            </label>
-
-            <label className="flex items-center gap-3 p-3 bg-dark-200 rounded-lg cursor-pointer hover:bg-dark-50 transition-all">
-              <input
-                type="checkbox"
-                checked={exportOptions.includeTimestamps}
-                onChange={() => toggleOption('includeTimestamps')}
-                className="w-5 h-5 rounded border-dark-50 bg-dark-100 checked:bg-cyber-blue focus:ring-2 focus:ring-cyber-blue"
-              />
-              <FileText className="text-cyber-blue" size={18} />
-              <div className="flex-1">
-                <div className="text-white font-medium">Timestamps</div>
-                <div className="text-xs text-gray-400">Include scan and discovery dates</div>
-              </div>
-            </label>
-
-            <label className="flex items-center gap-3 p-3 bg-dark-200 rounded-lg cursor-pointer hover:bg-dark-50 transition-all">
-              <input
-                type="checkbox"
-                checked={exportOptions.includeRelationships}
-                onChange={() => toggleOption('includeRelationships')}
-                disabled={exportFormat === 'csv'}
-                className="w-5 h-5 rounded border-dark-50 bg-dark-100 checked:bg-cyber-blue focus:ring-2 focus:ring-cyber-blue disabled:opacity-50 disabled:cursor-not-allowed"
-              />
-              <Package className="text-cyber-blue" size={18} />
-              <div className="flex-1">
-                <div className="text-white font-medium">Relational Structure</div>
-                <div className="text-xs text-gray-400">
-                  {exportFormat === 'csv' 
-                    ? 'Only available in JSON format'
-                    : 'Group data by subdomain with relationships'
-                  }
+      {/* Output Mapping Preview */}
+      <div className="bg-[#111111] rounded-xl border border-[#1f1f1f] overflow-hidden">
+        <button
+          onClick={() => setShowMapping(!showMapping)}
+          className="w-full px-5 py-4 flex items-center justify-between hover:bg-[#1a1a1a] transition-colors"
+        >
+          <div className="flex items-center gap-3">
+            <Eye size={20} className="text-emerald-400" />
+            <span className="text-white font-semibold">Output Mapping Structure</span>
+          </div>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={(e) => { e.stopPropagation(); copyPreview() }}
+              className="p-2 text-gray-500 hover:text-white rounded-lg hover:bg-[#252525] transition-colors"
+            >
+              {copiedPreview ? <Check size={16} className="text-emerald-400" /> : <Copy size={16} />}
+            </button>
+            <ChevronDown size={18} className={`text-gray-500 transition-transform ${showMapping ? 'rotate-180' : ''}`} />
+          </div>
+        </button>
+        
+        {showMapping && (
+          <div className="border-t border-[#1f1f1f] p-5">
+            {/* Visual Mapping Diagram */}
+            <div className="mb-6">
+              <h4 className="text-sm font-medium text-gray-400 mb-4">Data Relationship Structure</h4>
+              <div className="bg-[#0a0a0a] rounded-xl p-4 border border-[#1f1f1f]">
+                <div className="space-y-3">
+                  {/* Root */}
+                  <div className="flex items-start gap-2">
+                    <div className="w-3 h-3 rounded bg-emerald-500 mt-1.5" />
+                    <div>
+                      <span className="text-emerald-400 font-mono text-sm">export_data</span>
+                      <span className="text-gray-600 text-sm ml-2">(root)</span>
+                    </div>
+                  </div>
+                  
+                  {/* Metadata */}
+                  <div className="ml-6 flex items-start gap-2">
+                    <ChevronRight size={14} className="text-gray-600 mt-1" />
+                    <div className="w-3 h-3 rounded bg-gray-500 mt-1.5" />
+                    <div>
+                      <span className="text-gray-400 font-mono text-sm">metadata</span>
+                      <span className="text-gray-600 text-sm ml-2">- export info, totals, stats</span>
+                    </div>
+                  </div>
+                  
+                  {/* Subdomains */}
+                  <div className="ml-6 flex items-start gap-2">
+                    <ChevronRight size={14} className="text-gray-600 mt-1" />
+                    <div className="w-3 h-3 rounded bg-blue-500 mt-1.5" />
+                    <div>
+                      <span className="text-blue-400 font-mono text-sm">subdomains</span>
+                      <span className="text-gray-600 text-sm ml-2">- grouped by subdomain</span>
+                    </div>
+                  </div>
+                  
+                  {/* Subdomain Entry */}
+                  <div className="ml-12 flex items-start gap-2">
+                    <ChevronRight size={14} className="text-gray-600 mt-1" />
+                    <Globe size={14} className="text-blue-400 mt-1" />
+                    <div>
+                      <span className="text-white font-mono text-sm">[subdomain_name]</span>
+                    </div>
+                  </div>
+                  
+                  {/* Content Types */}
+                  <div className="ml-20 space-y-2">
+                    <div className="flex items-center gap-2">
+                      <ChevronRight size={12} className="text-gray-600" />
+                      <Database size={12} className="text-orange-400" />
+                      <span className="text-orange-400 font-mono text-xs">apis[]</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <ChevronRight size={12} className="text-gray-600" />
+                      <LinkIcon size={12} className="text-blue-400" />
+                      <span className="text-blue-400 font-mono text-xs">endpoints[]</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <ChevronRight size={12} className="text-gray-600" />
+                      <FolderOpen size={12} className="text-yellow-400" />
+                      <span className="text-yellow-400 font-mono text-xs">directories[]</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <ChevronRight size={12} className="text-gray-600" />
+                      <FileCode size={12} className="text-purple-400" />
+                      <span className="text-purple-400 font-mono text-xs">javascript[]</span>
+                    </div>
+                  </div>
                 </div>
               </div>
-            </label>
+            </div>
+            
+            {/* JSON Preview */}
+            <div>
+              <h4 className="text-sm font-medium text-gray-400 mb-3">JSON Structure Preview</h4>
+              <pre className="bg-[#0a0a0a] rounded-xl p-4 border border-[#1f1f1f] text-xs text-gray-400 overflow-x-auto max-h-96">
+{`{
+  "metadata": {
+    "exported_at": "${new Date().toISOString()}",
+    "total_items": ${items.length},
+    "total_subdomains": ${uniqueSubdomains.length},
+    "content_types": {
+      "apis": ${stats.apis || 0},
+      "endpoints": ${stats.endpoints || 0},
+      "directories": ${stats.directories || 0},
+      "javascript": ${stats.javascript || 0}
+    },
+    "interesting_count": ${stats.interesting || 0}
+  },
+  "subdomains": {
+${uniqueSubdomains.slice(0, 2).map(sub => {
+  const subItems = items.filter(i => i.subdomain === sub)
+  return `    "${sub}": {
+      "subdomain": "${sub}",
+      "total_items": ${subItems.length},
+      "content": {
+        "apis": [...${subItems.filter(i => i.content_type === 'api').length} items],
+        "endpoints": [...${subItems.filter(i => i.content_type === 'endpoint').length} items],
+        "directories": [...${subItems.filter(i => i.content_type === 'directory').length} items],
+        "javascript": [...${subItems.filter(i => i.content_type === 'javascript').length} items]
+      },
+      "stats": {
+        "apis": ${subItems.filter(i => i.content_type === 'api').length},
+        "endpoints": ${subItems.filter(i => i.content_type === 'endpoint').length},
+        "directories": ${subItems.filter(i => i.content_type === 'directory').length},
+        "javascript": ${subItems.filter(i => i.content_type === 'javascript').length},
+        "interesting": ${subItems.filter(i => i.is_interesting).length}
+      }
+    }`
+}).join(',\n')}${uniqueSubdomains.length > 2 ? `,\n    // ... ${uniqueSubdomains.length - 2} more subdomains` : ''}
+  }
+}`}
+              </pre>
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
-      {/* Export Info */}
-      <div className="bg-gradient-to-r from-cyber-blue/10 to-cyber-purple/10 border border-cyber-blue/30 rounded-xl p-6">
-        <h4 className="text-sm font-semibold text-white mb-3 flex items-center gap-2">
-          <AlertCircle className="text-cyber-blue" size={16} />
-          Export Structure Information
-        </h4>
-        <div className="space-y-2 text-sm text-gray-400">
-          {exportFormat === 'json' && exportOptions.includeRelationships && (
-            <p>• <strong>Relational Structure:</strong> All reconnaissance data will be organized by subdomain. Each subdomain will have its associated live hosts, open ports, and discovered endpoints grouped together for easy analysis.</p>
-          )}
-          {exportFormat === 'json' && !exportOptions.includeRelationships && (
-            <p>• <strong>Flat Structure:</strong> Data will be exported as separate arrays for each scan type. Use this for raw data processing.</p>
-          )}
-          {exportFormat === 'csv' && (
-            <p>• <strong>CSV Sections:</strong> The export will contain multiple sections (Subdomains, Live Hosts, Port Scans, Endpoints) with contextual information showing what belongs to which subdomain.</p>
-          )}
-          <p>• <strong>Context Preservation:</strong> Every port scan references its target host, every endpoint shows its parent subdomain, and all live hosts are linked to their subdomain.</p>
-          <p>• <strong>Complete Data:</strong> Export includes all discovered information including IP addresses, status codes, services, versions, and metadata.</p>
-        </div>
-      </div>
-
-      {/* Export Button */}
-      <div className="bg-dark-100 border border-dark-50 rounded-xl p-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h3 className="text-lg font-semibold text-white mb-1">Ready to Export</h3>
-            <p className="text-sm text-gray-400">
-              {Object.values(exportOptions).filter(Boolean).length} options selected • 
-              {stats.subdomains + stats.liveHosts + stats.ports + stats.endpoints} total records
-            </p>
+      {/* Per-Subdomain Breakdown */}
+      {uniqueSubdomains.length > 0 && (
+        <div className="bg-[#111111] rounded-xl border border-[#1f1f1f] overflow-hidden">
+          <div className="px-5 py-4 border-b border-[#1f1f1f]">
+            <h3 className="text-lg font-semibold text-white">Export Preview by Subdomain</h3>
           </div>
-          <button
-            onClick={handleExport}
-            disabled={!hasAnyData}
-            className="px-8 py-4 bg-gradient-to-r from-cyber-blue to-cyber-purple rounded-lg text-white font-semibold hover:from-cyber-blue/90 hover:to-cyber-purple/90 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-3 text-lg shadow-lg shadow-cyber-blue/20"
-          >
-            <Download size={24} />
-            Export {exportFormat.toUpperCase()}
-          </button>
+          <div className="divide-y divide-[#1f1f1f] max-h-96 overflow-y-auto">
+            {uniqueSubdomains.map(subdomain => {
+              const subItems = items.filter(i => i.subdomain === subdomain)
+              const subStats = {
+                apis: subItems.filter(i => i.content_type === 'api').length,
+                endpoints: subItems.filter(i => i.content_type === 'endpoint').length,
+                directories: subItems.filter(i => i.content_type === 'directory').length,
+                javascript: subItems.filter(i => i.content_type === 'javascript').length
+              }
+              
+              return (
+                <div key={subdomain} className="px-5 py-4 hover:bg-[#1a1a1a] transition-colors">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <Globe size={16} className="text-emerald-400" />
+                      <span className="text-white font-medium">{subdomain}</span>
+                    </div>
+                    <span className="text-gray-500 text-sm">{subItems.length} items</span>
+                  </div>
+                  <div className="flex items-center gap-4 text-xs">
+                    {subStats.apis > 0 && (
+                      <span className="flex items-center gap-1 text-orange-400">
+                        <Database size={12} /> {subStats.apis}
+                      </span>
+                    )}
+                    {subStats.endpoints > 0 && (
+                      <span className="flex items-center gap-1 text-blue-400">
+                        <LinkIcon size={12} /> {subStats.endpoints}
+                      </span>
+                    )}
+                    {subStats.directories > 0 && (
+                      <span className="flex items-center gap-1 text-yellow-400">
+                        <FolderOpen size={12} /> {subStats.directories}
+                      </span>
+                    )}
+                    {subStats.javascript > 0 && (
+                      <span className="flex items-center gap-1 text-purple-400">
+                        <FileCode size={12} /> {subStats.javascript}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
         </div>
-      </div>
+      )}
     </div>
   )
 }
-
-export default Exports

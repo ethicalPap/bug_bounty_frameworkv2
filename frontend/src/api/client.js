@@ -1,587 +1,441 @@
 /**
- * Bug Bounty Platform - API Client
- * Complete client for all backend endpoints
+ * API Client - Aligned with Backend Endpoints
+ * Backend: FastAPI at http://localhost:8000
  */
 
-import axios from 'axios'
+// Backend API base URL
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
-// Create axios instance with base configuration
-const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:8000',
-  timeout: 60000,
-  headers: {
-    'Content-Type': 'application/json',
+/**
+ * OUTPUT PATH CONFIGURATION
+ */
+export const OUTPUT_PATHS = {
+  base: '/opt/bugbounty/output',
+  scans: {
+    subdomains: '/opt/bugbounty/output/subdomains',
+    liveHosts: '/opt/bugbounty/output/live-hosts',
+    ports: '/opt/bugbounty/output/ports',
+    contentDiscovery: '/opt/bugbounty/output/content-discovery',
+    vulnerabilities: '/opt/bugbounty/output/vulnerabilities'
   },
-})
-
-// Request interceptor for logging
-api.interceptors.request.use(
-  (config) => {
-    console.log(`🚀 API Request: ${config.method?.toUpperCase()} ${config.url}`)
-    return config
+  contentDiscovery: {
+    apis: '/opt/bugbounty/output/content-discovery/apis',
+    endpoints: '/opt/bugbounty/output/content-discovery/endpoints',
+    directories: '/opt/bugbounty/output/content-discovery/directories',
+    javascript: '/opt/bugbounty/output/content-discovery/javascript'
   },
-  (error) => {
-    console.error('❌ Request Error:', error)
-    return Promise.reject(error)
+  exports: {
+    json: '/opt/bugbounty/output/exports/json',
+    csv: '/opt/bugbounty/output/exports/csv',
+    txt: '/opt/bugbounty/output/exports/txt',
+    reports: '/opt/bugbounty/output/exports/reports'
   }
-)
+}
 
-// Response interceptor for error handling
-api.interceptors.response.use(
-  (response) => {
-    console.log(`✅ API Response: ${response.config.url}`)
-    return response
-  },
-  (error) => {
-    if (error.response) {
-      console.error('❌ API Error:', error.response.status, error.response.data)
-    } else if (error.request) {
-      console.error('❌ Network Error:', error.message)
-    } else {
-      console.error('❌ Error:', error.message)
+export const OUTPUT_NAMING = {
+  getFilename: (target, scanType, extension = 'json') => {
+    const sanitizedTarget = target.replace(/[^a-zA-Z0-9.-]/g, '_')
+    const timestamp = new Date().toISOString().replace(/[:-]/g, '').split('.')[0]
+    return `${sanitizedTarget}_${scanType}_${timestamp}.${extension}`
+  }
+}
+
+/**
+ * API Request Helper
+ */
+async function apiRequest(endpoint, options = {}) {
+  const url = `${API_BASE_URL}${endpoint}`
+  
+  const defaultOptions = {
+    headers: {
+      'Content-Type': 'application/json',
+    },
+  }
+  
+  try {
+    const response = await fetch(url, { ...defaultOptions, ...options })
+    
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: 'Request failed' }))
+      throw new Error(error.detail || error.message || `HTTP ${response.status}`)
     }
-    return Promise.reject(error)
-  }
-)
-
-
-// ============================================================================
-// SUBDOMAIN SCANNING
-// ============================================================================
-
-/**
- * Get all subdomains for a domain
- * @param {string} domain - Target domain
- */
-export const getSubdomains = async (domain) => {
-  try {
-    const response = await api.get(`/api/v1/subdomains/${domain}`)
-    return response.data
+    
+    return response.json()
   } catch (error) {
-    console.error('Error fetching subdomains:', error)
+    console.error(`API Error [${endpoint}]:`, error)
     throw error
   }
 }
 
-/**
- * Start subdomain enumeration scan
- * @param {object} scanConfig - Scan configuration
- */
-export const startSubdomainScan = async (scanConfig) => {
-  try {
-    const response = await api.post('/api/v1/scan', scanConfig)
-    return response.data
-  } catch (error) {
-    console.error('Error starting subdomain scan:', error)
-    throw error
-  }
+// ==================== HEALTH & INFO ====================
+
+export async function healthCheck() {
+  return apiRequest('/health')
 }
 
-/**
- * Get scan results by scan ID
- * @param {string} scanId - Scan ID
- */
-export const getScanResults = async (scanId) => {
-  try {
-    const response = await api.get(`/api/v1/scan/${scanId}/results`)
-    return response.data
-  } catch (error) {
-    console.error('Error fetching scan results:', error)
-    throw error
-  }
+export async function getApiInfo() {
+  return apiRequest('/')
 }
 
+export async function getStatistics() {
+  return apiRequest('/api/v1/stats')
+}
 
-// ============================================================================
-// HTTP PROBING - FIXED IMPLEMENTATION
-// ============================================================================
+// ==================== SUBDOMAIN SCANNING ====================
 
-/**
- * Probe hosts with progress tracking via backend API
- * @param {string[]} subdomains - List of subdomains to probe
- * @param {function} onProgress - Progress callback function
- * @param {number} concurrency - Concurrency level (default: 10)
- */
-export const probeHostsWithProgress = async (subdomains, onProgress, concurrency = 10) => {
-  const batchSize = Math.min(concurrency, 20)
-  const batches = []
+export async function startSubdomainScan(config) {
+  return apiRequest('/api/v1/scan', {
+    method: 'POST',
+    body: JSON.stringify(config)
+  })
+}
+
+export async function getSubdomains(domain) {
+  return apiRequest(`/api/v1/subdomains/${encodeURIComponent(domain)}`)
+}
+
+export async function getSubdomainResults(scanId) {
+  // Backend doesn't have scan-specific endpoint, use domain query
+  return apiRequest(`/api/v1/subdomains?scan_id=${encodeURIComponent(scanId)}`)
+}
+
+export async function getDomains() {
+  return apiRequest('/api/v1/domains')
+}
+
+// ==================== HTTP PROBING / LIVE HOSTS ====================
+
+export async function startLiveHostsScan(config) {
+  return apiRequest('/api/v1/probe-hosts', {
+    method: 'POST',
+    body: JSON.stringify({
+      subdomains: config.subdomains || config.hosts || [],
+      concurrency: config.concurrency || 10,
+      timeout: config.timeout || 10
+    })
+  })
+}
+
+export async function probeHosts(subdomains, concurrency = 10, timeout = 10) {
+  return apiRequest('/api/v1/probe-hosts', {
+    method: 'POST',
+    body: JSON.stringify({ subdomains, concurrency, timeout })
+  })
+}
+
+export async function probeHostsBatch(subdomains, concurrency = 10, timeout = 10) {
+  return apiRequest('/api/v1/probe-hosts/batch', {
+    method: 'POST',
+    body: JSON.stringify({ subdomains, concurrency, timeout })
+  })
+}
+
+export async function probeHostsWithProgress(hosts, onProgress) {
+  const batchSize = 20
+  const results = []
+  const total = hosts.length
   
-  // Split into batches
-  for (let i = 0; i < subdomains.length; i += batchSize) {
-    batches.push(subdomains.slice(i, i + batchSize))
-  }
-  
-  const allResults = []
-  
-  for (let i = 0; i < batches.length; i++) {
-    const batch = batches[i]
+  for (let i = 0; i < hosts.length; i += batchSize) {
+    const batch = hosts.slice(i, i + batchSize)
     
     try {
-      // Call backend API for this batch
-      const response = await api.post('/api/v1/probe-hosts', {
-        subdomains: batch,
-        concurrency: batchSize,
-        timeout: 10
+      const response = await probeHosts(batch, 10, 10)
+      results.push(...(response.results || []))
+    } catch (e) {
+      // Add failed hosts
+      batch.forEach(host => {
+        results.push({ subdomain: host, is_active: false, error: e.message })
       })
-      
-      const batchResults = response.data.results || []
-      allResults.push(...batchResults)
-      
-      // Call progress callback
-      if (onProgress) {
-        onProgress({
-          completed: Math.min((i + 1) * batchSize, subdomains.length),
-          total: subdomains.length,
-          currentBatch: i + 1,
-          totalBatches: batches.length,
-          results: allResults,
-          stats: {
-            active: allResults.filter(r => r.is_active).length,
-            inactive: allResults.filter(r => !r.is_active).length
-          }
-        })
-      }
-      
-    } catch (error) {
-      console.error(`Batch ${i + 1} failed:`, error)
-      // Continue with next batch even if one fails
+    }
+    
+    if (onProgress) {
+      onProgress({
+        current: Math.min(i + batchSize, total),
+        total,
+        percentage: Math.round((Math.min(i + batchSize, total) / total) * 100),
+        results
+      })
     }
   }
   
-  return allResults
+  return results
 }
 
-/**
- * Probe hosts through backend (single batch)
- * @param {string[]} subdomains - List of subdomains to probe
- * @param {number} concurrency - Max concurrent requests
- * @param {number} timeout - Timeout in seconds
- */
-export const probeHosts = async (subdomains, concurrency = 10, timeout = 10) => {
-  try {
-    const response = await api.post('/api/v1/probe-hosts', {
-      subdomains: subdomains,
-      concurrency: concurrency,
-      timeout: timeout
-    })
-    return response.data
-  } catch (error) {
-    console.error('Error probing hosts:', error)
-    throw error
-  }
+export async function probeSingleHost(host) {
+  const response = await probeHosts([host], 1, 10)
+  return response.results ? response.results[0] : null
 }
 
-/**
- * Quick probe for a single host
- */
-export const quickProbe = async (subdomain, protocols = ['https', 'http']) => {
-  try {
-    const response = await api.post('/api/v1/probe-hosts', {
-      subdomains: [subdomain],
-      concurrency: 1,
-      timeout: 10
-    })
-    return response.data.results?.[0] || {}
-  } catch (error) {
-    console.error('Error in quick probe:', error)
-    throw error
-  }
+export async function getLiveHostsResults(scanId) {
+  // No direct endpoint - return empty for now
+  return { results: [] }
 }
 
-/**
- * Probe all subdomains for a domain
- */
-export const probeDomain = async (domain, concurrency = 10) => {
-  try {
-    // First get all subdomains for the domain
-    const subdomains = await getSubdomains(domain)
-    const subdomainList = subdomains?.data || subdomains || []
-    
-    if (subdomainList.length === 0) {
-      return { results: [], total: 0, active: 0, inactive: 0 }
-    }
-    
-    // Extract subdomain names
-    const names = subdomainList.map(s => s.full_domain || s.subdomain || s)
-    
-    // Probe them
-    return await probeHosts(names, concurrency)
-  } catch (error) {
-    console.error('Error probing domain:', error)
-    throw error
-  }
+// ==================== CONTENT DISCOVERY ====================
+
+export async function startContentDiscovery(config) {
+  return apiRequest('/api/v1/content-discovery/start', {
+    method: 'POST',
+    body: JSON.stringify(config)
+  })
 }
 
-/**
- * Probe with batching endpoint
- */
-export const probeHostsBatched = async (subdomains, concurrency = 10) => {
-  try {
-    const response = await api.post('/api/v1/probe-hosts/batch', {
-      subdomains: subdomains,
-      concurrency: concurrency,
-      timeout: 10
-    })
-    return response.data
-  } catch (error) {
-    console.error('Error in batched probe:', error)
-    throw error
-  }
+export async function getContentDiscoveryResults(scanId) {
+  return apiRequest(`/api/v1/content-discovery/scan/${encodeURIComponent(scanId)}`)
 }
 
-
-// ============================================================================
-// PORT SCANNING
-// ============================================================================
-
-/**
- * Start port scan
- * @param {object} scanConfig - Port scan configuration
- */
-export const startPortScan = async (scanConfig) => {
-  try {
-    const response = await api.post('/api/v1/ports/scan', scanConfig)
-    return response.data
-  } catch (error) {
-    console.error('Error starting port scan:', error)
-    throw error
-  }
+export async function getContentForTarget(target) {
+  // URL encode the target properly
+  const encodedTarget = encodeURIComponent(target)
+  return apiRequest(`/api/v1/content-discovery/target/${encodedTarget}`)
 }
 
-/**
- * Get ports for a target
- * @param {string} target - Target host
- */
-export const getPortsForTarget = async (target) => {
-  try {
-    const response = await api.get(`/api/v1/ports/target/${target}`)
-    return response.data
-  } catch (error) {
-    console.error('Error fetching ports:', error)
-    throw error
-  }
+export async function getInterestingDiscoveries(limit = 100) {
+  return apiRequest(`/api/v1/content-discovery/interesting?limit=${limit}`)
 }
 
-
-// ============================================================================
-// CONTENT DISCOVERY
-// ============================================================================
-
-/**
- * Start content discovery scan
- * @param {object} scanConfig - Content discovery configuration
- */
-export const startContentDiscovery = async (scanConfig) => {
-  try {
-    const response = await api.post('/api/v1/content/scan', scanConfig)
-    return response.data
-  } catch (error) {
-    console.error('Error starting content discovery:', error)
-    throw error
-  }
+export async function exportContentDiscovery(options) {
+  return apiRequest('/api/v1/content-discovery/export', {
+    method: 'POST',
+    body: JSON.stringify(options)
+  })
 }
 
-/**
- * Get content for a target URL
- * @param {string} targetUrl - Target URL
- */
-export const getContentForTarget = async (targetUrl) => {
-  try {
-    const response = await api.get(`/api/v1/content-discovery/target/${encodeURIComponent(targetUrl)}`)
-    return response.data
-  } catch (error) {
-    console.error('Error fetching content:', error)
-    throw error
-  }
+// ==================== PORT SCANNING ====================
+
+export async function startPortScan(config) {
+  return apiRequest('/api/v1/ports/scan', {
+    method: 'POST',
+    body: JSON.stringify(config)
+  })
 }
 
-
-// ============================================================================
-// VISUALIZATION
-// ============================================================================
-
-/**
- * Get visualization data for domain
- * @param {string} domain - Target domain
- */
-export const getVisualizationData = async (domain) => {
-  try {
-    const response = await api.get(`/api/v1/visualization/${domain}`)
-    return response.data
-  } catch (error) {
-    console.error('Error fetching visualization data:', error)
-    throw error
-  }
+export async function getPortScanResults(scanId) {
+  return apiRequest(`/api/v1/ports/scan/${encodeURIComponent(scanId)}`)
 }
 
-/**
- * Get technology breakdown
- * @param {string} domain - Target domain
- */
-export const getTechnologyBreakdown = async (domain) => {
-  try {
-    const response = await api.get(`/api/v1/visualization/${domain}/technology`)
-    return response.data
-  } catch (error) {
-    console.error('Error fetching technology breakdown:', error)
-    throw error
-  }
+export async function getPortsByTarget(target) {
+  return apiRequest(`/api/v1/ports/target/${encodeURIComponent(target)}`)
 }
 
-/**
- * Get service breakdown
- * @param {string} domain - Target domain
- */
-export const getServiceBreakdown = async (domain) => {
-  try {
-    const response = await api.get(`/api/v1/visualization/${domain}/services`)
-    return response.data
-  } catch (error) {
-    console.error('Error fetching service breakdown:', error)
-    throw error
-  }
+export async function getPortsBySubdomain(subdomainId) {
+  return apiRequest(`/api/v1/ports/subdomain/${subdomainId}`)
 }
 
-/**
- * Get endpoint tree
- * @param {string} domain - Target domain
- */
-export const getEndpointTree = async (domain) => {
-  try {
-    const response = await api.get(`/api/v1/visualization/${domain}/tree`)
-    return response.data
-  } catch (error) {
-    console.error('Error fetching endpoint tree:', error)
-    throw error
-  }
+export async function getOpenPorts(limit = 100) {
+  return apiRequest(`/api/v1/ports/open?limit=${limit}`)
 }
 
-/**
- * Get attack surface summary
- * @param {string} domain - Target domain
- */
-export const getAttackSurface = async (domain) => {
-  try {
-    const response = await api.get(`/api/v1/visualization/${domain}/attack-surface`)
-    return response.data
-  } catch (error) {
-    console.error('Error fetching attack surface:', error)
-    throw error
-  }
+export async function getPortsByService(service) {
+  return apiRequest(`/api/v1/ports/service/${encodeURIComponent(service)}`)
 }
 
+// ==================== VULNERABILITY SCANNING ====================
 
-// ============================================================================
-// STATISTICS
-// ============================================================================
-
-/**
- * Get platform statistics
- */
-export const getStats = async () => {
-  try {
-    const response = await api.get('/api/v1/stats')
-    return response.data
-  } catch (error) {
-    console.error('Error fetching stats:', error)
-    throw error
-  }
+export async function startVulnScan(config) {
+  const scanner = config.scanner || 'nuclei'
+  return apiRequest(`/api/v1/vuln-scan/${scanner}`, {
+    method: 'POST',
+    body: JSON.stringify(config)
+  })
 }
 
-/**
- * Get domain statistics
- */
-export const getDomainStats = async (domain) => {
-  try {
-    const response = await api.get(`/api/v1/visualization/${domain}/attack-surface`)
-    return response.data
-  } catch (error) {
-    console.error('Error fetching domain stats:', error)
-    throw error
-  }
+export async function runNucleiScan(config) {
+  return apiRequest('/api/v1/vuln-scan/nuclei', {
+    method: 'POST',
+    body: JSON.stringify(config)
+  })
 }
 
-
-// ============================================================================
-// VALIDATION
-// ============================================================================
-
-/**
- * Validate target for vulnerabilities
- * @param {string} targetUrl - Target URL to validate
- * @param {string[]} discoveredPaths - Discovered paths
- * @param {boolean} background - Run in background
- */
-export const validateTarget = async (targetUrl, discoveredPaths = [], background = false) => {
-  try {
-    const response = await api.post('/api/v1/validation/validate-target', {
-      target_url: targetUrl,
-      discovered_paths: discoveredPaths,
-      background: background
-    })
-    return response.data
-  } catch (error) {
-    console.error('Error validating target:', error)
-    throw error
-  }
+export async function runNiktoScan(config) {
+  return apiRequest('/api/v1/vuln-scan/nikto', {
+    method: 'POST',
+    body: JSON.stringify(config)
+  })
 }
 
-/**
- * Quick validation for a target
- * @param {string} targetUrl - Target URL to validate
- * @param {string[]} discoveredPaths - Discovered paths
- */
-export const quickValidateTarget = async (targetUrl, discoveredPaths = []) => {
-  try {
-    const response = await api.post('/api/v1/validation/quick-validate', {
+export async function runBatchVulnScan(config) {
+  return apiRequest('/api/v1/vuln-scan/batch', {
+    method: 'POST',
+    body: JSON.stringify(config)
+  })
+}
+
+export async function getVulnScanResults(scanId) {
+  return apiRequest(`/api/v1/vuln-scan/findings/${encodeURIComponent(scanId)}`)
+}
+
+export async function getVulnScansByTarget(target) {
+  return apiRequest(`/api/v1/vuln-scan/target/${encodeURIComponent(target)}`)
+}
+
+export async function getVulnScansByDomain(domain) {
+  return apiRequest(`/api/v1/vuln-scan/domain/${encodeURIComponent(domain)}`)
+}
+
+export async function getVulnFindingsBySeverity(severity, limit = 100) {
+  return apiRequest(`/api/v1/vuln-scan/findings/severity/${severity}?limit=${limit}`)
+}
+
+export async function getVulnStatistics() {
+  return apiRequest('/api/v1/vuln-scan/statistics')
+}
+
+export async function updateVulnFinding(findingId, updates) {
+  return apiRequest(`/api/v1/vuln-scan/finding/${findingId}`, {
+    method: 'PUT',
+    body: JSON.stringify(updates)
+  })
+}
+
+// ==================== VALIDATION ====================
+
+export async function validateTarget(config) {
+  return apiRequest('/api/v1/validation/validate-target', {
+    method: 'POST',
+    body: JSON.stringify(config)
+  })
+}
+
+export async function quickValidateTarget(targetUrl, discoveredPaths = []) {
+  return apiRequest('/api/v1/validation/quick-validate', {
+    method: 'POST',
+    body: JSON.stringify({
       target_url: targetUrl,
       discovered_paths: discoveredPaths
     })
-    return response.data
-  } catch (error) {
-    console.error('Error in quick validation:', error)
-    throw error
-  }
+  })
 }
 
-/**
- * Validate domain high-value targets
- * @param {string} domain - Domain to validate
- * @param {number} limit - Max targets to validate
- * @param {number} minRiskScore - Minimum risk score
- */
-export const validateDomain = async (domain, limit = 10, minRiskScore = 30) => {
-  try {
-    const response = await api.post('/api/v1/validation/validate-domain', {
-      domain: domain,
-      limit: limit,
-      min_risk_score: minRiskScore
-    })
-    return response.data
-  } catch (error) {
-    console.error('Error validating domain:', error)
-    throw error
-  }
+export async function validateDomain(config) {
+  return apiRequest('/api/v1/validation/validate-domain', {
+    method: 'POST',
+    body: JSON.stringify(config)
+  })
 }
 
-/**
- * Get validation report for domain
- * @param {string} domain - Domain
- */
-export const getValidationReport = async (domain) => {
-  try {
-    const response = await api.get(`/api/v1/validation/results/${domain}`)
-    return response.data
-  } catch (error) {
-    console.error('Error fetching validation report:', error)
-    throw error
-  }
+export async function getValidationResults(domain) {
+  return apiRequest(`/api/v1/validation/results/${encodeURIComponent(domain)}`)
 }
 
-/**
- * Get validation for specific target
- * @param {string} subdomain - Subdomain
- */
-export const getTargetValidation = async (subdomain) => {
-  try {
-    const response = await api.get(`/api/v1/validation/target/${subdomain}`)
-    return response.data
-  } catch (error) {
-    console.error('Error fetching target validation:', error)
-    throw error
-  }
+export async function getTargetValidation(subdomain) {
+  return apiRequest(`/api/v1/validation/target/${encodeURIComponent(subdomain)}`)
 }
 
+// ==================== VISUALIZATION ====================
 
-// ============================================================================
-// EXPORT
-// ============================================================================
-
-/**
- * Export results
- */
-export const exportResults = async (domain, format = 'json') => {
-  try {
-    const response = await api.get(`/api/v1/visualization/${domain}`)
-    return response.data
-  } catch (error) {
-    console.error('Error exporting results:', error)
-    throw error
-  }
+export async function getVisualizationData(domain) {
+  return apiRequest(`/api/v1/visualization/${encodeURIComponent(domain)}`)
 }
 
-/**
- * Download export
- */
-export const downloadExport = async (domain, format = 'json') => {
-  try {
-    const data = await exportResults(domain, format)
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
-    const url = window.URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `${domain}-export-${new Date().toISOString().split('T')[0]}.json`
-    a.click()
-    window.URL.revokeObjectURL(url)
-    return true
-  } catch (error) {
-    console.error('Error downloading export:', error)
-    return false
-  }
+export async function getTechnologyBreakdown(domain) {
+  return apiRequest(`/api/v1/visualization/${encodeURIComponent(domain)}/technology`)
 }
 
-
-// ============================================================================
-// HEALTH CHECK
-// ============================================================================
-
-/**
- * Check API health status
- */
-export const healthCheck = async () => {
-  try {
-    const response = await api.get('/health')
-    return response.data
-  } catch (error) {
-    console.error('Error checking health:', error)
-    throw error
-  }
+export async function getServiceBreakdown(domain) {
+  return apiRequest(`/api/v1/visualization/${encodeURIComponent(domain)}/services`)
 }
 
-/**
- * Check if API is reachable
- */
-export const isApiReachable = async () => {
-  try {
-    await healthCheck()
-    return true
-  } catch (error) {
-    return false
-  }
+export async function getEndpointTree(domain) {
+  return apiRequest(`/api/v1/visualization/${encodeURIComponent(domain)}/tree`)
 }
 
-
-// ============================================================================
-// UTILITY FUNCTIONS
-// ============================================================================
-
-/**
- * Get API base URL
- */
-export const getApiBaseUrl = () => {
-  return api.defaults.baseURL
+export async function getAttackSurface(domain) {
+  return apiRequest(`/api/v1/attack-surface/${encodeURIComponent(domain)}`)
 }
 
-/**
- * Set API base URL
- */
-export const setApiBaseUrl = (url) => {
-  api.defaults.baseURL = url
+// ==================== EXPORT ====================
+
+export async function exportAll(format = 'json') {
+  return apiRequest('/api/v1/exports/all', {
+    method: 'POST',
+    body: JSON.stringify({ format })
+  })
 }
 
+export async function exportBySubdomain(subdomain, format = 'json') {
+  return apiRequest('/api/v1/exports/by-subdomain', {
+    method: 'POST',
+    body: JSON.stringify({ subdomain, format })
+  })
+}
 
-// ============================================================================
-// EXPORTS
-// ============================================================================
+export async function exportByType(type, format = 'json') {
+  return apiRequest('/api/v1/exports/by-type', {
+    method: 'POST',
+    body: JSON.stringify({ type, format })
+  })
+}
 
-export default api
+// ==================== DEFAULT EXPORT ====================
+
+export default {
+  // Config
+  OUTPUT_PATHS,
+  OUTPUT_NAMING,
+  
+  // Health
+  healthCheck,
+  getApiInfo,
+  getStatistics,
+  
+  // Subdomains
+  startSubdomainScan,
+  getSubdomains,
+  getSubdomainResults,
+  getDomains,
+  
+  // Live Hosts / Probing
+  startLiveHostsScan,
+  probeHosts,
+  probeHostsBatch,
+  probeHostsWithProgress,
+  probeSingleHost,
+  getLiveHostsResults,
+  
+  // Content Discovery
+  startContentDiscovery,
+  getContentDiscoveryResults,
+  getContentForTarget,
+  getInterestingDiscoveries,
+  exportContentDiscovery,
+  
+  // Port Scanning
+  startPortScan,
+  getPortScanResults,
+  getPortsByTarget,
+  getPortsBySubdomain,
+  getOpenPorts,
+  getPortsByService,
+  
+  // Vulnerability Scanning
+  startVulnScan,
+  runNucleiScan,
+  runNiktoScan,
+  runBatchVulnScan,
+  getVulnScanResults,
+  getVulnScansByTarget,
+  getVulnScansByDomain,
+  getVulnFindingsBySeverity,
+  getVulnStatistics,
+  updateVulnFinding,
+  
+  // Validation
+  validateTarget,
+  quickValidateTarget,
+  validateDomain,
+  getValidationResults,
+  getTargetValidation,
+  
+  // Visualization
+  getVisualizationData,
+  getTechnologyBreakdown,
+  getServiceBreakdown,
+  getEndpointTree,
+  getAttackSurface,
+  
+  // Export
+  exportAll,
+  exportBySubdomain,
+  exportByType
+}

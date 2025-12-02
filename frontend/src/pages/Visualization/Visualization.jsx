@@ -1,666 +1,456 @@
-import { useState, useEffect, useMemo } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
-import { 
-  BarChart, 
-  Bar, 
-  PieChart, 
-  Pie, 
-  Cell, 
-  XAxis, 
-  YAxis, 
-  CartesianGrid, 
-  Tooltip, 
-  Legend, 
-  ResponsiveContainer,
-  RadarChart,
-  PolarGrid,
-  PolarAngleAxis,
-  PolarRadiusAxis,
-  Radar
-} from 'recharts'
-import { 
-  Globe, 
-  Network, 
-  Search, 
-  Shield, 
-  Activity,
-  AlertTriangle,
-  CheckCircle,
-  Lock,
-  Zap,
-  Code,
-  Server,
+/**
+ * Visualization Page
+ * Visualizes all reconnaissance data including content discovery
+ * Shows relationships between subdomains and discovered content
+ */
+
+import { useState, useMemo, useEffect } from 'react'
+import {
+  BarChart3,
+  PieChart,
+  Network,
   Database,
-  ExternalLink
+  Link as LinkIcon,
+  FolderOpen,
+  FileCode,
+  Globe,
+  Activity,
+  Shield,
+  Star,
+  ChevronDown,
+  Filter
 } from 'lucide-react'
+import { useContentDiscovery, CONTENT_TYPES } from '../../stores/ContentDiscoveryStore'
 
-const STORAGE_KEYS = {
-  SUBDOMAIN_RESULTS: 'subdomain_scanner_last_domain',
-  LIVE_HOSTS_RESULTS: 'live_hosts_results',
-  PORT_SCAN_RESULTS: 'port_scan_results',
-  CONTENT_DISCOVERY_RESULTS: 'content_discovery_results',
-}
-
-const COLORS = {
-  primary: '#3b82f6',
-  success: '#10b981',
-  warning: '#f59e0b',
-  danger: '#ef4444',
-  purple: '#a855f7',
-  pink: '#ec4899',
-  cyan: '#06b6d4',
-}
-
-const Visualization = () => {
-  const queryClient = useQueryClient()
-  const [selectedDomain, setSelectedDomain] = useState('')
-  const [availableDomains, setAvailableDomains] = useState([])
-
-  // Fetch available domains
+export default function Visualization() {
+  const { items, stats, uniqueSubdomains, getItemsByType, getItemsBySubdomain } = useContentDiscovery()
+  
+  const [selectedView, setSelectedView] = useState('overview')
+  const [selectedSubdomain, setSelectedSubdomain] = useState('all')
+  const [subdomainData, setSubdomainData] = useState([])
+  const [liveHosts, setLiveHosts] = useState([])
+  
+  // Load live hosts data
   useEffect(() => {
-    const queryCache = queryClient.getQueryCache()
-    const allQueries = queryCache.getAll()
-    
-    const domains = allQueries
-      .filter(query => query.queryKey[0] === 'subdomains' && query.state.data?.data?.length > 0)
-      .map(query => query.queryKey[1])
-      .filter(Boolean)
-    
-    const uniqueDomains = [...new Set(domains)]
-    setAvailableDomains(uniqueDomains)
-    
-    if (!selectedDomain && uniqueDomains.length > 0) {
-      setSelectedDomain(uniqueDomains[0])
-    }
-  }, [queryClient, selectedDomain])
-
-  // Get all data
-  const { subdomainsData, liveHostsData, portScanData, contentDiscoveryData } = useMemo(() => {
-    // Subdomains
-    const cachedData = queryClient.getQueryData(['subdomains', selectedDomain])
-    const subdomains = cachedData?.data || []
-
-    // Live Hosts
-    let liveHosts = []
     try {
-      const saved = localStorage.getItem(STORAGE_KEYS.LIVE_HOSTS_RESULTS)
-      liveHosts = saved ? JSON.parse(saved) : []
-    } catch {
-      liveHosts = []
-    }
-
-    // Port Scans
-    let portScans = []
-    try {
-      const saved = localStorage.getItem(STORAGE_KEYS.PORT_SCAN_RESULTS)
-      portScans = saved ? JSON.parse(saved) : []
-    } catch {
-      portScans = []
-    }
-
-    // Content Discovery
-    let contentDiscovery = []
-    try {
-      const saved = localStorage.getItem(STORAGE_KEYS.CONTENT_DISCOVERY_RESULTS)
-      contentDiscovery = saved ? JSON.parse(saved) : []
-    } catch {
-      contentDiscovery = []
-    }
-
-    return {
-      subdomainsData: subdomains,
-      liveHostsData: liveHosts,
-      portScanData: portScans,
-      contentDiscoveryData: contentDiscovery
-    }
-  }, [selectedDomain, queryClient])
-
-  // ========== PORT STATISTICS ==========
-  const portStats = useMemo(() => {
-    if (!portScanData || portScanData.length === 0) return null
-
-    // Group by service
-    const byService = portScanData.reduce((acc, port) => {
-      const service = port.service || 'unknown'
-      acc[service] = (acc[service] || 0) + 1
-      return acc
-    }, {})
-
-    // Group by port number (top ports)
-    const byPort = portScanData.reduce((acc, port) => {
-      acc[port.port] = (acc[port.port] || 0) + 1
-      return acc
-    }, {})
-
-    // Group by target
-    const byTarget = portScanData.reduce((acc, port) => {
-      acc[port.target] = (acc[port.target] || 0) + 1
-      return acc
-    }, {})
-
-    return {
-      totalOpenPorts: portScanData.length,
-      uniqueTargets: Object.keys(byTarget).length,
-      byService: Object.entries(byService)
-        .sort(([,a], [,b]) => b - a)
-        .slice(0, 10)
-        .map(([name, count]) => ({ name, count })),
-      topPorts: Object.entries(byPort)
-        .sort(([,a], [,b]) => b - a)
-        .slice(0, 10)
-        .map(([port, count]) => ({ 
-          port: parseInt(port), 
-          count,
-          service: portScanData.find(p => p.port === parseInt(port))?.service || 'unknown'
-        })),
-      byTarget: Object.entries(byTarget)
-        .sort(([,a], [,b]) => b - a)
-        .slice(0, 10)
-        .map(([target, count]) => ({ target, count })),
-    }
-  }, [portScanData])
-
-  // ========== TECHNOLOGY STATISTICS ==========
-  const techStats = useMemo(() => {
-    if (!contentDiscoveryData || contentDiscoveryData.length === 0) return null
-
-    const technologies = {}
-    const statusCodes = {}
-    const discoveryTypes = {}
-
-    contentDiscoveryData.forEach(item => {
-      // Technologies
-      if (item.technologies) {
-        try {
-          const techs = typeof item.technologies === 'string' 
-            ? JSON.parse(item.technologies) 
-            : item.technologies
-          
-          if (Array.isArray(techs)) {
-            techs.forEach(tech => {
-              technologies[tech] = (technologies[tech] || 0) + 1
-            })
-          } else if (typeof techs === 'object') {
-            Object.keys(techs).forEach(tech => {
-              technologies[tech] = (technologies[tech] || 0) + 1
-            })
-          }
-        } catch {}
+      const saved = localStorage.getItem('live_hosts_results')
+      if (saved) {
+        const parsed = JSON.parse(saved)
+        const hosts = Array.isArray(parsed) ? parsed : (parsed.results || [])
+        setLiveHosts(hosts)
       }
-
-      // Status codes
-      if (item.status_code) {
-        const codeGroup = Math.floor(item.status_code / 100) * 100
-        statusCodes[codeGroup] = (statusCodes[codeGroup] || 0) + 1
+    } catch (e) {
+      console.error('Error loading live hosts:', e)
+    }
+  }, [])
+  
+  // Load subdomain data
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('subdomain_scan_results')
+      if (saved) {
+        const parsed = JSON.parse(saved)
+        setSubdomainData(Array.isArray(parsed) ? parsed : (parsed.results || []))
       }
-
-      // Discovery types
-      if (item.discovery_type) {
-        discoveryTypes[item.discovery_type] = (discoveryTypes[item.discovery_type] || 0) + 1
+    } catch (e) {
+      console.error('Error loading subdomains:', e)
+    }
+  }, [])
+  
+  // Calculate content discovery stats per subdomain
+  const subdomainStats = useMemo(() => {
+    const statsMap = {}
+    
+    uniqueSubdomains.forEach(sub => {
+      const subItems = items.filter(i => i.subdomain === sub)
+      statsMap[sub] = {
+        subdomain: sub,
+        total: subItems.length,
+        apis: subItems.filter(i => i.content_type === 'api').length,
+        endpoints: subItems.filter(i => i.content_type === 'endpoint').length,
+        directories: subItems.filter(i => i.content_type === 'directory').length,
+        javascript: subItems.filter(i => i.content_type === 'javascript').length,
+        interesting: subItems.filter(i => i.is_interesting).length
       }
     })
-
-    return {
-      totalDiscoveries: contentDiscoveryData.length,
-      technologies: Object.entries(technologies)
-        .sort(([,a], [,b]) => b - a)
-        .slice(0, 10)
-        .map(([name, count]) => ({ name, count })),
-      statusCodes: Object.entries(statusCodes)
-        .map(([code, count]) => ({ code: parseInt(code), count }))
-        .sort((a, b) => a.code - b.code),
-      discoveryTypes: Object.entries(discoveryTypes)
-        .map(([type, count]) => ({ type, count }))
+    
+    return Object.values(statsMap).sort((a, b) => b.total - a.total)
+  }, [items, uniqueSubdomains])
+  
+  // Calculate max values for bar chart scaling
+  const maxTotal = useMemo(() => {
+    return Math.max(...subdomainStats.map(s => s.total), 1)
+  }, [subdomainStats])
+  
+  // Overview metrics
+  const overviewMetrics = useMemo(() => ({
+    totalContent: stats.total,
+    totalSubdomains: uniqueSubdomains.length,
+    totalLiveHosts: liveHosts.filter(h => h.is_active).length,
+    interestingFindings: stats.interesting,
+    contentTypes: {
+      apis: stats.apis || 0,
+      endpoints: stats.endpoints || 0,
+      directories: stats.directories || 0,
+      javascript: stats.javascript || 0
     }
-  }, [contentDiscoveryData])
-
-  // ========== LIVE HOSTS STATISTICS ==========
-  const liveHostStats = useMemo(() => {
-    if (!liveHostsData || liveHostsData.length === 0) return null
-
-    const protocolBreakdown = liveHostsData.reduce((acc, host) => {
-      const protocol = host.protocol || 'unknown'
-      acc[protocol] = (acc[protocol] || 0) + 1
-      return acc
-    }, {})
-
-    const statusCodeBreakdown = liveHostsData.reduce((acc, host) => {
-      if (host.status_code) {
-        const codeGroup = Math.floor(host.status_code / 100) * 100
-        acc[codeGroup] = (acc[codeGroup] || 0) + 1
+  }), [stats, uniqueSubdomains, liveHosts])
+  
+  // Content type distribution data
+  const contentDistribution = useMemo(() => {
+    const total = overviewMetrics.contentTypes.apis + 
+                  overviewMetrics.contentTypes.endpoints + 
+                  overviewMetrics.contentTypes.directories + 
+                  overviewMetrics.contentTypes.javascript
+    
+    if (total === 0) return []
+    
+    return [
+      { 
+        type: 'APIs', 
+        count: overviewMetrics.contentTypes.apis,
+        percentage: Math.round((overviewMetrics.contentTypes.apis / total) * 100),
+        color: 'bg-orange-500',
+        textColor: 'text-orange-400'
+      },
+      { 
+        type: 'Endpoints', 
+        count: overviewMetrics.contentTypes.endpoints,
+        percentage: Math.round((overviewMetrics.contentTypes.endpoints / total) * 100),
+        color: 'bg-blue-500',
+        textColor: 'text-blue-400'
+      },
+      { 
+        type: 'Directories', 
+        count: overviewMetrics.contentTypes.directories,
+        percentage: Math.round((overviewMetrics.contentTypes.directories / total) * 100),
+        color: 'bg-yellow-500',
+        textColor: 'text-yellow-400'
+      },
+      { 
+        type: 'JS Files', 
+        count: overviewMetrics.contentTypes.javascript,
+        percentage: Math.round((overviewMetrics.contentTypes.javascript / total) * 100),
+        color: 'bg-purple-500',
+        textColor: 'text-purple-400'
       }
-      return acc
-    }, {})
-
-    return {
-      total: liveHostsData.length,
-      active: liveHostsData.filter(h => h.is_active).length,
-      protocols: Object.entries(protocolBreakdown).map(([name, count]) => ({ name, count })),
-      statusCodes: Object.entries(statusCodeBreakdown)
-        .map(([code, count]) => ({ code: parseInt(code), count }))
-        .sort((a, b) => a.code - b.code),
-    }
-  }, [liveHostsData])
-
-  // ========== ATTACK SURFACE ANALYSIS ==========
-  const attackSurfaceData = useMemo(() => {
-    const data = []
-
-    // Subdomain enumeration
-    if (subdomainsData?.length > 0) {
-      data.push({
-        category: 'Subdomains',
-        value: subdomainsData.length,
-        fullMark: Math.max(100, subdomainsData.length)
-      })
-    }
-
-    // Live hosts
-    if (liveHostsData?.length > 0) {
-      data.push({
-        category: 'Live Hosts',
-        value: liveHostsData.filter(h => h.is_active).length,
-        fullMark: Math.max(50, liveHostsData.filter(h => h.is_active).length)
-      })
-    }
-
-    // Open ports
-    if (portScanData?.length > 0) {
-      data.push({
-        category: 'Open Ports',
-        value: portScanData.length,
-        fullMark: Math.max(50, portScanData.length)
-      })
-    }
-
-    // Content discoveries
-    if (contentDiscoveryData?.length > 0) {
-      data.push({
-        category: 'Endpoints',
-        value: contentDiscoveryData.length,
-        fullMark: Math.max(100, contentDiscoveryData.length)
-      })
-    }
-
-    // Technologies
-    if (techStats?.technologies?.length > 0) {
-      data.push({
-        category: 'Technologies',
-        value: techStats.technologies.length,
-        fullMark: 20
-      })
-    }
-
-    return data
-  }, [subdomainsData, liveHostsData, portScanData, contentDiscoveryData, techStats])
-
-  if (availableDomains.length === 0) {
-    return (
-      <div className="p-8">
-        <div className="mb-6">
-          <h2 className="text-3xl font-bold text-white flex items-center gap-3">
-            <Activity className="text-cyber-purple" />
-            Visualization Dashboard
-          </h2>
-          <p className="text-gray-400 mt-2">Interactive charts and analysis of reconnaissance data</p>
-        </div>
-        
-        <div className="bg-dark-100 border border-dark-50 rounded-xl p-12 text-center">
-          <Globe className="mx-auto text-gray-600 mb-4" size={64} />
-          <h3 className="text-xl font-semibold text-white mb-2">No Data Available</h3>
-          <p className="text-gray-400">Run reconnaissance scans to see visualizations</p>
-        </div>
-      </div>
-    )
-  }
+    ]
+  }, [overviewMetrics])
 
   return (
-    <div className="p-8 space-y-6">
+    <div className="p-6 space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-3xl font-bold text-white flex items-center gap-3">
-            <Activity className="text-cyber-purple" />
-            Visualization Dashboard
-          </h2>
-          <p className="text-gray-400 mt-2">Interactive analysis and visualization of all reconnaissance data</p>
-        </div>
-      </div>
-
-      {/* Domain Selection */}
-      <div className="bg-dark-100 border border-dark-50 rounded-xl p-6">
-        <label className="block text-sm font-medium text-gray-300 mb-2">
-          Select Domain
-        </label>
-        <select
-          value={selectedDomain}
-          onChange={(e) => setSelectedDomain(e.target.value)}
-          className="w-full px-4 py-3 bg-dark-200 border border-dark-50 rounded-lg text-white focus:outline-none focus:border-cyber-purple transition-all"
-        >
-          {availableDomains.map((domain) => (
-            <option key={domain} value={domain}>{domain}</option>
-          ))}
-        </select>
-      </div>
-
-      {/* Attack Surface Radar Chart */}
-      {attackSurfaceData.length > 0 && (
-        <div className="bg-dark-100 border border-dark-50 rounded-xl p-6">
-          <h3 className="text-xl font-semibold text-white mb-4 flex items-center gap-2">
-            <Shield className="text-cyber-purple" />
-            Attack Surface Overview
-          </h3>
-          <ResponsiveContainer width="100%" height={400}>
-            <RadarChart data={attackSurfaceData}>
-              <PolarGrid stroke="#334155" />
-              <PolarAngleAxis dataKey="category" stroke="#94a3b8" />
-              <PolarRadiusAxis stroke="#64748b" />
-              <Radar 
-                name="Coverage" 
-                dataKey="value" 
-                stroke={COLORS.purple} 
-                fill={COLORS.purple} 
-                fillOpacity={0.3} 
-              />
-              <Tooltip 
-                contentStyle={{ 
-                  backgroundColor: '#0f172a', 
-                  border: '1px solid #334155',
-                  borderRadius: '8px'
-                }}
-              />
-            </RadarChart>
-          </ResponsiveContainer>
-        </div>
-      )}
-
-      {/* Port Scan Visualizations */}
-      {portStats && (
-        <>
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Services Distribution */}
-            <div className="bg-dark-100 border border-dark-50 rounded-xl p-6">
-              <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
-                <Server className="text-cyber-pink" />
-                Services Distribution
-              </h3>
-              <ResponsiveContainer width="100%" height={300}>
-                <BarChart data={portStats.byService}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                  <XAxis dataKey="name" stroke="#94a3b8" angle={-45} textAnchor="end" height={100} />
-                  <YAxis stroke="#94a3b8" />
-                  <Tooltip 
-                    contentStyle={{ 
-                      backgroundColor: '#0f172a', 
-                      border: '1px solid #334155',
-                      borderRadius: '8px'
-                    }}
-                  />
-                  <Bar dataKey="count" fill={COLORS.pink} />
-                </BarChart>
-              </ResponsiveContainer>
+          <h1 className="text-2xl font-bold text-white flex items-center gap-3">
+            <div className="p-2 rounded-xl bg-emerald-500/10">
+              <BarChart3 size={24} className="text-emerald-400" />
             </div>
+            Visualization
+          </h1>
+          <p className="text-gray-500 mt-1">
+            Visual overview of all reconnaissance data
+          </p>
+        </div>
+        
+        {/* View Selector */}
+        <div className="flex items-center gap-2 bg-[#111111] rounded-xl p-1 border border-[#1f1f1f]">
+          {['overview', 'subdomains', 'content'].map(view => (
+            <button
+              key={view}
+              onClick={() => setSelectedView(view)}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                selectedView === view
+                  ? 'bg-emerald-500/20 text-emerald-400'
+                  : 'text-gray-400 hover:text-white'
+              }`}
+            >
+              {view.charAt(0).toUpperCase() + view.slice(1)}
+            </button>
+          ))}
+        </div>
+      </div>
 
-            {/* Top Ports */}
-            <div className="bg-dark-100 border border-dark-50 rounded-xl p-6">
+      {/* Overview Metrics */}
+      {selectedView === 'overview' && (
+        <>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="bg-[#111111] rounded-xl p-5 border border-[#1f1f1f]">
+              <div className="flex items-center gap-3 mb-3">
+                <div className="p-2 rounded-lg bg-emerald-500/10">
+                  <Network size={20} className="text-emerald-400" />
+                </div>
+                <span className="text-sm text-gray-400">Total Content</span>
+              </div>
+              <div className="text-3xl font-bold text-white">{overviewMetrics.totalContent}</div>
+            </div>
+            
+            <div className="bg-[#111111] rounded-xl p-5 border border-[#1f1f1f]">
+              <div className="flex items-center gap-3 mb-3">
+                <div className="p-2 rounded-lg bg-blue-500/10">
+                  <Globe size={20} className="text-blue-400" />
+                </div>
+                <span className="text-sm text-gray-400">Subdomains</span>
+              </div>
+              <div className="text-3xl font-bold text-white">{overviewMetrics.totalSubdomains}</div>
+            </div>
+            
+            <div className="bg-[#111111] rounded-xl p-5 border border-[#1f1f1f]">
+              <div className="flex items-center gap-3 mb-3">
+                <div className="p-2 rounded-lg bg-green-500/10">
+                  <Activity size={20} className="text-green-400" />
+                </div>
+                <span className="text-sm text-gray-400">Live Hosts</span>
+              </div>
+              <div className="text-3xl font-bold text-white">{overviewMetrics.totalLiveHosts}</div>
+            </div>
+            
+            <div className="bg-[#111111] rounded-xl p-5 border border-yellow-500/30">
+              <div className="flex items-center gap-3 mb-3">
+                <div className="p-2 rounded-lg bg-yellow-500/10">
+                  <Star size={20} className="text-yellow-400" />
+                </div>
+                <span className="text-sm text-gray-400">Interesting</span>
+              </div>
+              <div className="text-3xl font-bold text-yellow-400">{overviewMetrics.interestingFindings}</div>
+            </div>
+          </div>
+
+          {/* Content Type Distribution */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="bg-[#111111] rounded-xl p-6 border border-[#1f1f1f]">
               <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
-                <Network className="text-cyber-blue" />
-                Most Common Open Ports
+                <PieChart size={20} className="text-emerald-400" />
+                Content Type Distribution
               </h3>
-              <div className="space-y-2 max-h-[300px] overflow-y-auto">
-                {portStats.topPorts.map((item, index) => (
-                  <div 
-                    key={item.port}
-                    className="flex items-center justify-between p-3 bg-dark-200 border border-dark-50 rounded-lg hover:border-cyber-blue transition-all"
-                  >
-                    <div className="flex items-center gap-3">
-                      <span className="text-2xl font-bold text-cyber-blue w-8">
-                        #{index + 1}
-                      </span>
-                      <div>
-                        <span className="text-white font-mono font-semibold">
-                          Port {item.port}
-                        </span>
-                        <span className="text-xs text-gray-400 ml-2">
-                          ({item.service})
-                        </span>
+              
+              {contentDistribution.length > 0 ? (
+                <div className="space-y-4">
+                  {contentDistribution.map(item => (
+                    <div key={item.type}>
+                      <div className="flex items-center justify-between mb-2">
+                        <span className={`text-sm font-medium ${item.textColor}`}>{item.type}</span>
+                        <span className="text-sm text-gray-400">{item.count} ({item.percentage}%)</span>
+                      </div>
+                      <div className="h-3 bg-[#1a1a1a] rounded-full overflow-hidden">
+                        <div 
+                          className={`h-full ${item.color} rounded-full transition-all duration-500`}
+                          style={{ width: `${item.percentage}%` }}
+                        />
                       </div>
                     </div>
-                    <span className="px-3 py-1 bg-cyber-blue/20 text-cyber-blue rounded-full text-sm font-medium">
-                      {item.count} hosts
-                    </span>
-                  </div>
-                ))}
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-8 text-gray-500">
+                  No content discovered yet. Run scans to see data.
+                </div>
+              )}
+            </div>
+
+            {/* Category Cards */}
+            <div className="bg-[#111111] rounded-xl p-6 border border-[#1f1f1f]">
+              <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
+                <Shield size={20} className="text-emerald-400" />
+                Discovery Categories
+              </h3>
+              
+              <div className="grid grid-cols-2 gap-3">
+                <div className="bg-orange-500/10 rounded-xl p-4 border border-orange-500/30">
+                  <Database size={24} className="text-orange-400 mb-2" />
+                  <div className="text-2xl font-bold text-orange-400">{overviewMetrics.contentTypes.apis}</div>
+                  <div className="text-sm text-gray-400">APIs</div>
+                </div>
+                
+                <div className="bg-blue-500/10 rounded-xl p-4 border border-blue-500/30">
+                  <LinkIcon size={24} className="text-blue-400 mb-2" />
+                  <div className="text-2xl font-bold text-blue-400">{overviewMetrics.contentTypes.endpoints}</div>
+                  <div className="text-sm text-gray-400">Endpoints</div>
+                </div>
+                
+                <div className="bg-yellow-500/10 rounded-xl p-4 border border-yellow-500/30">
+                  <FolderOpen size={24} className="text-yellow-400 mb-2" />
+                  <div className="text-2xl font-bold text-yellow-400">{overviewMetrics.contentTypes.directories}</div>
+                  <div className="text-sm text-gray-400">Directories</div>
+                </div>
+                
+                <div className="bg-purple-500/10 rounded-xl p-4 border border-purple-500/30">
+                  <FileCode size={24} className="text-purple-400 mb-2" />
+                  <div className="text-2xl font-bold text-purple-400">{overviewMetrics.contentTypes.javascript}</div>
+                  <div className="text-sm text-gray-400">JS Files</div>
+                </div>
               </div>
             </div>
-          </div>
-
-          {/* Targets with Most Open Ports */}
-          <div className="bg-dark-100 border border-dark-50 rounded-xl p-6">
-            <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
-              <AlertTriangle className="text-yellow-400" />
-              Targets with Most Open Ports
-            </h3>
-            <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={portStats.byTarget} layout="vertical">
-                <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                <XAxis type="number" stroke="#94a3b8" />
-                <YAxis 
-                  dataKey="target" 
-                  type="category" 
-                  stroke="#94a3b8" 
-                  width={200}
-                  tick={{ fontSize: 12 }}
-                />
-                <Tooltip 
-                  contentStyle={{ 
-                    backgroundColor: '#0f172a', 
-                    border: '1px solid #334155',
-                    borderRadius: '8px'
-                  }}
-                />
-                <Bar dataKey="count" fill={COLORS.warning} />
-              </BarChart>
-            </ResponsiveContainer>
           </div>
         </>
       )}
 
-      {/* Technology Stack Visualization */}
-      {techStats && (
-        <>
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Technologies Detected */}
-            <div className="bg-dark-100 border border-dark-50 rounded-xl p-6">
-              <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
-                <Code className="text-cyber-purple" />
-                Detected Technologies
-              </h3>
-              <div className="space-y-2 max-h-[400px] overflow-y-auto">
-                {techStats.technologies.map((tech, index) => (
-                  <div 
-                    key={tech.name}
-                    className="flex items-center justify-between p-3 bg-dark-200 border border-dark-50 rounded-lg hover:border-cyber-purple transition-all"
-                  >
+      {/* Subdomains View */}
+      {selectedView === 'subdomains' && (
+        <div className="bg-[#111111] rounded-xl border border-[#1f1f1f] overflow-hidden">
+          <div className="p-5 border-b border-[#1f1f1f]">
+            <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+              <Globe size={20} className="text-emerald-400" />
+              Content per Subdomain
+            </h3>
+          </div>
+          
+          {subdomainStats.length > 0 ? (
+            <div className="divide-y divide-[#1f1f1f]">
+              {subdomainStats.map(sub => (
+                <div key={sub.subdomain} className="p-4 hover:bg-[#1a1a1a] transition-colors">
+                  <div className="flex items-center justify-between mb-3">
                     <div className="flex items-center gap-3">
-                      <span className="text-lg font-bold text-cyber-purple w-6">
-                        {index + 1}
-                      </span>
-                      <span className="text-white font-medium">{tech.name}</span>
+                      <Globe size={16} className="text-gray-500" />
+                      <span className="text-white font-medium">{sub.subdomain}</span>
+                      {sub.interesting > 0 && (
+                        <span className="text-xs px-2 py-0.5 bg-yellow-500/20 text-yellow-400 rounded">
+                          ★ {sub.interesting}
+                        </span>
+                      )}
                     </div>
-                    <span className="px-3 py-1 bg-cyber-purple/20 text-cyber-purple rounded-full text-sm font-medium">
-                      {tech.count} instances
-                    </span>
+                    <span className="text-gray-400 text-sm">{sub.total} items</span>
                   </div>
-                ))}
-              </div>
+                  
+                  {/* Stacked Bar */}
+                  <div className="h-4 bg-[#0a0a0a] rounded-full overflow-hidden flex">
+                    {sub.apis > 0 && (
+                      <div 
+                        className="h-full bg-orange-500" 
+                        style={{ width: `${(sub.apis / sub.total) * 100}%` }}
+                        title={`APIs: ${sub.apis}`}
+                      />
+                    )}
+                    {sub.endpoints > 0 && (
+                      <div 
+                        className="h-full bg-blue-500" 
+                        style={{ width: `${(sub.endpoints / sub.total) * 100}%` }}
+                        title={`Endpoints: ${sub.endpoints}`}
+                      />
+                    )}
+                    {sub.directories > 0 && (
+                      <div 
+                        className="h-full bg-yellow-500" 
+                        style={{ width: `${(sub.directories / sub.total) * 100}%` }}
+                        title={`Directories: ${sub.directories}`}
+                      />
+                    )}
+                    {sub.javascript > 0 && (
+                      <div 
+                        className="h-full bg-purple-500" 
+                        style={{ width: `${(sub.javascript / sub.total) * 100}%` }}
+                        title={`JS Files: ${sub.javascript}`}
+                      />
+                    )}
+                  </div>
+                  
+                  {/* Legend */}
+                  <div className="flex items-center gap-4 mt-2 text-xs">
+                    {sub.apis > 0 && (
+                      <span className="flex items-center gap-1">
+                        <div className="w-2 h-2 rounded-full bg-orange-500" />
+                        <span className="text-gray-500">APIs: {sub.apis}</span>
+                      </span>
+                    )}
+                    {sub.endpoints > 0 && (
+                      <span className="flex items-center gap-1">
+                        <div className="w-2 h-2 rounded-full bg-blue-500" />
+                        <span className="text-gray-500">Endpoints: {sub.endpoints}</span>
+                      </span>
+                    )}
+                    {sub.directories > 0 && (
+                      <span className="flex items-center gap-1">
+                        <div className="w-2 h-2 rounded-full bg-yellow-500" />
+                        <span className="text-gray-500">Directories: {sub.directories}</span>
+                      </span>
+                    )}
+                    {sub.javascript > 0 && (
+                      <span className="flex items-center gap-1">
+                        <div className="w-2 h-2 rounded-full bg-purple-500" />
+                        <span className="text-gray-500">JS: {sub.javascript}</span>
+                      </span>
+                    )}
+                  </div>
+                </div>
+              ))}
             </div>
-
-            {/* HTTP Status Codes Distribution */}
-            <div className="bg-dark-100 border border-dark-50 rounded-xl p-6">
-              <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
-                <Activity className="text-cyan-400" />
-                HTTP Status Code Distribution
-              </h3>
-              <ResponsiveContainer width="100%" height={300}>
-                <PieChart>
-                  <Pie
-                    data={techStats.statusCodes}
-                    cx="50%"
-                    cy="50%"
-                    labelLine={false}
-                    label={({ code, count }) => `${code}: ${count}`}
-                    outerRadius={100}
-                    fill="#8884d8"
-                    dataKey="count"
-                  >
-                    {techStats.statusCodes.map((entry, index) => {
-                      const color = entry.code >= 200 && entry.code < 300 ? COLORS.success :
-                                    entry.code >= 300 && entry.code < 400 ? COLORS.warning :
-                                    entry.code >= 400 && entry.code < 500 ? COLORS.danger :
-                                    COLORS.purple
-                      return <Cell key={`cell-${index}`} fill={color} />
-                    })}
-                  </Pie>
-                  <Tooltip 
-                    contentStyle={{ 
-                      backgroundColor: '#0f172a', 
-                      border: '1px solid #334155',
-                      borderRadius: '8px'
-                    }}
-                  />
-                </PieChart>
-              </ResponsiveContainer>
+          ) : (
+            <div className="p-12 text-center text-gray-500">
+              No subdomain data available. Run content discovery scans first.
             </div>
-          </div>
-
-          {/* Discovery Types */}
-          <div className="bg-dark-100 border border-dark-50 rounded-xl p-6">
-            <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
-              <Search className="text-cyber-green" />
-              Discovery Methods Used
-            </h3>
-            <ResponsiveContainer width="100%" height={250}>
-              <BarChart data={techStats.discoveryTypes}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                <XAxis dataKey="type" stroke="#94a3b8" />
-                <YAxis stroke="#94a3b8" />
-                <Tooltip 
-                  contentStyle={{ 
-                    backgroundColor: '#0f172a', 
-                    border: '1px solid #334155',
-                    borderRadius: '8px'
-                  }}
-                />
-                <Bar dataKey="count" fill={COLORS.success} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </>
-      )}
-
-      {/* Live Hosts Analysis */}
-      {liveHostStats && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Protocol Distribution */}
-          <div className="bg-dark-100 border border-dark-50 rounded-xl p-6">
-            <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
-              <Lock className="text-green-400" />
-              Protocol Distribution
-            </h3>
-            <ResponsiveContainer width="100%" height={300}>
-              <PieChart>
-                <Pie
-                  data={liveHostStats.protocols}
-                  cx="50%"
-                  cy="50%"
-                  labelLine={false}
-                  label={({ name, count }) => `${name.toUpperCase()}: ${count}`}
-                  outerRadius={100}
-                  fill="#8884d8"
-                  dataKey="count"
-                >
-                  {liveHostStats.protocols.map((entry, index) => {
-                    const color = entry.name === 'https' ? COLORS.success : COLORS.warning
-                    return <Cell key={`cell-${index}`} fill={color} />
-                  })}
-                </Pie>
-                <Tooltip 
-                  contentStyle={{ 
-                    backgroundColor: '#0f172a', 
-                    border: '1px solid #334155',
-                    borderRadius: '8px'
-                  }}
-                />
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
-
-          {/* Active vs Inactive */}
-          <div className="bg-dark-100 border border-dark-50 rounded-xl p-6">
-            <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
-              <CheckCircle className="text-green-400" />
-              Host Activity Status
-            </h3>
-            <ResponsiveContainer width="100%" height={300}>
-              <PieChart>
-                <Pie
-                  data={[
-                    { name: 'Active', value: liveHostStats.active },
-                    { name: 'Inactive', value: liveHostStats.total - liveHostStats.active }
-                  ]}
-                  cx="50%"
-                  cy="50%"
-                  labelLine={false}
-                  label={({ name, value }) => `${name}: ${value}`}
-                  outerRadius={100}
-                  fill="#8884d8"
-                  dataKey="value"
-                >
-                  <Cell fill={COLORS.success} />
-                  <Cell fill="#64748b" />
-                </Pie>
-                <Tooltip 
-                  contentStyle={{ 
-                    backgroundColor: '#0f172a', 
-                    border: '1px solid #334155',
-                    borderRadius: '8px'
-                  }}
-                />
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
+          )}
         </div>
       )}
 
-      {/* Summary Statistics */}
-      <div className="bg-dark-100 border border-dark-50 rounded-xl p-6">
-        <h3 className="text-lg font-semibold text-white mb-4">Overall Statistics</h3>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <div className="bg-dark-200 border border-dark-50 rounded-lg p-4 text-center">
-            <Globe className="mx-auto text-cyber-blue mb-2" size={32} />
-            <div className="text-2xl font-bold text-white">{subdomainsData?.length || 0}</div>
-            <div className="text-xs text-gray-400">Total Subdomains</div>
+      {/* Content View */}
+      {selectedView === 'content' && (
+        <div className="space-y-6">
+          {/* Subdomain Filter */}
+          <div className="flex items-center gap-4">
+            <Filter size={18} className="text-gray-500" />
+            <select
+              value={selectedSubdomain}
+              onChange={(e) => setSelectedSubdomain(e.target.value)}
+              className="bg-[#111111] text-white px-4 py-2.5 rounded-xl border border-[#1f1f1f] outline-none"
+            >
+              <option value="all">All Subdomains</option>
+              {uniqueSubdomains.map(sub => (
+                <option key={sub} value={sub}>{sub}</option>
+              ))}
+            </select>
           </div>
-          <div className="bg-dark-200 border border-green-500/20 rounded-lg p-4 text-center">
-            <CheckCircle className="mx-auto text-green-400 mb-2" size={32} />
-            <div className="text-2xl font-bold text-green-400">{liveHostStats?.active || 0}</div>
-            <div className="text-xs text-gray-400">Active Hosts</div>
-          </div>
-          <div className="bg-dark-200 border border-cyber-pink/20 rounded-lg p-4 text-center">
-            <Network className="mx-auto text-cyber-pink mb-2" size={32} />
-            <div className="text-2xl font-bold text-cyber-pink">{portStats?.totalOpenPorts || 0}</div>
-            <div className="text-xs text-gray-400">Open Ports</div>
-          </div>
-          <div className="bg-dark-200 border border-cyber-purple/20 rounded-lg p-4 text-center">
-            <Code className="mx-auto text-cyber-purple mb-2" size={32} />
-            <div className="text-2xl font-bold text-cyber-purple">{techStats?.totalDiscoveries || 0}</div>
-            <div className="text-xs text-gray-400">Endpoints Found</div>
+
+          {/* Content breakdown */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {Object.entries(CONTENT_TYPES).map(([key, config]) => {
+              const typeItems = selectedSubdomain === 'all' 
+                ? items.filter(i => i.content_type === key)
+                : items.filter(i => i.content_type === key && i.subdomain === selectedSubdomain)
+              
+              const IconMap = {
+                api: Database,
+                endpoint: LinkIcon,
+                directory: FolderOpen,
+                javascript: FileCode
+              }
+              const Icon = IconMap[key]
+              
+              return (
+                <div key={key} className={`bg-[#111111] rounded-xl p-5 border ${config.border}`}>
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-3">
+                      <div className={`p-2 rounded-lg ${config.bg}`}>
+                        <Icon size={20} className={config.color} />
+                      </div>
+                      <div>
+                        <h4 className="text-white font-medium">{config.label}</h4>
+                        <p className="text-xs text-gray-500">{config.description}</p>
+                      </div>
+                    </div>
+                    <div className={`text-2xl font-bold ${config.color}`}>{typeItems.length}</div>
+                  </div>
+                  
+                  {/* Sample URLs */}
+                  {typeItems.length > 0 && (
+                    <div className="space-y-1 mt-3 pt-3 border-t border-[#1f1f1f]">
+                      {typeItems.slice(0, 3).map(item => (
+                        <div key={item.id} className="text-xs text-gray-500 truncate font-mono">
+                          {item.discovered_url}
+                        </div>
+                      ))}
+                      {typeItems.length > 3 && (
+                        <div className="text-xs text-gray-600">
+                          +{typeItems.length - 3} more...
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
           </div>
         </div>
-      </div>
+      )}
     </div>
   )
 }
-
-export default Visualization

@@ -18,13 +18,19 @@ import {
   Scan,
   Bug,
   Bell,
-  Settings
+  Settings,
+  FolderOpen,
+  Database,
+  Link as LinkIcon,
+  FileCode,
+  Layers
 } from 'lucide-react'
 
 const Layout = () => {
   const location = useLocation()
   const [expandedSections, setExpandedSections] = useState({
     recon: true,
+    content: true,
     analyze: true,
     reports: true
   })
@@ -50,8 +56,19 @@ const Layout = () => {
       children: [
         { path: '/subdomain-scanner', label: 'Subdomains', icon: Globe },
         { path: '/live-hosts', label: 'Live Hosts', icon: Activity },
-        { path: '/content-discovery', label: 'Content Discovery', icon: Search },
         { path: '/port-scanner', label: 'Port Scanner', icon: Network },
+      ]
+    },
+    {
+      label: 'Content Discovery',
+      icon: Layers,
+      section: 'content',
+      children: [
+        { path: '/content-discovery', label: 'All Content', icon: Search },
+        { path: '/content-discovery/apis', label: 'APIs', icon: Database },
+        { path: '/content-discovery/endpoints', label: 'Endpoints', icon: LinkIcon },
+        { path: '/content-discovery/directories', label: 'Directories', icon: FolderOpen },
+        { path: '/content-discovery/js-files', label: 'JS Files', icon: FileCode },
       ]
     },
     {
@@ -75,8 +92,19 @@ const Layout = () => {
     }
   ]
 
-  const isPathActive = (path) => location.pathname === path
-  const isSectionActive = (children) => children.some(child => location.pathname === child.path)
+  const isPathActive = (path) => {
+    // Exact match
+    if (location.pathname === path) return true
+    // For content-discovery subroutes, match if starts with the path
+    if (path.startsWith('/content-discovery/') && location.pathname.startsWith(path)) return true
+    return false
+  }
+  const isSectionActive = (children) => children.some(child => {
+    if (location.pathname === child.path) return true
+    // Special handling for content discovery section
+    if (child.path === '/content-discovery' && location.pathname.startsWith('/content-discovery')) return true
+    return false
+  })
 
   return (
     <div className="flex h-screen bg-[#0a0a0a]">
