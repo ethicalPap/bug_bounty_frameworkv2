@@ -14,6 +14,7 @@ RUN apt-get update && apt-get install -y \
     chromium \
     chromium-driver \
     nmap \
+    default-jre \
     && rm -rf /var/lib/apt/lists/*
 
 # Set up Go environment
@@ -71,7 +72,6 @@ RUN git clone https://github.com/robertdavidgraham/masscan /opt/masscan \
     && rm -rf /opt/masscan
 
 # Install naabu - optional, will continue if it fails
-# Try v2 first, then fallback to older versions
 RUN go install -v github.com/projectdiscovery/naabu/v2/cmd/naabu@v2.1.8 || \
     echo "Naabu installation skipped - nmap and masscan are available"
 
@@ -102,6 +102,9 @@ RUN go install github.com/projectdiscovery/katana/cmd/katana@latest
 # Install gospider
 RUN go install github.com/jaeles-project/gospider@latest
 
+# Install hakrawler
+RUN go install github.com/hakluke/hakrawler@latest
+
 # JavaScript Analysis Tools
 # Install LinkFinder
 RUN git clone https://github.com/GerbenJavado/LinkFinder.git /opt/LinkFinder \
@@ -109,15 +112,15 @@ RUN git clone https://github.com/GerbenJavado/LinkFinder.git /opt/LinkFinder \
     && pip install -r requirements.txt \
     && chmod +x linkfinder.py
 
-# API Discovery Tools
-# Install Arjun
-RUN pip install arjun
+# Install xnLinkFinder
+RUN pip install xnLinkFinder
 
-# Install kiterunner (optional - very large)
-# RUN wget https://github.com/assetnote/kiterunner/releases/latest/download/kiterunner_linux_amd64.tar.gz \
-#     && tar -xzf kiterunner_linux_amd64.tar.gz \
-#     && mv kr /usr/local/bin/ \
-#     && rm kiterunner_linux_amd64.tar.gz
+# Install jsluice
+RUN go install github.com/BishopFox/jsluice/cmd/jsluice@latest
+
+# API/Parameter Discovery Tools
+# Install ParamSpider
+RUN pip install paramspider
 
 # Specialized Discovery Tools
 # Install unfurl
@@ -134,6 +137,23 @@ RUN go install github.com/tomnomnom/qsreplace@latest
 
 # Copy Go binaries to system PATH
 RUN cp $GOPATH/bin/* /usr/local/bin/ 2>/dev/null || true
+
+# ==================== OWASP ZAP ====================
+
+# Install ZAP
+ENV ZAP_VERSION=2.14.0
+RUN mkdir -p /opt/zap \
+    && wget -q https://github.com/zaproxy/zaproxy/releases/download/v${ZAP_VERSION}/ZAP_${ZAP_VERSION}_Linux.tar.gz \
+    && tar -xzf ZAP_${ZAP_VERSION}_Linux.tar.gz -C /opt/zap --strip-components=1 \
+    && rm ZAP_${ZAP_VERSION}_Linux.tar.gz \
+    && ln -s /opt/zap/zap.sh /usr/local/bin/zap \
+    && ln -s /opt/zap/zap-cli.py /usr/local/bin/zap-cli 2>/dev/null || true
+
+# Install zap-cli Python package
+RUN pip install python-owasp-zap-v2.4
+
+# Create ZAP home directory
+RUN mkdir -p /root/.ZAP
 
 # ==================== WORDLISTS ====================
 
@@ -179,6 +199,7 @@ RUN mkdir -p /app/output /app/logs /tmp
 # Set environment variables
 ENV PYTHONPATH=/app
 ENV DATABASE_URL=postgresql://postgres:password@db:5432/subdomain_scanner
+ENV ZAP_PATH=/opt/zap
 
 # Expose port
 EXPOSE 8000

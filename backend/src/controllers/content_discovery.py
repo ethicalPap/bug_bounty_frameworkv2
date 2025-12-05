@@ -43,14 +43,18 @@ class ContentDiscoveryConfig:
     # Crawling options
     use_katana: bool = True
     use_gospider: bool = True
+    use_hakrawler: bool = False
+    use_zap_spider: bool = False
+    use_zap_ajax: bool = False
     crawl_depth: int = 3
     
     # JS Analysis options
     use_linkfinder: bool = True
+    use_jsluice: bool = False
     
     # API Discovery options
     use_kiterunner: bool = False  # Resource intensive
-    use_arjun: bool = True
+    use_paramspider: bool = False
     
     # Specialized tools
     use_unfurl: bool = True
@@ -63,6 +67,10 @@ class ContentDiscoveryConfig:
     rate_limit: int = 150  # Requests per second
     follow_redirects: bool = True
     subdomain_id: Optional[int] = None
+    
+    # ZAP Configuration
+    zap_api_key: str = os.getenv('ZAP_API_KEY', '')
+    zap_proxy: str = os.getenv('ZAP_PROXY', 'http://localhost:8080')
     
 class ContentDiscoveryScanner:
     def __init__(self, config: ContentDiscoveryConfig):
@@ -414,6 +422,199 @@ class ContentDiscoveryScanner:
         
         return results
     
+    def run_hakrawler(self) -> Set[Dict]:
+        """Run hakrawler for simple crawling"""
+        if not self.check_tool_installed('hakrawler'):
+            logger.warning("hakrawler not installed, skipping...")
+            return set()
+        
+        logger.info(f"Running hakrawler for {self.config.target_url}")
+        results = set()
+        
+        try:
+            target = self.normalize_url(self.config.target_url)
+            
+            cmd = [
+                'hakrawler',
+                '-url', target,
+                '-depth', str(self.config.crawl_depth),
+                '-plain'
+            ]
+            
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=self.config.timeout)
+            
+            if result.returncode == 0:
+                for line in result.stdout.strip().split('\n'):
+                    url = line.strip()
+                    if url and url.startswith('http'):
+                        results.add(json.dumps({
+                            'url': url,
+                            'tool': 'hakrawler',
+                            'discovery_type': 'crawling'
+                        }))
+            
+            logger.info(f"hakrawler found {len(results)} URLs")
+            
+        except subprocess.TimeoutExpired:
+            logger.error(f"hakrawler timeout for {self.config.target_url}")
+        except Exception as e:
+            logger.error(f"hakrawler error: {e}")
+        
+        return results
+    
+    def run_zap_spider(self) -> Set[Dict]:
+        """Run OWASP ZAP traditional spider"""
+        logger.info(f"Running ZAP Spider for {self.config.target_url}")
+        results = set()
+        
+        try:
+            target = self.normalize_url(self.config.target_url)
+            zap_base = self.config.zap_proxy
+            api_key = self.config.zap_api_key
+            
+            # Start spider scan
+            start_url = f"{zap_base}/JSON/spider/action/scan/"
+            params = {
+                'apikey': api_key,
+                'url': target,
+                'maxChildren': '100',
+                'recurse': 'true',
+                'subtreeOnly': 'true'
+            }
+            
+            response = requests.get(start_url, params=params, timeout=30)
+            if response.status_code != 200:
+                logger.error(f"ZAP Spider failed to start: {response.text}")
+                return results
+            
+            scan_id = response.json().get('scan')
+            logger.info(f"ZAP Spider started with scan ID: {scan_id}")
+            
+            # Wait for spider to complete (with timeout)
+            status_url = f"{zap_base}/JSON/spider/view/status/"
+            max_wait = self.config.timeout
+            waited = 0
+            
+            while waited < max_wait:
+                status_response = requests.get(status_url, params={'apikey': api_key, 'scanId': scan_id}, timeout=10)
+                status = int(status_response.json().get('status', '0'))
+                
+                if status >= 100:
+                    break
+                
+                import time
+                time.sleep(5)
+                waited += 5
+                logger.info(f"ZAP Spider progress: {status}%")
+            
+            # Get results
+            results_url = f"{zap_base}/JSON/spider/view/results/"
+            results_response = requests.get(results_url, params={'apikey': api_key, 'scanId': scan_id}, timeout=30)
+            
+            if results_response.status_code == 200:
+                urls = results_response.json().get('results', [])
+                for url in urls:
+                    if url:
+                        results.add(json.dumps({
+                            'url': url,
+                            'tool': 'zap_spider',
+                            'discovery_type': 'crawling'
+                        }))
+            
+            logger.info(f"ZAP Spider found {len(results)} URLs")
+            
+        except requests.exceptions.ConnectionError:
+            logger.error("ZAP is not running or not accessible")
+        except Exception as e:
+            logger.error(f"ZAP Spider error: {e}")
+        
+        return results
+    
+    def run_zap_ajax_spider(self) -> Set[Dict]:
+        """Run OWASP ZAP Ajax Spider for JavaScript-heavy sites"""
+        logger.info(f"Running ZAP Ajax Spider for {self.config.target_url}")
+        results = set()
+        
+        try:
+            target = self.normalize_url(self.config.target_url)
+            zap_base = self.config.zap_proxy
+            api_key = self.config.zap_api_key
+            
+            # Start Ajax spider scan
+            start_url = f"{zap_base}/JSON/ajaxSpider/action/scan/"
+            params = {
+                'apikey': api_key,
+                'url': target,
+                'inScope': 'true',
+                'subtreeOnly': 'true'
+            }
+            
+            response = requests.get(start_url, params=params, timeout=30)
+            if response.status_code != 200:
+                logger.error(f"ZAP Ajax Spider failed to start: {response.text}")
+                return results
+            
+            logger.info("ZAP Ajax Spider started")
+            
+            # Wait for Ajax spider to complete
+            status_url = f"{zap_base}/JSON/ajaxSpider/view/status/"
+            max_wait = self.config.timeout
+            waited = 0
+            
+            while waited < max_wait:
+                status_response = requests.get(status_url, params={'apikey': api_key}, timeout=10)
+                status = status_response.json().get('status', '')
+                
+                if status == 'stopped':
+                    break
+                
+                import time
+                time.sleep(5)
+                waited += 5
+                logger.info(f"ZAP Ajax Spider status: {status}")
+            
+            # Get results from spider results
+            results_url = f"{zap_base}/JSON/ajaxSpider/view/results/"
+            results_response = requests.get(results_url, params={'apikey': api_key, 'start': '0', 'count': '10000'}, timeout=30)
+            
+            if results_response.status_code == 200:
+                items = results_response.json().get('results', [])
+                for item in items:
+                    url = item.get('requestHeader', '').split(' ')[1] if 'requestHeader' in item else ''
+                    if url and url.startswith('/'):
+                        parsed = urlparse(target)
+                        url = f"{parsed.scheme}://{parsed.netloc}{url}"
+                    
+                    if url and url.startswith('http'):
+                        results.add(json.dumps({
+                            'url': url,
+                            'tool': 'zap_ajax_spider',
+                            'discovery_type': 'crawling'
+                        }))
+            
+            # Also get URLs from the sites tree
+            sites_url = f"{zap_base}/JSON/core/view/urls/"
+            sites_response = requests.get(sites_url, params={'apikey': api_key, 'baseurl': target}, timeout=30)
+            
+            if sites_response.status_code == 200:
+                urls = sites_response.json().get('urls', [])
+                for url in urls:
+                    if url:
+                        results.add(json.dumps({
+                            'url': url,
+                            'tool': 'zap_ajax_spider',
+                            'discovery_type': 'crawling'
+                        }))
+            
+            logger.info(f"ZAP Ajax Spider found {len(results)} URLs")
+            
+        except requests.exceptions.ConnectionError:
+            logger.error("ZAP is not running or not accessible")
+        except Exception as e:
+            logger.error(f"ZAP Ajax Spider error: {e}")
+        
+        return results
+    
     # ==================== JS ANALYSIS ====================
     
     def run_linkfinder(self) -> Set[Dict]:
@@ -469,64 +670,122 @@ class ContentDiscoveryScanner:
         
         return results
     
-    # ==================== API DISCOVERY ====================
-    
-    def run_arjun(self) -> Set[Dict]:
-        """Run Arjun for parameter discovery"""
-        if not self.check_tool_installed('arjun'):
-            logger.warning("Arjun not installed, skipping...")
+    def run_jsluice(self) -> Set[Dict]:
+        """Run jsluice for extracting URLs from JavaScript"""
+        if not self.check_tool_installed('jsluice'):
+            logger.warning("jsluice not installed, skipping...")
             return set()
         
-        logger.info(f"Running Arjun for {self.config.target_url}")
+        logger.info(f"Running jsluice for {self.config.target_url}")
+        results = set()
+        
+        try:
+            target = self.normalize_url(self.config.target_url)
+            
+            # Fetch JS content first
+            response = requests.get(target, timeout=30, verify=False)
+            
+            if response.status_code == 200:
+                # Write to temp file
+                with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.js') as tmp:
+                    tmp.write(response.text)
+                    tmp_file = tmp.name
+                
+                cmd = ['jsluice', 'urls', tmp_file]
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+                
+                if result.returncode == 0:
+                    for line in result.stdout.strip().split('\n'):
+                        try:
+                            data = json.loads(line)
+                            url = data.get('url', '')
+                            if url:
+                                if url.startswith('/'):
+                                    parsed = urlparse(target)
+                                    url = f"{parsed.scheme}://{parsed.netloc}{url}"
+                                results.add(json.dumps({
+                                    'url': url,
+                                    'tool': 'jsluice',
+                                    'discovery_type': 'js_analysis'
+                                }))
+                        except json.JSONDecodeError:
+                            continue
+                
+                os.unlink(tmp_file)
+            
+            logger.info(f"jsluice found {len(results)} URLs")
+            
+        except Exception as e:
+            logger.error(f"jsluice error: {e}")
+        
+        return results
+    
+    # ==================== PARAMETER DISCOVERY ====================
+    
+    def run_paramspider(self) -> Set[Dict]:
+        """Run ParamSpider for parameter mining from archives"""
+        if not self.check_tool_installed('paramspider'):
+            logger.warning("paramspider not installed, skipping...")
+            return set()
+        
+        logger.info(f"Running ParamSpider for {self.config.target_url}")
         results = set()
         parameters = []
         
         try:
-            target = self.normalize_url(self.config.target_url)
-            output_file = f"/tmp/arjun_{self.scan_id}.json"
+            parsed = urlparse(self.normalize_url(self.config.target_url))
+            domain = parsed.netloc
+            output_dir = f"/tmp/paramspider_{self.scan_id}"
+            os.makedirs(output_dir, exist_ok=True)
             
             cmd = [
-                'arjun',
-                '-u', target,
-                '-oJ', output_file,
-                '-t', str(self.config.threads),
-                '--stable'
+                'paramspider',
+                '-d', domain,
+                '-o', f"{output_dir}/params.txt"
             ]
             
             subprocess.run(cmd, capture_output=True, timeout=self.config.timeout)
             
             # Parse results
+            output_file = f"{output_dir}/params.txt"
             if os.path.exists(output_file):
                 with open(output_file, 'r') as f:
-                    data = json.load(f)
-                    for url, params in data.items():
-                        for param in params:
-                            parameters.append({
-                                'target_url': url,
-                                'parameter_name': param,
-                                'parameter_type': 'query',
-                                'tool': 'arjun'
-                            })
-                            
-                            # Add to results
-                            param_url = f"{url}?{param}=test"
+                    for line in f:
+                        url = line.strip()
+                        if url:
                             results.add(json.dumps({
-                                'url': param_url,
-                                'tool': 'arjun',
+                                'url': url,
+                                'tool': 'paramspider',
                                 'discovery_type': 'api'
                             }))
-                
-                os.unlink(output_file)
+                            
+                            # Extract parameter names
+                            parsed_url = urlparse(url)
+                            if parsed_url.query:
+                                for param in parsed_url.query.split('&'):
+                                    param_name = param.split('=')[0]
+                                    if param_name:
+                                        parameters.append({
+                                            'target_url': url.split('?')[0],
+                                            'parameter_name': param_name,
+                                            'parameter_type': 'query',
+                                            'tool': 'paramspider'
+                                        })
             
-            logger.info(f"Arjun found {len(parameters)} parameters")
+            # Cleanup
+            import shutil
+            shutil.rmtree(output_dir, ignore_errors=True)
             
-            # Store parameters separately
-            self.save_api_parameters(parameters)
+            logger.info(f"ParamSpider found {len(results)} URLs with parameters")
+            
+            # Store parameters
+            if parameters:
+                self.save_api_parameters(parameters)
             
         except subprocess.TimeoutExpired:
-            logger.error(f"Arjun timeout for {self.config.target_url}")
+            logger.error(f"ParamSpider timeout for {self.config.target_url}")
         except Exception as e:
-            logger.error(f"Arjun error: {e}")
+            logger.error(f"ParamSpider error: {e}")
         
         return results
     
@@ -859,7 +1118,7 @@ class ContentDiscoveryScanner:
                 tool_results['gau'] = len(gau_results)
         
         # Crawling
-        if scan_type in ['full', 'crawling']:
+        if scan_type in ['full', 'crawling', 'api']:
             if self.config.use_katana:
                 katana_results = self.run_katana()
                 all_results.update(katana_results)
@@ -869,20 +1128,40 @@ class ContentDiscoveryScanner:
                 gospider_results = self.run_gospider()
                 all_results.update(gospider_results)
                 tool_results['gospider'] = len(gospider_results)
+            
+            if self.config.use_hakrawler:
+                hakrawler_results = self.run_hakrawler()
+                all_results.update(hakrawler_results)
+                tool_results['hakrawler'] = len(hakrawler_results)
+            
+            if self.config.use_zap_spider:
+                zap_spider_results = self.run_zap_spider()
+                all_results.update(zap_spider_results)
+                tool_results['zap_spider'] = len(zap_spider_results)
+            
+            if self.config.use_zap_ajax:
+                zap_ajax_results = self.run_zap_ajax_spider()
+                all_results.update(zap_ajax_results)
+                tool_results['zap_ajax_spider'] = len(zap_ajax_results)
         
         # JS Analysis
-        if scan_type in ['full', 'js_analysis']:
+        if scan_type in ['full', 'js_analysis', 'javascript']:
             if self.config.use_linkfinder:
                 linkfinder_results = self.run_linkfinder()
                 all_results.update(linkfinder_results)
                 tool_results['linkfinder'] = len(linkfinder_results)
+            
+            if self.config.use_jsluice:
+                jsluice_results = self.run_jsluice()
+                all_results.update(jsluice_results)
+                tool_results['jsluice'] = len(jsluice_results)
         
-        # API Discovery
+        # API/Parameter Discovery
         if scan_type in ['full', 'api']:
-            if self.config.use_arjun:
-                arjun_results = self.run_arjun()
-                all_results.update(arjun_results)
-                tool_results['arjun'] = len(arjun_results)
+            if self.config.use_paramspider:
+                paramspider_results = self.run_paramspider()
+                all_results.update(paramspider_results)
+                tool_results['paramspider'] = len(paramspider_results)
         
         # Specialized Tools - Process collected URLs
         if all_results:
@@ -900,7 +1179,7 @@ class ContentDiscoveryScanner:
         # Save results to database
         saved_count = self.save_to_database(all_results)
         
-        # ✅ CRITICAL FIX: Query saved records to include in response
+        # Query saved records to include in response
         db = SessionLocal()
         try:
             saved_records = db.query(ContentDiscovery).filter(
@@ -916,7 +1195,7 @@ class ContentDiscoveryScanner:
                 'tool_results': tool_results,
                 'timestamp': datetime.utcnow().isoformat(),
                 
-                # ✅ THIS IS THE FIX - Include discovered_urls array for frontend
+                # Include discovered_urls array for frontend
                 'discovered_urls': [
                     {
                         'id': record.id,

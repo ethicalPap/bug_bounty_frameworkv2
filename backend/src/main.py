@@ -130,13 +130,17 @@ class ContentDiscoveryRequest(BaseModel):
     # Crawling options
     use_katana: bool = Field(True, description="Use katana for crawling")
     use_gospider: bool = Field(True, description="Use gospider for spidering")
+    use_hakrawler: bool = Field(False, description="Use hakrawler for simple crawling")
+    use_zap_spider: bool = Field(False, description="Use OWASP ZAP spider")
+    use_zap_ajax: bool = Field(False, description="Use OWASP ZAP Ajax spider")
     crawl_depth: int = Field(3, description="Crawl depth", ge=1, le=5)
     
     # JS Analysis
     use_linkfinder: bool = Field(True, description="Use LinkFinder for JS analysis")
+    use_jsluice: bool = Field(False, description="Use jsluice for JS URL extraction")
     
-    # API Discovery
-    use_arjun: bool = Field(True, description="Use Arjun for parameter discovery")
+    # Parameter Discovery
+    use_paramspider: bool = Field(False, description="Use ParamSpider for parameter mining")
     
     # Specialized
     use_unfurl: bool = Field(True, description="Use unfurl for URL parsing")
@@ -472,9 +476,13 @@ async def create_content_discovery(
             use_gau=request.use_gau,
             use_katana=request.use_katana,
             use_gospider=request.use_gospider,
+            use_hakrawler=request.use_hakrawler,
+            use_zap_spider=request.use_zap_spider,
+            use_zap_ajax=request.use_zap_ajax,
             crawl_depth=request.crawl_depth,
             use_linkfinder=request.use_linkfinder,
-            use_arjun=request.use_arjun,
+            use_jsluice=request.use_jsluice,
+            use_paramspider=request.use_paramspider,
             use_unfurl=request.use_unfurl,
             use_uro=request.use_uro,
             use_nuclei=request.use_nuclei,
@@ -505,7 +513,7 @@ async def start_content_discovery_scan(
         if not target_url:
             raise HTTPException(status_code=400, detail="target_url is required")
         
-        # Extract all configuration options
+        # Extract all configuration options - NO use_arjun!
         scan_config = {
             'scan_type': request.get('scan_type', 'full'),
             'use_ffuf': request.get('use_ffuf', True),
@@ -514,8 +522,12 @@ async def start_content_discovery_scan(
             'use_gau': request.get('use_gau', True),
             'use_katana': request.get('use_katana', True),
             'use_gospider': request.get('use_gospider', False),
+            'use_hakrawler': request.get('use_hakrawler', False),
+            'use_zap_spider': request.get('use_zap_spider', False),
+            'use_zap_ajax': request.get('use_zap_ajax', False),
             'use_linkfinder': request.get('use_linkfinder', False),
-            'use_arjun': request.get('use_arjun', True),
+            'use_jsluice': request.get('use_jsluice', False),
+            'use_paramspider': request.get('use_paramspider', False),
             'use_unfurl': request.get('use_unfurl', True),
             'use_uro': request.get('use_uro', True),
             'use_nuclei': request.get('use_nuclei', False),

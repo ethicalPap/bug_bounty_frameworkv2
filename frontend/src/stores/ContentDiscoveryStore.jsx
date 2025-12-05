@@ -13,7 +13,7 @@ export const CONTENT_TYPES = {
     bg: 'bg-orange-500/10',
     border: 'border-orange-500/30',
     patterns: ['/api/', '/v1/', '/v2/', '/v3/', '/graphql', '/rest/', '/json/', '/xml/', '/oauth/', '/auth/', '/token/'],
-    tools: ['arjun', 'ffuf', 'gau', 'waymore'],
+    tools: ['zapspider', 'paramspider', 'ffuf', 'gau', 'waymore'],
     riskFactors: ['IDOR', 'Auth Bypass', 'Rate Limiting', 'Mass Assignment']
   },
   endpoint: {

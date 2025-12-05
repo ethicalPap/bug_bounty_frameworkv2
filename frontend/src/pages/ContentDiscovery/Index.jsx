@@ -6,6 +6,7 @@
 
 import { useState, useEffect, useMemo } from 'react'
 import { Link } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
 import { 
   Search,
   Globe,
@@ -30,7 +31,7 @@ import {
   List,
   CheckSquare
 } from 'lucide-react'
-import { startContentDiscovery } from '../../api/client'
+import { startContentDiscovery, getDomains, getSubdomains } from '../../api/client'
 import { useContentDiscovery, CONTENT_TYPES } from '../../stores/contentDiscoveryStore.jsx'
 
 // Tool configurations
@@ -41,8 +42,11 @@ const TOOLS = {
   gau: { name: 'GAU', description: 'Archive URLs', category: 'passive' },
   katana: { name: 'Katana', description: 'Web crawler', category: 'crawling' },
   gospider: { name: 'GoSpider', description: 'Fast web spider', category: 'crawling' },
+  hakrawler: { name: 'Hakrawler', description: 'Simple web crawler', category: 'crawling' },
+  zapspider: { name: 'ZAP Spider', description: 'OWASP ZAP spider', category: 'crawling' },
   linkfinder: { name: 'LinkFinder', description: 'JS endpoint extraction', category: 'js' },
-  arjun: { name: 'Arjun', description: 'Parameter discovery', category: 'api' },
+  jsluice: { name: 'JSLuice', description: 'Extract URLs from JS', category: 'js' },
+  paramspider: { name: 'ParamSpider', description: 'Parameter mining', category: 'api' },
 }
 
 // Scan presets
@@ -55,7 +59,7 @@ const SCAN_PRESETS = {
   full: {
     name: 'Full Scan', 
     description: 'Comprehensive discovery',
-    tools: ['ffuf', 'feroxbuster', 'waymore', 'gau', 'katana', 'gospider', 'linkfinder', 'arjun'],
+    tools: ['ffuf', 'feroxbuster', 'waymore', 'gau', 'katana', 'gospider', 'linkfinder', 'zapspider'],
   },
   passive: {
     name: 'Passive Only',
@@ -108,7 +112,7 @@ export default function ContentDiscoveryIndex() {
   const [showConfig, setShowConfig] = useState(false)
   const [scanConfig, setScanConfig] = useState({
     scanType: 'full',
-    enabledTools: ['ffuf', 'waymore', 'gau', 'katana', 'linkfinder', 'arjun'],
+    enabledTools: ['ffuf', 'waymore', 'gau', 'katana', 'linkfinder', 'zapspider'],
     wordlist: '/opt/wordlists/common.txt',
     threads: 10,
     timeout: 600,
@@ -116,77 +120,103 @@ export default function ContentDiscoveryIndex() {
     crawlDepth: 3,
   })
 
-  // Available domains from subdomain scans (from localStorage)
-  const [availableDomains, setAvailableDomains] = useState([])
-  
-  // Get subdomains for selected domain
+  // Subdomains state
   const [subdomainsList, setSubdomainsList] = useState([])
-  
-  // All subdomains data from localStorage
-  const [allSubdomainsData, setAllSubdomainsData] = useState({})
   
   // Live hosts from localStorage
   const [liveHosts, setLiveHosts] = useState([])
 
-  // Load subdomain data from localStorage
-  useEffect(() => {
-    const loadSubdomainData = () => {
-      try {
-        const saved = localStorage.getItem('subdomain_scan_results')
-        if (saved) {
-          const parsed = JSON.parse(saved)
-          // parsed could be:
-          // 1. Object keyed by domain: { "example.com": [...subdomains] }
-          // 2. Array of subdomains for a single domain
-          // 3. Object with a different structure
-          
-          if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
-            // It's an object - could be keyed by domain or have other structure
-            const domains = Object.keys(parsed).filter(d => {
-              const subs = parsed[d]
-              return Array.isArray(subs) && subs.length > 0
-            })
-            
-            if (domains.length > 0) {
-              setAllSubdomainsData(parsed)
-              setAvailableDomains(domains)
-              console.log('📋 [Content Discovery] Loaded domains from localStorage:', domains)
-            }
-          }
+  // Fetch domains from backend API
+  const { data: domainsData, isLoading: isLoadingDomains } = useQuery({
+    queryKey: ['domains'],
+    queryFn: getDomains,
+    staleTime: 30000, // 30 seconds
+    refetchInterval: 60000, // Refetch every minute
+  })
+
+  // Extract available domains from API response
+  const availableDomains = useMemo(() => {
+    if (!domainsData) return []
+    
+    console.log('📋 [Content Discovery] Domains API response:', domainsData)
+    
+    // Handle string response (single domain)
+    if (typeof domainsData === 'string') {
+      return [domainsData]
+    }
+    
+    // Handle array response
+    if (Array.isArray(domainsData)) {
+      return domainsData.map(d => typeof d === 'string' ? d : d.domain || d.name || d.full_domain).filter(Boolean)
+    }
+    
+    // Handle object with domains array
+    if (domainsData.domains && Array.isArray(domainsData.domains)) {
+      return domainsData.domains.map(d => typeof d === 'string' ? d : d.domain || d.name || d.full_domain).filter(Boolean)
+    }
+    
+    // Handle object with data array
+    if (domainsData.data && Array.isArray(domainsData.data)) {
+      return domainsData.data.map(d => typeof d === 'string' ? d : d.domain || d.name || d.full_domain).filter(Boolean)
+    }
+    
+    // Handle single domain object
+    if (domainsData.domain) {
+      return [domainsData.domain]
+    }
+    
+    return []
+  }, [domainsData])
+
+  // Calculate total subdomain count
+  const totalSubdomainCount = useMemo(() => {
+    if (!domainsData) return 0
+    
+    // If it's a string, we have 1 domain but don't know subdomain count yet
+    if (typeof domainsData === 'string') return 0
+    
+    if (Array.isArray(domainsData)) {
+      const total = domainsData.reduce((sum, d) => {
+        if (typeof d === 'object') {
+          return sum + (d.subdomain_count || d.count || d.total || 0)
         }
-      } catch (e) {
-        console.error('Error loading subdomain data:', e)
-      }
+        return sum
+      }, 0)
+      // If no counts in objects, just return domain count as fallback
+      return total > 0 ? total : domainsData.length
     }
+    
+    if (domainsData.total_subdomains) return domainsData.total_subdomains
+    if (domainsData.total) return domainsData.total
+    if (domainsData.count) return domainsData.count
+    
+    return availableDomains.length
+  }, [domainsData, availableDomains.length])
 
-    loadSubdomainData()
-    
-    // Listen for storage changes (in case subdomain scanner updates from another tab)
-    const handleStorageChange = (e) => {
-      if (e.key === 'subdomain_scan_results') {
-        loadSubdomainData()
-      }
-    }
-    window.addEventListener('storage', handleStorageChange)
-    
-    // Also poll periodically in case same-tab updates
-    const interval = setInterval(loadSubdomainData, 2000)
-    
-    return () => {
-      window.removeEventListener('storage', handleStorageChange)
-      clearInterval(interval)
-    }
-  }, [])
+  // Fetch subdomains when domain is selected
+  const { data: subdomainsData, isLoading: isLoadingSubdomains } = useQuery({
+    queryKey: ['subdomains', selectedDomain],
+    queryFn: () => getSubdomains(selectedDomain),
+    enabled: !!selectedDomain,
+    staleTime: 60000,
+  })
 
-  // Update subdomains list when domain is selected
+  // Update subdomains list when data changes
   useEffect(() => {
-    if (!selectedDomain || !allSubdomainsData[selectedDomain]) {
+    if (!subdomainsData) {
       setSubdomainsList([])
       return
     }
 
-    const subs = allSubdomainsData[selectedDomain]
-    
+    let subs = []
+    if (Array.isArray(subdomainsData)) {
+      subs = subdomainsData
+    } else if (subdomainsData.data && Array.isArray(subdomainsData.data)) {
+      subs = subdomainsData.data
+    } else if (subdomainsData.subdomains && Array.isArray(subdomainsData.subdomains)) {
+      subs = subdomainsData.subdomains
+    }
+
     // Normalize to have full_domain
     const normalized = subs.map(sub => {
       if (typeof sub === 'string') {
@@ -199,9 +229,9 @@ export default function ContentDiscoveryIndex() {
         ...sub
       }
     })
-    
+
     setSubdomainsList(normalized)
-  }, [selectedDomain, allSubdomainsData])
+  }, [subdomainsData])
 
   // Load live hosts from localStorage
   useEffect(() => {
@@ -285,14 +315,11 @@ export default function ContentDiscoveryIndex() {
     return selectedTargets
   }
 
-  const handleStartScan = async () => {
-    const targets = getTargetsToScan()
-    if (targets.length === 0 || isScanning) return
+  // Batch scan state
+  const [batchProgress, setBatchProgress] = useState({ current: 0, total: 0, currentTarget: '' })
 
-    // For now, scan first target (can extend to batch later)
-    const target = targets[0]
-    startScan(target)
-
+  // Scan a single target
+  const scanSingleTarget = async (target) => {
     try {
       const response = await startContentDiscovery({
         target_url: target,
@@ -303,8 +330,12 @@ export default function ContentDiscoveryIndex() {
         use_gau: scanConfig.enabledTools.includes('gau'),
         use_katana: scanConfig.enabledTools.includes('katana'),
         use_gospider: scanConfig.enabledTools.includes('gospider'),
+        use_hakrawler: scanConfig.enabledTools.includes('hakrawler'),
         use_linkfinder: scanConfig.enabledTools.includes('linkfinder'),
-        use_arjun: scanConfig.enabledTools.includes('arjun'),
+        use_jsluice: scanConfig.enabledTools.includes('jsluice'),
+        use_paramspider: scanConfig.enabledTools.includes('paramspider'),
+        use_zap_spider: scanConfig.enabledTools.includes('zapspider'),
+        use_zap_ajax: scanConfig.enabledTools.includes('zapajax'),
         threads: scanConfig.threads,
         timeout: scanConfig.timeout,
         rate_limit: scanConfig.rateLimit,
@@ -320,12 +351,101 @@ export default function ContentDiscoveryIndex() {
         scan_id: response.scan_id
       }))
 
-      addItems(newItems)
-      endScan(true, newItems.length)
+      return { success: true, items: newItems, target }
     } catch (error) {
-      console.error('Scan failed:', error)
-      endScan(false, 0)
+      console.error(`Scan failed for ${target}:`, error)
+      return { success: false, items: [], target, error: error.message }
     }
+  }
+
+  const handleStartScan = async () => {
+    const targets = getTargetsToScan()
+    if (targets.length === 0 || isScanning) return
+
+    startScan(targets[0])
+    setBatchProgress({ current: 0, total: targets.length, currentTarget: '' })
+
+    let totalItems = []
+    let successCount = 0
+    let failCount = 0
+
+    for (let i = 0; i < targets.length; i++) {
+      const target = targets[i]
+      setBatchProgress({ current: i + 1, total: targets.length, currentTarget: target })
+      updateProgress(Math.round(((i + 1) / targets.length) * 100), `Scanning ${i + 1}/${targets.length}: ${new URL(target).hostname}`)
+
+      const result = await scanSingleTarget(target)
+      
+      if (result.success) {
+        successCount++
+        totalItems = [...totalItems, ...result.items]
+        addItems(result.items)
+      } else {
+        failCount++
+      }
+    }
+
+    setBatchProgress({ current: 0, total: 0, currentTarget: '' })
+    endScan(successCount > 0, totalItems.length)
+  }
+
+  // Scan all subdomains for selected domain
+  const handleScanAllSubdomains = async () => {
+    if (!selectedDomain || isScanning || subdomainsList.length === 0) return
+    
+    const targets = subdomainsList.map(s => `https://${s.full_domain}`)
+    setSelectedTargets(targets)
+    setSelectAll(true)
+    
+    // Trigger scan after state update
+    setTimeout(() => {
+      handleStartScanWithTargets(targets)
+    }, 100)
+  }
+
+  // Scan all live hosts
+  const handleScanAllLiveHosts = async () => {
+    if (isScanning || liveHosts.length === 0) return
+    
+    const targets = liveHosts.map(h => h.url || `https://${h.subdomain}`)
+    setSelectedTargets(targets)
+    setSelectAll(true)
+    
+    // Trigger scan after state update
+    setTimeout(() => {
+      handleStartScanWithTargets(targets)
+    }, 100)
+  }
+
+  // Start scan with specific targets (bypasses getTargetsToScan)
+  const handleStartScanWithTargets = async (targets) => {
+    if (targets.length === 0 || isScanning) return
+
+    startScan(targets[0])
+    setBatchProgress({ current: 0, total: targets.length, currentTarget: '' })
+
+    let totalItems = []
+    let successCount = 0
+    let failCount = 0
+
+    for (let i = 0; i < targets.length; i++) {
+      const target = targets[i]
+      setBatchProgress({ current: i + 1, total: targets.length, currentTarget: target })
+      updateProgress(Math.round(((i + 1) / targets.length) * 100), `Scanning ${i + 1}/${targets.length}: ${new URL(target).hostname}`)
+
+      const result = await scanSingleTarget(target)
+      
+      if (result.success) {
+        successCount++
+        totalItems = [...totalItems, ...result.items]
+        addItems(result.items)
+      } else {
+        failCount++
+      }
+    }
+
+    setBatchProgress({ current: 0, total: 0, currentTarget: '' })
+    endScan(successCount > 0, totalItems.length)
   }
 
   // Category cards configuration
@@ -439,10 +559,14 @@ export default function ContentDiscoveryIndex() {
               >
                 <Icon size={16} />
                 <span className="font-medium">{source.label}</span>
-                {source.id === 'subdomains' && availableDomains.length > 0 && (
-                  <span className="px-1.5 py-0.5 bg-emerald-500/20 rounded text-xs">
-                    {Object.values(allSubdomainsData).reduce((sum, subs) => sum + (Array.isArray(subs) ? subs.length : 0), 0)}
-                  </span>
+                {source.id === 'subdomains' && (
+                  isLoadingDomains ? (
+                    <Loader size={12} className="animate-spin" />
+                  ) : availableDomains.length > 0 ? (
+                    <span className="px-1.5 py-0.5 bg-emerald-500/20 rounded text-xs">
+                      {totalSubdomainCount > 0 ? totalSubdomainCount : availableDomains.length}
+                    </span>
+                  ) : null
                 )}
                 {source.id === 'liveHosts' && liveHosts.length > 0 && (
                   <span className="px-1.5 py-0.5 bg-emerald-500/20 rounded text-xs">
@@ -474,7 +598,12 @@ export default function ContentDiscoveryIndex() {
         {/* Subdomain Selection */}
         {targetSource === 'subdomains' && (
           <div className="space-y-4">
-            {availableDomains.length === 0 ? (
+            {isLoadingDomains ? (
+              <div className="flex items-center justify-center py-8 bg-[#0a0a0a] rounded-xl border border-[#1f1f1f]">
+                <Loader className="animate-spin text-emerald-400 mr-2" size={20} />
+                <span className="text-gray-400">Loading domains from database...</span>
+              </div>
+            ) : availableDomains.length === 0 ? (
               <div className="text-center py-8 bg-[#0a0a0a] rounded-xl border border-[#1f1f1f]">
                 <Globe className="mx-auto text-gray-600 mb-3" size={40} />
                 <p className="text-gray-400">No domains available</p>
@@ -483,7 +612,7 @@ export default function ContentDiscoveryIndex() {
             ) : (
               <>
                 <div>
-                  <label className="block text-sm font-medium text-gray-400 mb-2">Select Domain</label>
+                  <label className="block text-sm font-medium text-gray-400 mb-2">Select Domain ({availableDomains.length} available)</label>
                   <select
                     value={selectedDomain}
                     onChange={(e) => {
@@ -500,26 +629,43 @@ export default function ContentDiscoveryIndex() {
                   </select>
                 </div>
 
-                {selectedDomain && subdomainsList.length > 0 && (
+                {selectedDomain && isLoadingSubdomains && (
+                  <div className="flex items-center justify-center py-4 bg-[#0a0a0a] rounded-xl border border-[#1f1f1f]">
+                    <Loader className="animate-spin text-emerald-400 mr-2" size={16} />
+                    <span className="text-gray-400">Loading subdomains...</span>
+                  </div>
+                )}
+
+                {selectedDomain && !isLoadingSubdomains && subdomainsList.length > 0 && (
                   <div>
                     <div className="flex items-center justify-between mb-2">
                       <label className="text-sm font-medium text-gray-400">
                         Select Subdomains ({selectedTargets.length} of {subdomainsList.length} selected)
                       </label>
-                      <button
-                        onClick={() => {
-                          setSelectAll(!selectAll)
-                          if (!selectAll) {
-                            setSelectedTargets(subdomainsList.map(s => `https://${s.full_domain}`))
-                          } else {
-                            setSelectedTargets([])
-                          }
-                        }}
-                        className="flex items-center gap-1.5 text-sm text-emerald-400 hover:text-emerald-300"
-                      >
-                        <CheckSquare size={14} />
-                        {selectAll ? 'Deselect All' : 'Select All'}
-                      </button>
+                      <div className="flex items-center gap-3">
+                        <button
+                          onClick={() => {
+                            setSelectAll(!selectAll)
+                            if (!selectAll) {
+                              setSelectedTargets(subdomainsList.map(s => `https://${s.full_domain}`))
+                            } else {
+                              setSelectedTargets([])
+                            }
+                          }}
+                          className="flex items-center gap-1.5 text-sm text-emerald-400 hover:text-emerald-300"
+                        >
+                          <CheckSquare size={14} />
+                          {selectAll ? 'Deselect All' : 'Select All'}
+                        </button>
+                        <button
+                          onClick={handleScanAllSubdomains}
+                          disabled={isScanning || subdomainsList.length === 0}
+                          className="flex items-center gap-1.5 text-sm px-3 py-1.5 bg-emerald-500/20 text-emerald-400 rounded-lg hover:bg-emerald-500/30 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        >
+                          <Play size={14} />
+                          Scan All ({subdomainsList.length})
+                        </button>
+                      </div>
                     </div>
                     <div className="max-h-60 overflow-y-auto bg-[#0a0a0a] rounded-xl border border-[#1f1f1f] divide-y divide-[#1f1f1f]">
                       {displayList.map((item, idx) => (
@@ -560,20 +706,30 @@ export default function ContentDiscoveryIndex() {
                   <label className="text-sm font-medium text-gray-400">
                     Select Live Hosts ({selectedTargets.length} of {liveHosts.length} selected)
                   </label>
-                  <button
-                    onClick={() => {
-                      setSelectAll(!selectAll)
-                      if (!selectAll) {
-                        setSelectedTargets(liveHosts.map(h => h.url || `https://${h.subdomain}`))
-                      } else {
-                        setSelectedTargets([])
-                      }
-                    }}
-                    className="flex items-center gap-1.5 text-sm text-emerald-400 hover:text-emerald-300"
-                  >
-                    <CheckSquare size={14} />
-                    {selectAll ? 'Deselect All' : 'Select All'}
-                  </button>
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={() => {
+                        setSelectAll(!selectAll)
+                        if (!selectAll) {
+                          setSelectedTargets(liveHosts.map(h => h.url || `https://${h.subdomain}`))
+                        } else {
+                          setSelectedTargets([])
+                        }
+                      }}
+                      className="flex items-center gap-1.5 text-sm text-emerald-400 hover:text-emerald-300"
+                    >
+                      <CheckSquare size={14} />
+                      {selectAll ? 'Deselect All' : 'Select All'}
+                    </button>
+                    <button
+                      onClick={handleScanAllLiveHosts}
+                      disabled={isScanning || liveHosts.length === 0}
+                      className="flex items-center gap-1.5 text-sm px-3 py-1.5 bg-emerald-500/20 text-emerald-400 rounded-lg hover:bg-emerald-500/30 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    >
+                      <Play size={14} />
+                      Scan All ({liveHosts.length})
+                    </button>
+                  </div>
                 </div>
                 <div className="max-h-60 overflow-y-auto bg-[#0a0a0a] rounded-xl border border-[#1f1f1f] divide-y divide-[#1f1f1f]">
                   {displayList.map((item, idx) => (
@@ -620,12 +776,12 @@ export default function ContentDiscoveryIndex() {
             {isScanning ? (
               <>
                 <Loader size={18} className="animate-spin" />
-                Scanning...
+                Scanning{batchProgress.total > 1 ? ` (${batchProgress.current}/${batchProgress.total})` : '...'}
               </>
             ) : (
               <>
                 <Play size={18} />
-                Start Scan
+                Start Scan{targetsToScan.length > 1 ? ` (${targetsToScan.length})` : ''}
               </>
             )}
           </button>
@@ -634,24 +790,38 @@ export default function ContentDiscoveryIndex() {
         {/* Scan Progress */}
         {scanProgress && (
           <div className="p-4 bg-[#0a0a0a] rounded-xl border border-[#1f1f1f]">
-            <div className="flex items-center gap-3">
-              {scanProgress.status === 'running' && <Loader size={16} className="animate-spin text-emerald-400" />}
-              {scanProgress.status === 'completed' && <CheckCircle size={16} className="text-emerald-400" />}
-              {scanProgress.status === 'failed' && <XCircle size={16} className="text-red-400" />}
-              <span className={`text-sm ${
-                scanProgress.status === 'completed' ? 'text-emerald-400' :
-                scanProgress.status === 'failed' ? 'text-red-400' : 'text-gray-400'
-              }`}>
-                {scanProgress.message}
-              </span>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                {scanProgress.status === 'running' && <Loader size={16} className="animate-spin text-emerald-400" />}
+                {scanProgress.status === 'completed' && <CheckCircle size={16} className="text-emerald-400" />}
+                {scanProgress.status === 'failed' && <XCircle size={16} className="text-red-400" />}
+                <span className={`text-sm ${
+                  scanProgress.status === 'completed' ? 'text-emerald-400' :
+                  scanProgress.status === 'failed' ? 'text-red-400' : 'text-gray-400'
+                }`}>
+                  {scanProgress.message}
+                </span>
+              </div>
+              {batchProgress.total > 1 && scanProgress.status === 'running' && (
+                <span className="text-sm text-emerald-400 font-medium">
+                  {batchProgress.current} / {batchProgress.total} targets
+                </span>
+              )}
             </div>
             {scanProgress.status === 'running' && (
-              <div className="mt-3 h-2 bg-[#1a1a1a] rounded-full overflow-hidden">
-                <div 
-                  className="h-full bg-emerald-500 rounded-full transition-all duration-500"
-                  style={{ width: `${scanProgress.progress}%` }}
-                />
-              </div>
+              <>
+                <div className="mt-3 h-2 bg-[#1a1a1a] rounded-full overflow-hidden">
+                  <div 
+                    className="h-full bg-emerald-500 rounded-full transition-all duration-500"
+                    style={{ width: `${scanProgress.progress}%` }}
+                  />
+                </div>
+                {batchProgress.currentTarget && (
+                  <p className="mt-2 text-xs text-gray-500 truncate">
+                    Current: <span className="text-gray-400 font-mono">{batchProgress.currentTarget}</span>
+                  </p>
+                )}
+              </>
             )}
           </div>
         )}
@@ -799,25 +969,6 @@ export default function ContentDiscoveryIndex() {
           )
         })}
       </div>
-
-      {/* View All Link */}
-      <Link
-        to="/content-discovery/all"
-        className="block bg-[#111111] rounded-xl p-5 border border-[#1f1f1f] hover:bg-[#1a1a1a] hover:border-emerald-500/30 transition-all group"
-      >
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <div className="p-3 rounded-xl bg-emerald-500/10">
-              <Search size={24} className="text-emerald-400" />
-            </div>
-            <div>
-              <h3 className="text-lg font-semibold text-white">View All Content</h3>
-              <p className="text-sm text-gray-500 mt-1">Browse all {stats.total} discovered items across all categories</p>
-            </div>
-          </div>
-          <ChevronRight size={24} className="text-gray-600 group-hover:text-emerald-400 transition-colors" />
-        </div>
-      </Link>
     </div>
   )
 }
