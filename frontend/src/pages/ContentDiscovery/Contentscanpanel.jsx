@@ -7,9 +7,10 @@
  * - Tool selection based on scan type (API, Endpoint, Directory, JS)
  * - Batch scanning with progress tracking
  * - Select All / Scan All functionality
+ * - Persistent scan logs (survives navigation)
  */
 
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
   Play,
@@ -26,9 +27,38 @@ import {
   CheckCircle,
   CheckSquare,
   Square,
-  X
+  X,
+  Trash2
 } from 'lucide-react'
 import { getDomains, getSubdomains, startContentDiscovery } from '../../api/client'
+
+// Storage key for scan logs
+const CONTENT_SCAN_LOGS_KEY = 'content_scan_logs'
+
+// Load persisted scan logs
+const loadScanLogs = (scanType) => {
+  try {
+    const saved = localStorage.getItem(`${CONTENT_SCAN_LOGS_KEY}_${scanType}`)
+    if (saved) {
+      return JSON.parse(saved)
+    }
+  } catch (e) {
+    console.error('Error loading scan logs:', e)
+  }
+  return { logs: [], lastScan: null, results: { successCount: 0, failCount: 0, totalItems: 0 } }
+}
+
+// Save scan logs
+const saveScanLogs = (scanType, data) => {
+  try {
+    localStorage.setItem(`${CONTENT_SCAN_LOGS_KEY}_${scanType}`, JSON.stringify({
+      ...data,
+      savedAt: new Date().toISOString()
+    }))
+  } catch (e) {
+    console.error('Error saving scan logs:', e)
+  }
+}
 
 // Tool definitions by scan type - only show relevant tools for each type
 const SCAN_TYPE_TOOLS = {
@@ -170,8 +200,43 @@ export default function ContentScanPanel({
   const [scanError, setScanError] = useState(null)
   const [batchProgress, setBatchProgress] = useState({ current: 0, total: 0, currentTarget: '' })
   
+  // Persistent scan logs - use lazy initializer to load from localStorage
+  const [scanLogs, setScanLogs] = useState(() => {
+    const data = loadScanLogs(scanType)
+    return data.logs || []
+  })
+  const [lastScanResults, setLastScanResults] = useState(() => {
+    const data = loadScanLogs(scanType)
+    return data.results || { successCount: 0, failCount: 0, totalItems: 0 }
+  })
+  
   // Live hosts from localStorage
   const [liveHosts, setLiveHosts] = useState([])
+
+  // Save logs whenever they change
+  useEffect(() => {
+    saveScanLogs(scanType, {
+      logs: scanLogs,
+      results: lastScanResults,
+      lastScan: scanLogs.length > 0 ? new Date().toISOString() : null
+    })
+  }, [scanLogs, lastScanResults, scanType])
+
+  // Add log entry helper
+  const addLog = useCallback((message, type = 'info') => {
+    setScanLogs(prev => [...prev, {
+      timestamp: new Date().toISOString(),
+      message,
+      type
+    }])
+  }, [])
+
+  // Clear logs
+  const clearLogs = useCallback(() => {
+    setScanLogs([])
+    setLastScanResults({ successCount: 0, failCount: 0, totalItems: 0 })
+    localStorage.removeItem(`${CONTENT_SCAN_LOGS_KEY}_${scanType}`)
+  }, [scanType])
 
   // Fetch domains from backend
   const { data: domainsData, isLoading: isLoadingDomains } = useQuery({
@@ -323,14 +388,26 @@ export default function ContentScanPanel({
     setScanProgress({ status: 'running', message: 'Starting scan...', progress: 0 })
     setBatchProgress({ current: 0, total: targets.length, currentTarget: '' })
     
+    // Clear previous logs for new scan
+    setScanLogs([])
+    addLog(`Starting ${scanConfig.label} on ${targets.length} target(s)`, 'info')
+    addLog('═'.repeat(40), 'info')
+    
     if (onScanStart) onScanStart(targets[0])
 
     let allResults = []
     let successCount = 0
+    let failCount = 0
+    let totalItems = 0
 
     for (let i = 0; i < targets.length; i++) {
       const target = targets[i]
-      const hostname = new URL(target).hostname
+      let hostname = target
+      try {
+        hostname = new URL(target).hostname
+      } catch (e) {
+        hostname = target
+      }
       
       setBatchProgress({ current: i + 1, total: targets.length, currentTarget: hostname })
       setScanProgress({ 
@@ -338,11 +415,17 @@ export default function ContentScanPanel({
         message: `Scanning ${i + 1}/${targets.length}: ${hostname}`, 
         progress: Math.round(((i + 0.5) / targets.length) * 100)
       })
+      
+      addLog(`Scanning ${i + 1}/${targets.length}: ${hostname}`, 'info')
 
       const result = await scanSingleTarget(target)
       
       if (result.success) {
         successCount++
+        const itemCount = result.results.length
+        totalItems += itemCount
+        addLog(`✓ Found ${itemCount} items from ${hostname}`, 'success')
+        
         const processedResults = result.results.map(item => ({
           ...item,
           target_url: target,
@@ -355,8 +438,20 @@ export default function ContentScanPanel({
         if (onScanComplete) {
           onScanComplete(processedResults, target)
         }
+      } else {
+        failCount++
+        addLog(`✗ Failed on ${hostname}: ${result.error || 'Unknown error'}`, 'error')
       }
     }
+
+    addLog('═'.repeat(40), 'info')
+    addLog(`Scan complete: ${totalItems} items found from ${successCount}/${targets.length} targets`, successCount > 0 ? 'success' : 'warning')
+    if (failCount > 0) {
+      addLog(`${failCount} target(s) failed`, 'warning')
+    }
+    
+    // Save results summary
+    setLastScanResults({ successCount, failCount, totalItems })
 
     setScanProgress({ 
       status: successCount > 0 ? 'completed' : 'failed', 
@@ -388,14 +483,26 @@ export default function ContentScanPanel({
     setScanProgress({ status: 'running', message: 'Starting scan...', progress: 0 })
     setBatchProgress({ current: 0, total: targets.length, currentTarget: '' })
     
+    // Clear previous logs for new scan
+    setScanLogs([])
+    addLog(`Starting ${scanConfig.label} on ${targets.length} target(s)`, 'info')
+    addLog('═'.repeat(40), 'info')
+    
     if (onScanStart) onScanStart(targets[0])
 
     let allResults = []
     let successCount = 0
+    let failCount = 0
+    let totalItems = 0
 
     for (let i = 0; i < targets.length; i++) {
       const target = targets[i]
-      const hostname = new URL(target).hostname
+      let hostname = target
+      try {
+        hostname = new URL(target).hostname
+      } catch (e) {
+        hostname = target
+      }
       
       setBatchProgress({ current: i + 1, total: targets.length, currentTarget: hostname })
       setScanProgress({ 
@@ -403,11 +510,17 @@ export default function ContentScanPanel({
         message: `Scanning ${i + 1}/${targets.length}: ${hostname}`, 
         progress: Math.round(((i + 0.5) / targets.length) * 100)
       })
+      
+      addLog(`Scanning ${i + 1}/${targets.length}: ${hostname}`, 'info')
 
       const result = await scanSingleTarget(target)
       
       if (result.success) {
         successCount++
+        const itemCount = result.results.length
+        totalItems += itemCount
+        addLog(`✓ Found ${itemCount} items from ${hostname}`, 'success')
+        
         const processedResults = result.results.map(item => ({
           ...item,
           target_url: target,
@@ -419,8 +532,19 @@ export default function ContentScanPanel({
         if (onScanComplete) {
           onScanComplete(processedResults, target)
         }
+      } else {
+        failCount++
+        addLog(`✗ Failed on ${hostname}: ${result.error || 'Unknown error'}`, 'error')
       }
     }
+
+    addLog('═'.repeat(40), 'info')
+    addLog(`Scan complete: ${totalItems} items found from ${successCount}/${targets.length} targets`, successCount > 0 ? 'success' : 'warning')
+    if (failCount > 0) {
+      addLog(`${failCount} target(s) failed`, 'warning')
+    }
+    
+    setLastScanResults({ successCount, failCount, totalItems })
 
     setScanProgress({ 
       status: successCount > 0 ? 'completed' : 'failed', 
@@ -746,6 +870,50 @@ export default function ContentScanPanel({
                 </p>
               )}
             </>
+          )}
+        </div>
+      )}
+
+      {/* Scan Logs (Persisted) */}
+      {scanLogs.length > 0 && (
+        <div className="border border-[#1f1f1f] rounded-lg overflow-hidden">
+          <div className="p-2 bg-[#0a0a0a] border-b border-[#1f1f1f] flex items-center justify-between">
+            <span className="text-xs text-gray-500">Scan Logs ({scanLogs.length})</span>
+            <button
+              onClick={clearLogs}
+              disabled={isScanning}
+              className="p-1 text-gray-500 hover:text-red-400 disabled:opacity-50 transition-colors"
+              title="Clear logs"
+            >
+              <Trash2 size={12} />
+            </button>
+          </div>
+          <div className="max-h-40 overflow-y-auto p-2 bg-[#050505] font-mono text-xs space-y-0.5">
+            {scanLogs.map((log, i) => {
+              const typeColors = {
+                info: 'text-gray-400',
+                success: 'text-green-400',
+                error: 'text-red-400',
+                warning: 'text-yellow-400'
+              }
+              return (
+                <div key={i} className={`${typeColors[log.type]} flex gap-2`}>
+                  <span className="text-gray-600 flex-shrink-0">
+                    {new Date(log.timestamp).toLocaleTimeString()}
+                  </span>
+                  <span>{log.message}</span>
+                </div>
+              )
+            })}
+          </div>
+          {lastScanResults.totalItems > 0 && !isScanning && (
+            <div className="p-2 bg-[#0a0a0a] border-t border-[#1f1f1f] flex items-center gap-4 text-xs">
+              <span className="text-green-400">{lastScanResults.successCount} succeeded</span>
+              {lastScanResults.failCount > 0 && (
+                <span className="text-red-400">{lastScanResults.failCount} failed</span>
+              )}
+              <span className="text-emerald-400">{lastScanResults.totalItems} items found</span>
+            </div>
           )}
         </div>
       )}

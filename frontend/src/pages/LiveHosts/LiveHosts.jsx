@@ -41,7 +41,6 @@ const LiveHosts = () => {
   }, [selectedDomain])
 
   // Fetch available domains from subdomain scanner cache
-  // FIX: Removed selectedDomain from dependencies to prevent infinite loop
   useEffect(() => {
     let timeout = null
     
@@ -64,7 +63,6 @@ const LiveHosts = () => {
         
         const uniqueDomains = [...new Set(domains)]
         
-        // Only update if actually changed to prevent unnecessary renders
         setAvailableDomains(prev => {
           if (JSON.stringify(prev) === JSON.stringify(uniqueDomains)) return prev
           console.log('📋 Available domains:', uniqueDomains)
@@ -77,7 +75,6 @@ const LiveHosts = () => {
 
     fetchAvailableDomains()
     
-    // Debounced subscription to prevent rapid re-renders
     const unsubscribe = queryClient.getQueryCache().subscribe(() => {
       if (timeout) clearTimeout(timeout)
       timeout = setTimeout(fetchAvailableDomains, 500)
@@ -87,9 +84,9 @@ const LiveHosts = () => {
       unsubscribe()
       if (timeout) clearTimeout(timeout)
     }
-  }, [queryClient]) // Removed selectedDomain from deps!
+  }, [queryClient])
 
-  // Auto-select domain - SEPARATE effect to avoid infinite loop
+  // Auto-select domain
   useEffect(() => {
     if (availableDomains.length > 0 && !selectedDomain) {
       const savedDomain = localStorage.getItem(STORAGE_KEYS.LIVE_HOSTS_DOMAIN)
@@ -99,7 +96,7 @@ const LiveHosts = () => {
         setSelectedDomain(availableDomains[0])
       }
     }
-  }, [availableDomains]) // Only runs when availableDomains changes, not selectedDomain
+  }, [availableDomains])
 
   // Query for fetching subdomains
   const { data: subdomainsResponse, isLoading: isLoadingSubdomains } = useQuery({
@@ -114,17 +111,14 @@ const LiveHosts = () => {
   const subdomainsList = useMemo(() => {
     if (!subdomainsResponse) return []
     
-    // If it's already an array, use it directly
     if (Array.isArray(subdomainsResponse)) {
       return subdomainsResponse
     }
     
-    // If it has a 'data' property that's an array
     if (subdomainsResponse.data && Array.isArray(subdomainsResponse.data)) {
       return subdomainsResponse.data
     }
     
-    // If it has a 'subdomains' property that's an array
     if (subdomainsResponse.subdomains && Array.isArray(subdomainsResponse.subdomains)) {
       return subdomainsResponse.subdomains
     }
@@ -143,24 +137,18 @@ const LiveHosts = () => {
     setCurrentlyProbing('Initializing...')
 
     try {
-      // Extract just the subdomain names
       const subdomainNames = subdomainsList.map(sub => sub.full_domain || sub.subdomain || sub)
-
       console.log(`🚀 Starting probe for ${subdomainNames.length} subdomains via backend API`)
 
-      // Use backend API
       const results = await probeHostsWithProgress(
         subdomainNames,
         (progressData) => {
-          // Update progress in real-time
           setProbeProgress((progressData.completed / progressData.total) * 100)
           setCurrentlyProbing(`Batch ${progressData.currentBatch}/${progressData.totalBatches}`)
           
-          // Update results as they come in
           if (progressData.results && progressData.results.length > 0) {
             setProbeResults([...progressData.results])
           }
-
           console.log(
             `Progress: ${progressData.completed}/${progressData.total} | ` +
             `Active: ${progressData.stats.active} | ` +
@@ -170,17 +158,14 @@ const LiveHosts = () => {
         concurrency
       )
 
-      // Final update
       setProbeResults(results)
       setProbeProgress(100)
       setCurrentlyProbing('')
 
-      // Save to localStorage
       localStorage.setItem(STORAGE_KEYS.LIVE_HOSTS_RESULTS, JSON.stringify(results))
 
       const activeCount = results.filter(r => r.is_active).length
       console.log(`✅ Probing complete! Found ${activeCount} active hosts out of ${results.length}`)
-
     } catch (error) {
       console.error('❌ Probing failed:', error)
       alert(`Probing failed: ${error.message || 'Unknown error'}`)
@@ -248,15 +233,17 @@ const LiveHosts = () => {
   }
 
   return (
-    <div className="p-8 space-y-6">
+    <div className="p-6 space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-3xl font-bold text-white flex items-center gap-3">
-            <Activity className="text-cyber-green" />
+          <h1 className="text-2xl font-bold text-white flex items-center gap-3">
+            <div className="p-2 rounded-xl bg-gradient-to-br from-green-500/20 to-green-600/20">
+              <Activity size={24} className="text-green-400" />
+            </div>
             Live Hosts
-          </h2>
-          <p className="text-gray-400 mt-2">Probe subdomains to discover active hosts and services</p>
+          </h1>
+          <p className="text-gray-500 mt-1">Probe subdomains to discover active hosts and services</p>
         </div>
 
         {probeResults.length > 0 && !isProbing && (
@@ -264,7 +251,7 @@ const LiveHosts = () => {
             <button
               onClick={copyActiveToClipboard}
               disabled={stats.active === 0}
-              className="flex items-center gap-2 px-4 py-2 bg-dark-100 border border-dark-50 rounded-lg text-white hover:border-cyber-green transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              className="flex items-center gap-2 px-3 py-2 bg-[#111111] border border-[#1f1f1f] rounded-lg text-gray-400 hover:text-white hover:border-[#2a2a2a] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               title="Copy active hosts"
             >
               <Copy size={16} />
@@ -272,7 +259,7 @@ const LiveHosts = () => {
             </button>
             <button
               onClick={exportToCSV}
-              className="flex items-center gap-2 px-4 py-2 bg-dark-100 border border-dark-50 rounded-lg text-white hover:border-cyber-blue transition-all"
+              className="flex items-center gap-2 px-3 py-2 bg-[#111111] border border-[#1f1f1f] rounded-lg text-gray-400 hover:text-white hover:border-[#2a2a2a] transition-colors"
               title="Export to CSV"
             >
               <Download size={16} />
@@ -280,7 +267,7 @@ const LiveHosts = () => {
             </button>
             <button
               onClick={clearResults}
-              className="flex items-center gap-2 px-4 py-2 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 hover:bg-red-500/20 transition-all"
+              className="flex items-center gap-2 px-3 py-2 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 hover:bg-red-500/20 transition-colors"
               title="Clear results"
             >
               <X size={16} />
@@ -291,15 +278,15 @@ const LiveHosts = () => {
       </div>
 
       {/* Probe Configuration */}
-      <div className="bg-dark-100 border border-dark-50 rounded-xl p-6">
+      <div className="bg-[#111111] border border-[#1f1f1f] rounded-xl p-6">
         <div className="space-y-6">
           {/* Domain Selection */}
           <div>
-            <label className="block text-sm font-medium text-gray-300 mb-2">
+            <label className="block text-sm font-medium text-gray-400 mb-2">
               Select Domain to Probe
             </label>
             {availableDomains.length === 0 ? (
-              <div className="text-center py-8 bg-dark-200 border border-dark-50 rounded-lg">
+              <div className="text-center py-8 bg-[#0a0a0a] border border-[#1f1f1f] rounded-lg">
                 <Globe className="mx-auto text-gray-600 mb-3" size={48} />
                 <p className="text-gray-400 mb-2">No domains available</p>
                 <p className="text-sm text-gray-500">
@@ -310,7 +297,7 @@ const LiveHosts = () => {
               <select
                 value={selectedDomain}
                 onChange={(e) => setSelectedDomain(e.target.value)}
-                className="w-full px-4 py-3 bg-dark-200 border border-dark-50 rounded-lg text-white focus:outline-none focus:border-cyber-green transition-all disabled:opacity-50"
+                className="w-full px-4 py-3 bg-[#0a0a0a] border border-[#1f1f1f] rounded-lg text-white focus:outline-none focus:border-emerald-500/50 transition-colors disabled:opacity-50"
                 disabled={isProbing}
               >
                 <option value="">Select a domain...</option>
@@ -323,7 +310,7 @@ const LiveHosts = () => {
 
           {/* Show subdomain count */}
           {selectedDomain && subdomainsList.length > 0 && (
-            <div className="flex items-center justify-between p-4 bg-dark-200 border border-dark-50 rounded-lg">
+            <div className="flex items-center justify-between p-4 bg-[#0a0a0a] border border-[#1f1f1f] rounded-lg">
               <div>
                 <p className="text-white font-medium">
                   {subdomainsList.length} subdomains ready to probe
@@ -338,7 +325,7 @@ const LiveHosts = () => {
                   type="number"
                   value={concurrency}
                   onChange={(e) => setConcurrency(Math.max(1, Math.min(50, parseInt(e.target.value) || 10)))}
-                  className="w-20 px-3 py-1 bg-dark-100 border border-dark-50 rounded text-white text-center"
+                  className="w-20 px-3 py-1 bg-[#111111] border border-[#1f1f1f] rounded text-white text-center focus:outline-none focus:border-emerald-500/50"
                   min="1"
                   max="50"
                   disabled={isProbing}
@@ -349,8 +336,8 @@ const LiveHosts = () => {
           
           {/* Loading indicator for subdomains */}
           {selectedDomain && isLoadingSubdomains && (
-            <div className="flex items-center justify-center p-4 bg-dark-200 border border-dark-50 rounded-lg">
-              <Loader className="animate-spin text-cyber-green mr-2" size={20} />
+            <div className="flex items-center justify-center p-4 bg-[#0a0a0a] border border-[#1f1f1f] rounded-lg">
+              <Loader className="animate-spin text-emerald-400 mr-2" size={20} />
               <span className="text-gray-400">Loading subdomains...</span>
             </div>
           )}
@@ -361,7 +348,7 @@ const LiveHosts = () => {
               <button
                 onClick={startProbing}
                 disabled={!selectedDomain || subdomainsList.length === 0 || isLoadingSubdomains}
-                className="w-full py-3 px-6 bg-gradient-to-r from-cyber-green to-cyber-blue rounded-lg font-medium text-white hover:from-cyber-green/90 hover:to-cyber-blue/90 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2"
+                className="w-full py-3 px-6 bg-emerald-500/20 border border-emerald-500/30 rounded-lg font-medium text-emerald-400 hover:bg-emerald-500/30 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2"
               >
                 <Play size={20} />
                 Start Probing
@@ -371,7 +358,7 @@ const LiveHosts = () => {
                 <button
                   type="button"
                   disabled
-                  className="flex-1 py-3 px-6 bg-gradient-to-r from-cyber-green to-cyber-blue rounded-lg font-medium text-white opacity-75 cursor-not-allowed transition-all flex items-center justify-center gap-2"
+                  className="flex-1 py-3 px-6 bg-emerald-500/20 border border-emerald-500/30 rounded-lg font-medium text-emerald-400 opacity-75 cursor-not-allowed transition-all flex items-center justify-center gap-2"
                 >
                   <Loader className="animate-spin" size={20} />
                   Probing... {probeProgress.toFixed(0)}%
@@ -396,11 +383,11 @@ const LiveHosts = () => {
             <div>
               <div className="flex items-center justify-between mb-2">
                 <span className="text-sm text-gray-400">Probe Progress</span>
-                <span className="text-sm font-medium text-cyber-green">{probeProgress.toFixed(0)}%</span>
+                <span className="text-sm font-medium text-emerald-400">{probeProgress.toFixed(0)}%</span>
               </div>
-              <div className="w-full bg-dark-200 rounded-full h-3 overflow-hidden">
+              <div className="w-full bg-[#0a0a0a] rounded-full h-2 overflow-hidden">
                 <div 
-                  className="h-full bg-gradient-to-r from-cyber-green to-cyber-blue transition-all duration-300 ease-out rounded-full"
+                  className="h-full bg-gradient-to-r from-emerald-500 to-emerald-400 transition-all duration-300 ease-out rounded-full"
                   style={{ width: `${probeProgress}%` }}
                 />
               </div>
@@ -408,7 +395,7 @@ const LiveHosts = () => {
 
             {currentlyProbing && (
               <div className="flex items-center gap-2 text-sm text-gray-400">
-                <Loader className="animate-spin text-cyber-green" size={16} />
+                <Loader className="animate-spin text-emerald-400" size={16} />
                 <span>Currently probing: <span className="text-white font-mono">{currentlyProbing}</span></span>
               </div>
             )}
@@ -418,9 +405,9 @@ const LiveHosts = () => {
 
       {/* Probe Complete - Export Only */}
       {probeResults.length > 0 && !isProbing && (
-        <div className="bg-dark-100 border border-dark-50 rounded-xl p-6">
+        <div className="bg-[#111111] border border-[#1f1f1f] rounded-xl p-6">
           {/* Completion Banner */}
-          <div className="bg-gradient-to-r from-cyber-green/10 to-cyber-blue/10 border border-cyber-green/30 rounded-lg p-6 mb-6">
+          <div className="bg-gradient-to-r from-emerald-500/10 to-emerald-600/10 border border-emerald-500/30 rounded-lg p-6 mb-6">
             <div className="flex items-center justify-between">
               <div>
                 <h4 className="text-lg font-semibold text-white mb-1 flex items-center gap-2">
@@ -439,11 +426,11 @@ const LiveHosts = () => {
 
           {/* Summary Statistics */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-            <div className="bg-dark-200 border border-dark-50 rounded-lg p-4 text-center">
+            <div className="bg-[#0a0a0a] border border-[#1f1f1f] rounded-lg p-4 text-center">
               <div className="text-3xl font-bold text-white mb-1">{stats.total}</div>
               <div className="text-xs text-gray-400">Total Probed</div>
             </div>
-            <div className="bg-dark-200 border border-green-500/20 rounded-lg p-4 text-center">
+            <div className="bg-[#0a0a0a] border border-green-500/20 rounded-lg p-4 text-center">
               <div className="text-3xl font-bold text-green-400 mb-1">{stats.active}</div>
               <div className="text-xs text-gray-400">Active Hosts</div>
               {stats.active > 0 && (
@@ -452,21 +439,21 @@ const LiveHosts = () => {
                 </div>
               )}
             </div>
-            <div className="bg-dark-200 border border-dark-50 rounded-lg p-4 text-center">
+            <div className="bg-[#0a0a0a] border border-[#1f1f1f] rounded-lg p-4 text-center">
               <div className="text-3xl font-bold text-gray-500 mb-1">{stats.inactive}</div>
               <div className="text-xs text-gray-400">Inactive</div>
             </div>
-            <div className="bg-dark-200 border border-cyber-blue/20 rounded-lg p-4 text-center">
-              <div className="text-3xl font-bold text-cyber-blue mb-1">{stats.avg_response_time}ms</div>
+            <div className="bg-[#0a0a0a] border border-blue-500/20 rounded-lg p-4 text-center">
+              <div className="text-3xl font-bold text-blue-400 mb-1">{stats.avg_response_time}ms</div>
               <div className="text-xs text-gray-400">Avg Response</div>
             </div>
           </div>
 
           {/* Export Information */}
-          <div className="bg-dark-200 border border-dark-50 rounded-lg p-6">
+          <div className="bg-[#0a0a0a] border border-[#1f1f1f] rounded-lg p-6">
             <div className="flex items-start gap-4">
-              <div className="p-3 bg-cyber-green/10 rounded-lg flex-shrink-0">
-                <Download className="text-cyber-green" size={24} />
+              <div className="p-3 bg-emerald-500/10 rounded-lg flex-shrink-0">
+                <Download className="text-emerald-400" size={24} />
               </div>
               <div className="flex-1">
                 <h4 className="text-sm font-semibold text-white mb-2">
@@ -479,21 +466,21 @@ const LiveHosts = () => {
                 
                 {/* Export Stats */}
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-4">
-                  <div className="bg-dark-100 border border-dark-50 rounded px-3 py-2 text-center">
+                  <div className="bg-[#111111] border border-[#1f1f1f] rounded px-3 py-2 text-center">
                     <div className="text-white font-semibold">{probeResults.filter(r => r.protocol === 'https').length}</div>
                     <div className="text-xs text-gray-400">HTTPS</div>
                   </div>
-                  <div className="bg-dark-100 border border-dark-50 rounded px-3 py-2 text-center">
+                  <div className="bg-[#111111] border border-[#1f1f1f] rounded px-3 py-2 text-center">
                     <div className="text-white font-semibold">{probeResults.filter(r => r.protocol === 'http').length}</div>
                     <div className="text-xs text-gray-400">HTTP Only</div>
                   </div>
-                  <div className="bg-dark-100 border border-dark-50 rounded px-3 py-2 text-center">
+                  <div className="bg-[#111111] border border-[#1f1f1f] rounded px-3 py-2 text-center">
                     <div className="text-white font-semibold">
                       {probeResults.filter(r => r.status_code >= 200 && r.status_code < 300).length}
                     </div>
                     <div className="text-xs text-gray-400">2xx Success</div>
                   </div>
-                  <div className="bg-dark-100 border border-dark-50 rounded px-3 py-2 text-center">
+                  <div className="bg-[#111111] border border-[#1f1f1f] rounded px-3 py-2 text-center">
                     <div className="text-white font-semibold">
                       {probeResults.filter(r => r.response_time && r.response_time < 500).length}
                     </div>
@@ -501,14 +488,14 @@ const LiveHosts = () => {
                   </div>
                 </div>
 
-                <div className="bg-dark-100 border border-dark-50 rounded-lg p-3">
+                <div className="bg-[#111111] border border-[#1f1f1f] rounded-lg p-3">
                   <div className="text-xs text-gray-400 mb-1">CSV Export Contains:</div>
                   <div className="flex gap-2 flex-wrap">
-                    <span className="px-2 py-1 bg-dark-200 rounded text-xs text-white">Host</span>
-                    <span className="px-2 py-1 bg-dark-200 rounded text-xs text-white">Status</span>
-                    <span className="px-2 py-1 bg-dark-200 rounded text-xs text-white">Protocol</span>
-                    <span className="px-2 py-1 bg-dark-200 rounded text-xs text-white">Status Code</span>
-                    <span className="px-2 py-1 bg-dark-200 rounded text-xs text-white">Response Time</span>
+                    <span className="px-2 py-1 bg-[#0a0a0a] rounded text-xs text-white">Host</span>
+                    <span className="px-2 py-1 bg-[#0a0a0a] rounded text-xs text-white">Status</span>
+                    <span className="px-2 py-1 bg-[#0a0a0a] rounded text-xs text-white">Protocol</span>
+                    <span className="px-2 py-1 bg-[#0a0a0a] rounded text-xs text-white">Status Code</span>
+                    <span className="px-2 py-1 bg-[#0a0a0a] rounded text-xs text-white">Response Time</span>
                   </div>
                   <div className="text-xs text-gray-500 mt-2">
                     Complete format for security analysis

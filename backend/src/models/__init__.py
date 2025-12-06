@@ -13,7 +13,8 @@ __all__ = [
     'APIParameter',
     'PortScan',
     'VulnScan',
-    'VulnFinding'
+    'VulnFinding',
+    'Workspace'
 ]
 
 __version__ = "2.1.0"

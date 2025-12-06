@@ -21,41 +21,44 @@ def main():
     
     try:
         # Import all models to ensure they're registered
-        print("📦 Importing models...")
+        print("Importing models...")
         from src.models import (
             Subdomain, 
             ContentDiscovery, 
             JSEndpoint, 
             APIParameter,
-            PortScan
+            PortScan,
+            VulnScan,
+            VulnFinding,
+            Workspace
         )
-        print("✓ All models imported successfully")
+        print("All models imported successfully")
         print()
         
         # Show which models are registered
-        print("📋 Registered models:")
+        print("Registered models:")
         for table_name in Base.metadata.tables.keys():
             print(f"  • {table_name}")
         print()
         
         # Create all tables
-        print("🏗️  Creating database tables...")
+        print("Creating database tables...")
         Base.metadata.create_all(bind=engine)
-        print("✓ Tables created successfully!")
+        print("Tables created successfully!")
         print()
         
         # Verify tables were created
-        print("✅ Verification:")
+        print("Verification:")
         from sqlalchemy import inspect
         inspector = inspect(engine)
         tables = inspector.get_table_names()
         
         for table in tables:
-            print(f"  ✓ {table}")
+            print(f"  {table}")
         
         print()
         print("=" * 70)
-        print("DATABASE INITIALIZATION COMPLETE! ✨")
+        print("DATABASE INITIALIZATION COMPLETE!")
         print("=" * 70)
         print()
         print("You can now start using the application.")
@@ -63,7 +66,7 @@ def main():
         
     except Exception as e:
         print()
-        print("❌ ERROR: Database initialization failed!")
+        print("ERROR: Database initialization failed!")
         print(f"   {str(e)}")
         print()
         import traceback

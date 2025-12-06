@@ -367,6 +367,58 @@ export async function exportByType(type, format = 'json') {
   })
 }
 
+// ==================== WORKSPACES ====================
+
+/**
+ * Get all workspaces
+ */
+export async function getWorkspaces() {
+  return apiRequest('/api/v1/workspaces')
+}
+
+/**
+ * Get a specific workspace by ID
+ */
+export async function getWorkspace(workspaceId) {
+  return apiRequest(`/api/v1/workspaces/${workspaceId}`)
+}
+
+/**
+ * Create a new workspace
+ */
+export async function createWorkspace(data) {
+  return apiRequest('/api/v1/workspaces', {
+    method: 'POST',
+    body: JSON.stringify(data)
+  })
+}
+
+/**
+ * Update a workspace
+ */
+export async function updateWorkspace(workspaceId, data) {
+  return apiRequest(`/api/v1/workspaces/${workspaceId}`, {
+    method: 'PUT',
+    body: JSON.stringify(data)
+  })
+}
+
+/**
+ * Delete a workspace
+ */
+export async function deleteWorkspace(workspaceId) {
+  return apiRequest(`/api/v1/workspaces/${workspaceId}`, {
+    method: 'DELETE'
+  })
+}
+
+/**
+ * Get workspace statistics
+ */
+export async function getWorkspaceStats(workspaceId) {
+  return apiRequest(`/api/v1/workspaces/${workspaceId}/stats`)
+}
+
 // ==================== DEFAULT EXPORT ====================
 
 export default {
@@ -437,5 +489,13 @@ export default {
   // Export
   exportAll,
   exportBySubdomain,
-  exportByType
+  exportByType,
+  
+  // Workspaces
+  getWorkspaces,
+  getWorkspace,
+  createWorkspace,
+  updateWorkspace,
+  deleteWorkspace,
+  getWorkspaceStats
 }

@@ -309,22 +309,24 @@ const SubdomainScanner = () => {
   }, [results, scanSummary])
 
   return (
-    <div className="p-8 space-y-6">
+    <div className="p-6 space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-3xl font-bold text-white flex items-center gap-3">
-            <Globe className="text-cyber-blue" />
+          <h1 className="text-2xl font-bold text-white flex items-center gap-3">
+            <div className="p-2 rounded-xl bg-gradient-to-br from-blue-500/20 to-blue-600/20">
+              <Globe size={24} className="text-blue-400" />
+            </div>
             Subdomain Scanner
-          </h2>
-          <p className="text-gray-400 mt-2">Discover subdomains using multiple reconnaissance tools</p>
+          </h1>
+          <p className="text-gray-500 mt-1">Discover subdomains using multiple reconnaissance tools</p>
         </div>
         
         {lastScanDomain && results.length > 0 && !isScanning && (
           <div className="flex gap-2">
             <button
               onClick={copyToClipboard}
-              className="flex items-center gap-2 px-4 py-2 bg-dark-100 border border-dark-50 rounded-lg text-white hover:border-cyber-blue transition-all"
+              className="flex items-center gap-2 px-3 py-2 bg-[#111111] border border-[#1f1f1f] rounded-lg text-gray-400 hover:text-white hover:border-[#2a2a2a] transition-colors"
               title="Copy all subdomains"
             >
               <Copy size={16} />
@@ -332,7 +334,7 @@ const SubdomainScanner = () => {
             </button>
             <button
               onClick={exportToCSV}
-              className="flex items-center gap-2 px-4 py-2 bg-dark-100 border border-dark-50 rounded-lg text-white hover:border-cyber-green transition-all"
+              className="flex items-center gap-2 px-3 py-2 bg-[#111111] border border-[#1f1f1f] rounded-lg text-gray-400 hover:text-white hover:border-[#2a2a2a] transition-colors"
               title="Export to CSV"
             >
               <Download size={16} />
@@ -340,7 +342,7 @@ const SubdomainScanner = () => {
             </button>
             <button
               onClick={() => refetch()}
-              className="flex items-center gap-2 px-4 py-2 bg-dark-100 border border-dark-50 rounded-lg text-white hover:border-cyber-purple transition-all"
+              className="flex items-center gap-2 px-3 py-2 bg-[#111111] border border-[#1f1f1f] rounded-lg text-gray-400 hover:text-white hover:border-[#2a2a2a] transition-colors"
               title="Refresh results"
             >
               <RefreshCw size={16} />
@@ -348,7 +350,7 @@ const SubdomainScanner = () => {
             </button>
             <button
               onClick={clearResults}
-              className="flex items-center gap-2 px-4 py-2 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 hover:bg-red-500/20 transition-all"
+              className="flex items-center gap-2 px-3 py-2 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 hover:bg-red-500/20 transition-colors"
               title="Clear all results and start fresh"
             >
               <X size={16} />
@@ -359,11 +361,11 @@ const SubdomainScanner = () => {
       </div>
 
       {/* Scan Configuration */}
-      <div className="bg-dark-100 border border-dark-50 rounded-xl p-6">
+      <div className="bg-[#111111] border border-[#1f1f1f] rounded-xl p-6">
         <form onSubmit={handleSubmit} className="space-y-6">
           {/* Domain Input */}
           <div>
-            <label className="block text-sm font-medium text-gray-300 mb-2">
+            <label className="block text-sm font-medium text-gray-400 mb-2">
               Target Domain
             </label>
             <input
@@ -371,7 +373,7 @@ const SubdomainScanner = () => {
               value={domain}
               onChange={(e) => setDomain(e.target.value)}
               placeholder="example.com"
-              className="w-full px-4 py-3 bg-dark-200 border border-dark-50 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-cyber-blue transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full px-4 py-3 bg-[#0a0a0a] border border-[#1f1f1f] rounded-lg text-white placeholder-gray-600 focus:outline-none focus:border-emerald-500/50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               disabled={isScanning}
               readOnly={isScanning}
             />
@@ -379,7 +381,7 @@ const SubdomainScanner = () => {
 
           {/* Tool Selection */}
           <div>
-            <label className="block text-sm font-medium text-gray-300 mb-3">
+            <label className="block text-sm font-medium text-gray-400 mb-3">
               Scanning Tools ({totalTools} selected)
             </label>
             <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
@@ -392,15 +394,15 @@ const SubdomainScanner = () => {
                       : 'cursor-pointer'
                   } ${
                     scanConfig[tool]
-                      ? 'bg-cyber-blue/10 border-cyber-blue'
-                      : 'bg-dark-200 border-dark-50 hover:border-gray-600'
+                      ? 'bg-emerald-500/10 border-emerald-500/30'
+                      : 'bg-[#0a0a0a] border-[#1f1f1f] hover:border-[#2a2a2a]'
                   }`}
                 >
                   <input
                     type="checkbox"
                     checked={scanConfig[tool]}
                     onChange={(e) => setScanConfig({ ...scanConfig, [tool]: e.target.checked })}
-                    className="w-4 h-4 text-cyber-blue bg-dark-200 border-gray-600 rounded focus:ring-cyber-blue disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="w-4 h-4 rounded bg-[#0a0a0a] border-[#2a2a2a] text-emerald-500 focus:ring-emerald-500/50 disabled:opacity-50 disabled:cursor-not-allowed"
                     disabled={isScanning}
                   />
                   <span className="text-sm text-white capitalize">
@@ -410,7 +412,7 @@ const SubdomainScanner = () => {
               ))}
             </div>
             {isScanning ? (
-              <p className="text-xs text-orange-400 mt-2 flex items-center gap-2">
+              <p className="text-xs text-yellow-400 mt-2 flex items-center gap-2">
                 <Loader className="animate-spin" size={12} />
                 Scan in progress - settings locked
               </p>
@@ -427,7 +429,7 @@ const SubdomainScanner = () => {
               <button
                 type="submit"
                 disabled={!domain.trim() || totalTools === 0}
-                className="w-full py-3 px-6 bg-gradient-to-r from-cyber-blue to-cyber-purple rounded-lg font-medium text-white hover:from-cyber-blue/90 hover:to-cyber-purple/90 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2"
+                className="w-full py-3 px-6 bg-emerald-500/20 border border-emerald-500/30 rounded-lg font-medium text-emerald-400 hover:bg-emerald-500/30 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2"
               >
                 <Play size={20} />
                 Start Scan
@@ -437,7 +439,7 @@ const SubdomainScanner = () => {
                 <button
                   type="button"
                   disabled
-                  className="flex-1 py-3 px-6 bg-gradient-to-r from-cyber-blue to-cyber-purple rounded-lg font-medium text-white opacity-75 cursor-not-allowed transition-all flex items-center justify-center gap-2"
+                  className="flex-1 py-3 px-6 bg-emerald-500/20 border border-emerald-500/30 rounded-lg font-medium text-emerald-400 opacity-75 cursor-not-allowed transition-all flex items-center justify-center gap-2"
                 >
                   <Loader className="animate-spin" size={20} />
                   Scanning... {scanProgress.toFixed(0)}%
@@ -463,20 +465,18 @@ const SubdomainScanner = () => {
             <div>
               <div className="flex items-center justify-between mb-2">
                 <span className="text-sm text-gray-400">Scan Progress</span>
-                <span className="text-sm font-medium text-cyber-blue">{scanProgress.toFixed(0)}%</span>
+                <span className="text-sm font-medium text-emerald-400">{scanProgress.toFixed(0)}%</span>
               </div>
-              <div className="w-full bg-dark-200 rounded-full h-3 overflow-hidden">
+              <div className="w-full bg-[#0a0a0a] rounded-full h-2 overflow-hidden">
                 <div 
-                  className="h-full bg-gradient-to-r from-cyber-blue to-cyber-purple transition-all duration-500 ease-out rounded-full relative overflow-hidden"
+                  className="h-full bg-gradient-to-r from-emerald-500 to-emerald-400 transition-all duration-500 ease-out rounded-full"
                   style={{ width: `${scanProgress}%` }}
-                >
-                  <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent animate-shimmer"></div>
-                </div>
+                />
               </div>
             </div>
 
             {/* Tool Status */}
-            <div className="bg-dark-200 rounded-lg p-4">
+            <div className="bg-[#0a0a0a] rounded-lg p-4 border border-[#1f1f1f]">
               <h4 className="text-sm font-medium text-white mb-3">Tool Status</h4>
               <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
                 {enabledTools.map((tool) => {
@@ -488,20 +488,20 @@ const SubdomainScanner = () => {
                       key={tool}
                       className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-all ${
                         isComplete ? 'bg-green-500/10 border border-green-500/30' :
-                        isCurrentlyScanning ? 'bg-cyber-blue/10 border border-cyber-blue/30' :
-                        'bg-dark-100 border border-dark-50'
+                        isCurrentlyScanning ? 'bg-blue-500/10 border border-blue-500/30' :
+                        'bg-[#111111] border border-[#1f1f1f]'
                       }`}
                     >
                       {isComplete ? (
                         <CheckCircle className="text-green-400 flex-shrink-0" size={16} />
                       ) : isCurrentlyScanning ? (
-                        <Loader className="text-cyber-blue animate-spin flex-shrink-0" size={16} />
+                        <Loader className="text-blue-400 animate-spin flex-shrink-0" size={16} />
                       ) : (
                         <div className="w-4 h-4 rounded-full border-2 border-gray-600 flex-shrink-0"></div>
                       )}
                       <span className={`capitalize truncate ${
                         isComplete ? 'text-green-400' :
-                        isCurrentlyScanning ? 'text-cyber-blue' :
+                        isCurrentlyScanning ? 'text-blue-400' :
                         'text-gray-500'
                       }`}>
                         {tool.replace('use_', '').replace('_', ' ')}
@@ -514,7 +514,7 @@ const SubdomainScanner = () => {
 
             {/* Current Status */}
             <div className="flex items-center gap-2 text-sm text-gray-400">
-              <Loader className="animate-spin text-cyber-blue" size={16} />
+              <Loader className="animate-spin text-emerald-400" size={16} />
               <span>
                 Scanning with {totalTools} tool{totalTools !== 1 ? 's' : ''}... 
                 {completedTools.length > 0 && ` (${completedTools.length}/${totalTools} completed)`}
@@ -545,11 +545,11 @@ const SubdomainScanner = () => {
         )}
 
         {isCancelled && (
-          <div className="mt-4 p-4 bg-orange-500/10 border border-orange-500/30 rounded-lg flex items-start gap-3">
-            <AlertTriangle className="text-orange-400 flex-shrink-0 mt-0.5" size={20} />
+          <div className="mt-4 p-4 bg-yellow-500/10 border border-yellow-500/30 rounded-lg flex items-start gap-3">
+            <AlertTriangle className="text-yellow-400 flex-shrink-0 mt-0.5" size={20} />
             <div>
-              <p className="text-orange-400 font-medium">Scan cancelled</p>
-              <p className="text-orange-400/70 text-sm mt-1">
+              <p className="text-yellow-400 font-medium">Scan cancelled</p>
+              <p className="text-yellow-400/70 text-sm mt-1">
                 The scan was stopped. Results may be incomplete.
               </p>
             </div>
@@ -571,11 +571,11 @@ const SubdomainScanner = () => {
 
       {/* Results Section */}
       {lastScanDomain && (
-        <div className="bg-dark-100 border border-dark-50 rounded-xl p-6">
+        <div className="bg-[#111111] border border-[#1f1f1f] rounded-xl p-6">
           {/* Persistence Indicator */}
           {results.length > 0 && !isScanning && dataRestoredFromCache && (
-            <div className="mb-4 p-3 bg-cyber-purple/10 border border-cyber-purple/30 rounded-lg flex items-center gap-3">
-              <CheckCircle className="text-cyber-purple flex-shrink-0" size={20} />
+            <div className="mb-4 p-3 bg-purple-500/10 border border-purple-500/30 rounded-lg flex items-center gap-3">
+              <CheckCircle className="text-purple-400 flex-shrink-0" size={20} />
               <div className="flex-1">
                 <p className="text-sm text-white font-medium">
                   🎉 Results restored from cache
@@ -599,7 +599,7 @@ const SubdomainScanner = () => {
               <h3 className="text-xl font-semibold text-white flex items-center gap-2">
                 Results for {lastScanDomain}
                 {(isLoadingResults || isFetching) && (
-                  <Loader className="animate-spin text-cyber-blue" size={20} />
+                  <Loader className="animate-spin text-emerald-400" size={20} />
                 )}
               </h3>
               <div className="flex items-center gap-4 mt-2 text-sm">
@@ -631,7 +631,7 @@ const SubdomainScanner = () => {
                   : 'Start a scan to discover subdomains'}
               </p>
               {(isLoadingResults || isFetching) && (
-                <div className="mt-4 flex items-center justify-center gap-2 text-cyber-blue">
+                <div className="mt-4 flex items-center justify-center gap-2 text-emerald-400">
                   <Loader className="animate-spin" size={16} />
                   <span className="text-sm">Loading...</span>
                 </div>
@@ -639,7 +639,7 @@ const SubdomainScanner = () => {
               {scanSummary?.total_unique_subdomains > 0 && !isLoadingResults && (
                 <button
                   onClick={() => refetch()}
-                  className="mt-4 px-4 py-2 bg-cyber-blue/20 border border-cyber-blue/50 rounded-lg text-cyber-blue hover:bg-cyber-blue/30 transition-all"
+                  className="mt-4 px-4 py-2 bg-emerald-500/20 border border-emerald-500/30 rounded-lg text-emerald-400 hover:bg-emerald-500/30 transition-all"
                 >
                   <RefreshCw size={16} className="inline mr-2" />
                   Refresh Results
@@ -650,11 +650,11 @@ const SubdomainScanner = () => {
             <>
               {/* Results Summary Cards */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-                <div className="bg-dark-200 border border-dark-50 rounded-lg p-6 text-center">
+                <div className="bg-[#0a0a0a] border border-[#1f1f1f] rounded-lg p-6 text-center">
                   <div className="text-3xl font-bold text-white mb-2">{stats.total}</div>
                   <div className="text-sm text-gray-400">Total Subdomains</div>
                 </div>
-                <div className="bg-dark-200 border border-green-500/20 rounded-lg p-6 text-center">
+                <div className="bg-[#0a0a0a] border border-green-500/20 rounded-lg p-6 text-center">
                   <div className="text-3xl font-bold text-green-400 mb-2">{stats.active}</div>
                   <div className="text-sm text-gray-400">Active Hosts</div>
                   {stats.active > 0 && stats.total > 0 && (
@@ -663,14 +663,14 @@ const SubdomainScanner = () => {
                     </div>
                   )}
                 </div>
-                <div className="bg-dark-200 border border-dark-50 rounded-lg p-6 text-center">
+                <div className="bg-[#0a0a0a] border border-[#1f1f1f] rounded-lg p-6 text-center">
                   <div className="text-3xl font-bold text-gray-500 mb-2">{stats.inactive}</div>
                   <div className="text-sm text-gray-400">Inactive</div>
                 </div>
               </div>
 
               {/* Export Actions */}
-              <div className="bg-gradient-to-r from-cyber-blue/10 to-cyber-purple/10 border border-cyber-blue/30 rounded-lg p-6">
+              <div className="bg-gradient-to-r from-emerald-500/10 to-emerald-600/10 border border-emerald-500/30 rounded-lg p-6">
                 <div className="flex items-center justify-between">
                   <div>
                     <h4 className="text-lg font-semibold text-white mb-1">
@@ -688,22 +688,22 @@ const SubdomainScanner = () => {
               </div>
 
               {/* Export Info Box */}
-              <div className="mt-4 bg-dark-200 border border-dark-50 rounded-lg p-6">
+              <div className="mt-4 bg-[#0a0a0a] border border-[#1f1f1f] rounded-lg p-6">
                 <h4 className="text-sm font-semibold text-white mb-3 flex items-center gap-2">
-                  <Download size={16} className="text-cyber-blue" />
+                  <Download size={16} className="text-emerald-400" />
                   Export Options
                 </h4>
                 <p className="text-sm text-gray-400 mb-4">
                   Results are stored and can be exported at any time. Use the buttons above to export to CSV or copy to clipboard.
                 </p>
                 <div className="flex flex-wrap gap-2 text-xs">
-                  <span className="px-3 py-1 bg-dark-100 border border-dark-50 rounded-full text-gray-400">
+                  <span className="px-3 py-1 bg-[#111111] border border-[#1f1f1f] rounded-full text-gray-400">
                     📄 CSV Export Available
                   </span>
-                  <span className="px-3 py-1 bg-dark-100 border border-dark-50 rounded-full text-gray-400">
+                  <span className="px-3 py-1 bg-[#111111] border border-[#1f1f1f] rounded-full text-gray-400">
                     📋 Clipboard Copy Ready
                   </span>
-                  <span className="px-3 py-1 bg-dark-100 border border-dark-50 rounded-full text-gray-400">
+                  <span className="px-3 py-1 bg-[#111111] border border-[#1f1f1f] rounded-full text-gray-400">
                     🔄 Results Cached
                   </span>
                 </div>

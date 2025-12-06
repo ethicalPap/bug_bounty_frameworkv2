@@ -118,8 +118,10 @@ export function ContentDiscoveryProvider(props) {
   function loadInitialState() {
     try {
       var saved = localStorage.getItem(STORAGE_KEY)
+      console.log('📦 Loading content discovery state:', saved ? 'found' : 'empty')
       if (saved) {
         var parsed = JSON.parse(saved)
+        console.log('📦 Loaded items:', parsed.items?.length || 0)
         return {
           items: parsed.items || [],
           scanHistory: parsed.scanHistory || []
@@ -158,13 +160,18 @@ export function ContentDiscoveryProvider(props) {
     return []
   }
 
-  var initialState = loadInitialState()
-  
-  var itemsState = useState(initialState.items)
+  // Use lazy initializers to ensure state loads from localStorage
+  var itemsState = useState(function() {
+    var state = loadInitialState()
+    return state.items
+  })
   var items = itemsState[0]
   var setItems = itemsState[1]
   
-  var scanHistoryState = useState(initialState.scanHistory)
+  var scanHistoryState = useState(function() {
+    var state = loadInitialState()
+    return state.scanHistory
+  })
   var scanHistory = scanHistoryState[0]
   var setScanHistory = scanHistoryState[1]
   
@@ -213,6 +220,7 @@ export function ContentDiscoveryProvider(props) {
 
   useEffect(function() {
     try {
+      console.log('💾 Saving content discovery state:', items.length, 'items')
       localStorage.setItem(STORAGE_KEY, JSON.stringify({
         items: items,
         scanHistory: scanHistory

@@ -271,22 +271,24 @@ const PortScanner = () => {
     .slice(0, 4)
 
   return (
-    <div className="p-8 space-y-6">
+    <div className="p-6 space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-3xl font-bold text-white flex items-center gap-3">
-            <Network className="text-cyber-pink" />
+          <h1 className="text-2xl font-bold text-white flex items-center gap-3">
+            <div className="p-2 rounded-xl bg-gradient-to-br from-pink-500/20 to-pink-600/20">
+              <Network size={24} className="text-pink-400" />
+            </div>
             Port Scanner
-          </h2>
-          <p className="text-gray-400 mt-2">Discover open ports and running services</p>
+          </h1>
+          <p className="text-gray-500 mt-1">Discover open ports and running services</p>
         </div>
 
         {scanResults.length > 0 && !isScanning && (
           <div className="flex gap-2">
             <button
               onClick={copyToClipboard}
-              className="flex items-center gap-2 px-4 py-2 bg-dark-100 border border-dark-50 rounded-lg text-white hover:border-cyber-pink transition-all"
+              className="flex items-center gap-2 px-3 py-2 bg-[#111111] border border-[#1f1f1f] rounded-lg text-gray-400 hover:text-white hover:border-[#2a2a2a] transition-colors"
               title="Copy open ports"
             >
               <Copy size={16} />
@@ -294,7 +296,7 @@ const PortScanner = () => {
             </button>
             <button
               onClick={exportToCSV}
-              className="flex items-center gap-2 px-4 py-2 bg-dark-100 border border-dark-50 rounded-lg text-white hover:border-cyber-blue transition-all"
+              className="flex items-center gap-2 px-3 py-2 bg-[#111111] border border-[#1f1f1f] rounded-lg text-gray-400 hover:text-white hover:border-[#2a2a2a] transition-colors"
               title="Export to CSV"
             >
               <Download size={16} />
@@ -302,7 +304,7 @@ const PortScanner = () => {
             </button>
             <button
               onClick={clearResults}
-              className="flex items-center gap-2 px-4 py-2 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 hover:bg-red-500/20 transition-all"
+              className="flex items-center gap-2 px-3 py-2 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 hover:bg-red-500/20 transition-colors"
               title="Clear results"
             >
               <X size={16} />
@@ -313,19 +315,19 @@ const PortScanner = () => {
       </div>
 
       {/* Scan Configuration */}
-      <div className="bg-dark-100 border border-dark-50 rounded-xl p-6">
+      <div className="bg-[#111111] border border-[#1f1f1f] rounded-xl p-6">
         <div className="space-y-6">
           {/* Target Selection */}
           <div>
             <div className="flex items-center justify-between mb-2">
-              <label className="block text-sm font-medium text-gray-300">
+              <label className="block text-sm font-medium text-gray-400">
                 Select Targets ({selectedTargets.length} selected)
               </label>
               <div className="flex gap-2">
                 <button
                   onClick={selectAllTargets}
                   disabled={isScanning || availableTargets.length === 0}
-                  className="text-xs text-cyber-blue hover:underline disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="text-xs text-emerald-400 hover:underline disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   Select All
                 </button>
@@ -340,7 +342,7 @@ const PortScanner = () => {
             </div>
 
             {availableTargets.length === 0 ? (
-              <div className="text-center py-8 bg-dark-200 border border-dark-50 rounded-lg">
+              <div className="text-center py-8 bg-[#0a0a0a] border border-[#1f1f1f] rounded-lg">
                 <Globe className="mx-auto text-gray-600 mb-3" size={48} />
                 <p className="text-gray-400 mb-2">No active hosts available</p>
                 <p className="text-sm text-gray-500">
@@ -350,15 +352,15 @@ const PortScanner = () => {
             ) : (
               <>
                 {/* Available Targets */}
-                <div className="bg-dark-200 border border-dark-50 rounded-lg p-4 max-h-48 overflow-y-auto">
+                <div className="bg-[#0a0a0a] border border-[#1f1f1f] rounded-lg p-4 max-h-48 overflow-y-auto">
                   <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
                     {availableTargets.map((target) => (
                       <label
                         key={target.host}
                         className={`flex items-center gap-2 p-2 rounded border transition-all cursor-pointer ${
                           selectedTargets.includes(target.host)
-                            ? 'bg-cyber-pink/10 border-cyber-pink'
-                            : 'bg-dark-100 border-dark-50 hover:border-gray-600'
+                            ? 'bg-pink-500/10 border-pink-500/30'
+                            : 'bg-[#111111] border-[#1f1f1f] hover:border-[#2a2a2a]'
                         } ${isScanning ? 'opacity-50 cursor-not-allowed' : ''}`}
                       >
                         <input
@@ -372,7 +374,7 @@ const PortScanner = () => {
                             }
                           }}
                           disabled={isScanning}
-                          className="w-4 h-4 text-cyber-pink bg-dark-200 border-gray-600 rounded focus:ring-cyber-pink"
+                          className="w-4 h-4 rounded bg-[#0a0a0a] border-[#2a2a2a] text-pink-500 focus:ring-pink-500/50"
                         />
                         <span className="text-sm text-white truncate flex-1" title={target.host}>
                           {target.host}
@@ -390,13 +392,13 @@ const PortScanner = () => {
                     onChange={(e) => setCustomTarget(e.target.value)}
                     onKeyPress={(e) => e.key === 'Enter' && addCustomTarget()}
                     placeholder="Add custom target (IP or domain)"
-                    className="flex-1 px-4 py-2 bg-dark-200 border border-dark-50 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-cyber-pink transition-all disabled:opacity-50"
+                    className="flex-1 px-4 py-2 bg-[#0a0a0a] border border-[#1f1f1f] rounded-lg text-white placeholder-gray-600 focus:outline-none focus:border-emerald-500/50 transition-colors disabled:opacity-50"
                     disabled={isScanning}
                   />
                   <button
                     onClick={addCustomTarget}
                     disabled={!customTarget.trim() || isScanning}
-                    className="px-4 py-2 bg-cyber-pink/10 border border-cyber-pink/30 rounded-lg text-cyber-pink hover:bg-cyber-pink/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="px-4 py-2 bg-emerald-500/10 border border-emerald-500/30 rounded-lg text-emerald-400 hover:bg-emerald-500/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     Add
                   </button>
@@ -416,7 +418,7 @@ const PortScanner = () => {
                   <select
                     value={scanConfig.port_preset}
                     onChange={(e) => setScanConfig({...scanConfig, port_preset: e.target.value})}
-                    className="w-full px-3 py-2 bg-dark-200 border border-dark-50 rounded-lg text-white text-sm focus:outline-none focus:border-cyber-pink transition-all disabled:opacity-50"
+                    className="w-full px-3 py-2 bg-[#0a0a0a] border border-[#1f1f1f] rounded-lg text-white text-sm focus:outline-none focus:border-emerald-500/50 transition-colors disabled:opacity-50"
                     disabled={isScanning}
                   >
                     {Object.entries(PORT_PRESETS).map(([key, preset]) => (
@@ -431,7 +433,7 @@ const PortScanner = () => {
                       value={scanConfig.custom_ports}
                       onChange={(e) => setScanConfig({...scanConfig, custom_ports: e.target.value})}
                       placeholder="e.g., 80,443,8080-8090"
-                      className="w-full mt-2 px-3 py-2 bg-dark-200 border border-dark-50 rounded-lg text-white text-sm placeholder-gray-500 focus:outline-none focus:border-cyber-pink transition-all"
+                      className="w-full mt-2 px-3 py-2 bg-[#0a0a0a] border border-[#1f1f1f] rounded-lg text-white text-sm placeholder-gray-600 focus:outline-none focus:border-emerald-500/50 transition-colors"
                       disabled={isScanning}
                     />
                   )}
@@ -444,7 +446,7 @@ const PortScanner = () => {
                   <select
                     value={scanConfig.scan_type}
                     onChange={(e) => setScanConfig({...scanConfig, scan_type: e.target.value})}
-                    className="w-full px-3 py-2 bg-dark-200 border border-dark-50 rounded-lg text-white text-sm focus:outline-none focus:border-cyber-pink transition-all disabled:opacity-50"
+                    className="w-full px-3 py-2 bg-[#0a0a0a] border border-[#1f1f1f] rounded-lg text-white text-sm focus:outline-none focus:border-emerald-500/50 transition-colors disabled:opacity-50"
                     disabled={isScanning}
                   >
                     <option value="syn">SYN Scan (Stealth)</option>
@@ -462,7 +464,7 @@ const PortScanner = () => {
                   <select
                     value={scanConfig.scan_speed}
                     onChange={(e) => setScanConfig({...scanConfig, scan_speed: e.target.value})}
-                    className="w-full px-3 py-2 bg-dark-200 border border-dark-50 rounded-lg text-white text-sm focus:outline-none focus:border-cyber-pink transition-all disabled:opacity-50"
+                    className="w-full px-3 py-2 bg-[#0a0a0a] border border-[#1f1f1f] rounded-lg text-white text-sm focus:outline-none focus:border-emerald-500/50 transition-colors disabled:opacity-50"
                     disabled={isScanning}
                   >
                     <option value="slow">Slow (Stealthy)</option>
@@ -473,26 +475,30 @@ const PortScanner = () => {
                 </div>
 
                 <div>
-                  <label className="flex items-center gap-2 p-3 bg-dark-200 border border-dark-50 rounded-lg cursor-pointer hover:border-cyber-pink transition-all">
+                  <label className={`flex items-center gap-2 p-3 bg-[#0a0a0a] border rounded-lg cursor-pointer transition-colors ${
+                    scanConfig.service_detection ? 'border-emerald-500/30' : 'border-[#1f1f1f] hover:border-[#2a2a2a]'
+                  }`}>
                     <input
                       type="checkbox"
                       checked={scanConfig.service_detection}
                       onChange={(e) => setScanConfig({...scanConfig, service_detection: e.target.checked})}
                       disabled={isScanning}
-                      className="w-4 h-4 text-cyber-pink bg-dark-100 border-gray-600 rounded focus:ring-cyber-pink"
+                      className="w-4 h-4 rounded bg-[#0a0a0a] border-[#2a2a2a] text-emerald-500 focus:ring-emerald-500/50"
                     />
                     <span className="text-sm text-white">Service Detection</span>
                   </label>
                 </div>
 
                 <div>
-                  <label className="flex items-center gap-2 p-3 bg-dark-200 border border-dark-50 rounded-lg cursor-pointer hover:border-cyber-pink transition-all">
+                  <label className={`flex items-center gap-2 p-3 bg-[#0a0a0a] border rounded-lg cursor-pointer transition-colors ${
+                    scanConfig.os_detection ? 'border-emerald-500/30' : 'border-[#1f1f1f] hover:border-[#2a2a2a]'
+                  }`}>
                     <input
                       type="checkbox"
                       checked={scanConfig.os_detection}
                       onChange={(e) => setScanConfig({...scanConfig, os_detection: e.target.checked})}
                       disabled={isScanning}
-                      className="w-4 h-4 text-cyber-pink bg-dark-100 border-gray-600 rounded focus:ring-cyber-pink"
+                      className="w-4 h-4 rounded bg-[#0a0a0a] border-[#2a2a2a] text-emerald-500 focus:ring-emerald-500/50"
                     />
                     <span className="text-sm text-white">OS Detection</span>
                   </label>
@@ -500,9 +506,9 @@ const PortScanner = () => {
               </div>
 
               {/* Scan Info */}
-              <div className="p-4 bg-dark-200 border border-dark-50 rounded-lg">
+              <div className="p-4 bg-[#0a0a0a] border border-[#1f1f1f] rounded-lg">
                 <div className="flex items-start gap-3">
-                  <Shield className="text-cyber-pink flex-shrink-0 mt-0.5" size={20} />
+                  <Shield className="text-pink-400 flex-shrink-0 mt-0.5" size={20} />
                   <div className="flex-1">
                     <h4 className="text-sm font-medium text-white mb-1">Scan Configuration</h4>
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
@@ -537,7 +543,7 @@ const PortScanner = () => {
               <button
                 onClick={startScan}
                 disabled={selectedTargets.length === 0}
-                className="w-full py-3 px-6 bg-gradient-to-r from-cyber-pink to-cyber-purple rounded-lg font-medium text-white hover:from-cyber-pink/90 hover:to-cyber-purple/90 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2"
+                className="w-full py-3 px-6 bg-emerald-500/20 border border-emerald-500/30 rounded-lg font-medium text-emerald-400 hover:bg-emerald-500/30 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2"
               >
                 <Play size={20} />
                 Start Port Scan
@@ -547,7 +553,7 @@ const PortScanner = () => {
                 <button
                   type="button"
                   disabled
-                  className="flex-1 py-3 px-6 bg-gradient-to-r from-cyber-pink to-cyber-purple rounded-lg font-medium text-white opacity-75 cursor-not-allowed transition-all flex items-center justify-center gap-2"
+                  className="flex-1 py-3 px-6 bg-emerald-500/20 border border-emerald-500/30 rounded-lg font-medium text-emerald-400 opacity-75 cursor-not-allowed transition-all flex items-center justify-center gap-2"
                 >
                   <Loader className="animate-spin" size={20} />
                   Scanning... {scanProgress.toFixed(0)}%
@@ -572,11 +578,11 @@ const PortScanner = () => {
             <div>
               <div className="flex items-center justify-between mb-2">
                 <span className="text-sm text-gray-400">Scan Progress</span>
-                <span className="text-sm font-medium text-cyber-pink">{scanProgress.toFixed(0)}%</span>
+                <span className="text-sm font-medium text-emerald-400">{scanProgress.toFixed(0)}%</span>
               </div>
-              <div className="w-full bg-dark-200 rounded-full h-3 overflow-hidden">
+              <div className="w-full bg-[#0a0a0a] rounded-full h-2 overflow-hidden">
                 <div 
-                  className="h-full bg-gradient-to-r from-cyber-pink to-cyber-purple transition-all duration-300 ease-out rounded-full"
+                  className="h-full bg-gradient-to-r from-emerald-500 to-emerald-400 transition-all duration-300 ease-out rounded-full"
                   style={{ width: `${scanProgress}%` }}
                 />
               </div>
@@ -584,7 +590,7 @@ const PortScanner = () => {
 
             {currentTarget && (
               <div className="flex items-center gap-2 text-sm text-gray-400">
-                <Loader className="animate-spin text-cyber-pink" size={16} />
+                <Loader className="animate-spin text-emerald-400" size={16} />
                 <span>Scanning: <span className="text-white font-mono font-medium">{currentTarget}</span></span>
               </div>
             )}
@@ -594,9 +600,9 @@ const PortScanner = () => {
 
       {/* Results Summary */}
       {scanResults.length > 0 && !isScanning && (
-        <div className="bg-dark-100 border border-dark-50 rounded-xl p-6">
+        <div className="bg-[#111111] border border-[#1f1f1f] rounded-xl p-6">
           {/* Completion Banner */}
-          <div className="bg-gradient-to-r from-cyber-pink/10 to-cyber-purple/10 border border-cyber-pink/30 rounded-lg p-6 mb-6">
+          <div className="bg-gradient-to-r from-emerald-500/10 to-emerald-600/10 border border-emerald-500/30 rounded-lg p-6 mb-6">
             <div className="flex items-center justify-between">
               <div>
                 <h4 className="text-lg font-semibold text-white mb-1 flex items-center gap-2">
@@ -615,20 +621,20 @@ const PortScanner = () => {
 
           {/* Summary Statistics */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-            <div className="bg-dark-200 border border-dark-50 rounded-lg p-4 text-center">
+            <div className="bg-[#0a0a0a] border border-[#1f1f1f] rounded-lg p-4 text-center">
               <div className="text-3xl font-bold text-white mb-1">{stats.total_ports}</div>
               <div className="text-xs text-gray-400">Open Ports</div>
             </div>
-            <div className="bg-dark-200 border border-cyber-pink/20 rounded-lg p-4 text-center">
-              <div className="text-3xl font-bold text-cyber-pink mb-1">{stats.unique_targets}</div>
+            <div className="bg-[#0a0a0a] border border-pink-500/20 rounded-lg p-4 text-center">
+              <div className="text-3xl font-bold text-pink-400 mb-1">{stats.unique_targets}</div>
               <div className="text-xs text-gray-400">Targets Scanned</div>
             </div>
-            <div className="bg-dark-200 border border-dark-50 rounded-lg p-4 text-center">
+            <div className="bg-[#0a0a0a] border border-[#1f1f1f] rounded-lg p-4 text-center">
               <div className="text-3xl font-bold text-white mb-1">{stats.common_ports}</div>
               <div className="text-xs text-gray-400">Common Ports</div>
               <div className="text-xs text-gray-500 mt-1">(&lt;1024)</div>
             </div>
-            <div className="bg-dark-200 border border-dark-50 rounded-lg p-4 text-center">
+            <div className="bg-[#0a0a0a] border border-[#1f1f1f] rounded-lg p-4 text-center">
               <div className="text-3xl font-bold text-white mb-1">{stats.with_version}</div>
               <div className="text-xs text-gray-400">With Version</div>
             </div>
@@ -640,10 +646,10 @@ const PortScanner = () => {
               <h4 className="text-sm font-semibold text-white mb-3">Top Services Discovered</h4>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 {topServices.map(([service, count]) => (
-                  <div key={service} className="bg-dark-200 border border-dark-50 rounded-lg p-3">
+                  <div key={service} className="bg-[#0a0a0a] border border-[#1f1f1f] rounded-lg p-3">
                     <div className="flex items-center justify-between">
                       <span className="text-sm text-white font-medium capitalize">{service}</span>
-                      <span className="text-xs text-gray-400 bg-dark-100 px-2 py-1 rounded">{count}</span>
+                      <span className="text-xs text-gray-400 bg-[#111111] px-2 py-1 rounded">{count}</span>
                     </div>
                   </div>
                 ))}
@@ -652,10 +658,10 @@ const PortScanner = () => {
           )}
 
           {/* Export Information */}
-          <div className="bg-dark-200 border border-dark-50 rounded-lg p-6">
+          <div className="bg-[#0a0a0a] border border-[#1f1f1f] rounded-lg p-6">
             <div className="flex items-start gap-4">
-              <div className="p-3 bg-cyber-pink/10 rounded-lg flex-shrink-0">
-                <Download className="text-cyber-pink" size={24} />
+              <div className="p-3 bg-emerald-500/10 rounded-lg flex-shrink-0">
+                <Download className="text-emerald-400" size={24} />
               </div>
               <div className="flex-1">
                 <h4 className="text-sm font-semibold text-white mb-2">
@@ -666,15 +672,15 @@ const PortScanner = () => {
                   Perfect for vulnerability assessment and further security analysis.
                 </p>
 
-                <div className="bg-dark-100 border border-dark-50 rounded-lg p-3">
+                <div className="bg-[#111111] border border-[#1f1f1f] rounded-lg p-3">
                   <div className="text-xs text-gray-400 mb-1">CSV Export Contains:</div>
                   <div className="flex gap-2 flex-wrap">
-                    <span className="px-2 py-1 bg-dark-200 rounded text-xs text-white">Target</span>
-                    <span className="px-2 py-1 bg-dark-200 rounded text-xs text-white">Port</span>
-                    <span className="px-2 py-1 bg-dark-200 rounded text-xs text-white">State</span>
-                    <span className="px-2 py-1 bg-dark-200 rounded text-xs text-white">Service</span>
-                    <span className="px-2 py-1 bg-dark-200 rounded text-xs text-white">Version</span>
-                    <span className="px-2 py-1 bg-dark-200 rounded text-xs text-white">Protocol</span>
+                    <span className="px-2 py-1 bg-[#0a0a0a] rounded text-xs text-white">Target</span>
+                    <span className="px-2 py-1 bg-[#0a0a0a] rounded text-xs text-white">Port</span>
+                    <span className="px-2 py-1 bg-[#0a0a0a] rounded text-xs text-white">State</span>
+                    <span className="px-2 py-1 bg-[#0a0a0a] rounded text-xs text-white">Service</span>
+                    <span className="px-2 py-1 bg-[#0a0a0a] rounded text-xs text-white">Version</span>
+                    <span className="px-2 py-1 bg-[#0a0a0a] rounded text-xs text-white">Protocol</span>
                   </div>
                   <div className="text-xs text-gray-500 mt-2">
                     Detailed port and service information for security analysis

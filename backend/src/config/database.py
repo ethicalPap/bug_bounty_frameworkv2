@@ -46,7 +46,7 @@ def get_db() -> Generator[Session, None, None]:
 
 def drop_all_indexes_and_constraints(conn):
     """Drop all indexes and constraints to ensure clean slate"""
-    logger.info("🧹 Dropping all indexes and constraints...")
+    logger.info("Dropping all indexes and constraints...")
     
     try:
         # Get all indexes except primary key indexes
@@ -66,7 +66,7 @@ def drop_all_indexes_and_constraints(conn):
                 logger.warning(f"  Could not drop index {index_name}: {e}")
         
         conn.commit()
-        logger.info(f"  ✓ Dropped {len(indexes)} indexes")
+        logger.info(f"  Dropped {len(indexes)} indexes")
         
     except Exception as e:
         logger.error(f"Error dropping indexes: {e}")
@@ -74,7 +74,7 @@ def drop_all_indexes_and_constraints(conn):
 
 def drop_all_tables(conn):
     """Drop all tables with CASCADE"""
-    logger.info("🗑️  Dropping all tables...")
+    logger.info("Dropping all tables...")
     
     try:
         inspector = inspect(engine)
@@ -85,14 +85,14 @@ def drop_all_tables(conn):
             for table in tables:
                 try:
                     conn.execute(text(f'DROP TABLE IF EXISTS "{table}" CASCADE'))
-                    logger.debug(f"  Dropped table: {table}")
+                    logger.debug(f"Dropped table: {table}")
                 except Exception as e:
-                    logger.warning(f"  Could not drop table {table}: {e}")
+                    logger.warning(f"Could not drop table {table}: {e}")
             
             conn.commit()
-            logger.info("  ✓ All tables dropped")
+            logger.info("All tables dropped")
         else:
-            logger.info("  No tables to drop")
+            logger.info("No tables to drop")
             
     except Exception as e:
         logger.error(f"Error dropping tables: {e}")
@@ -106,13 +106,13 @@ def init_db():
     """
     try:
         # Import all models to register them with the shared Base
-        logger.info("📦 Importing models...")
+        logger.info("Importing models...")
         from src.models import Subdomain, ContentDiscovery, JSEndpoint, APIParameter, PortScan
         
-        logger.info("✓ Models imported successfully")
+        logger.info("Models imported successfully")
         
         # Show registered models
-        logger.info("📋 Registered models:")
+        logger.info("Registered models:")
         for table_name in Base.metadata.tables.keys():
             logger.info(f"  • {table_name}")
         
@@ -122,10 +122,10 @@ def init_db():
         
         # If tables exist, check for orphaned objects
         if existing_tables:
-            logger.info(f"⚠️  Found {len(existing_tables)} existing tables")
+            logger.info(f"Found {len(existing_tables)} existing tables")
             
             # Try to create tables (will fail if there are conflicts)
-            logger.info("🏗️  Attempting to create/update tables...")
+            logger.info("Attempting to create/update tables...")
             try:
                 Base.metadata.create_all(bind=engine)
                 
@@ -133,7 +133,7 @@ def init_db():
                 inspector = inspect(engine)
                 created_tables = inspector.get_table_names()
                 
-                print("\n✅ Database initialized successfully!")
+                print("\nDatabase initialized successfully!")
                 print(f"Tables ready: {len(created_tables)}")
                 for table_name in created_tables:
                     print(f"  ✓ {table_name}")
@@ -151,7 +151,7 @@ def init_db():
                     'relation', 
                     'index'
                 ]):
-                    logger.warning("⚠️  Found orphaned database objects, performing deep cleanup...")
+                    logger.warning("Found orphaned database objects, performing deep cleanup...")
                     
                     # Perform comprehensive cleanup
                     with engine.connect() as conn:
@@ -166,18 +166,18 @@ def init_db():
                         remaining_tables = inspector.get_table_names()
                         
                         if remaining_tables:
-                            logger.error(f"❌ Tables still exist after cleanup: {remaining_tables}")
+                            logger.error(f"Tables still exist after cleanup: {remaining_tables}")
                             raise Exception("Failed to clean up all tables")
                     
                     # Now create fresh tables
-                    logger.info("🏗️  Creating fresh database schema...")
+                    logger.info("Creating fresh database schema...")
                     Base.metadata.create_all(bind=engine)
                     
                     # Verify
                     inspector = inspect(engine)
                     created_tables = inspector.get_table_names()
                     
-                    print("\n✅ Database initialized successfully (after cleanup)!")
+                    print("\nDatabase initialized successfully (after cleanup)!")
                     print(f"Tables created: {len(created_tables)}")
                     for table_name in created_tables:
                         print(f"  ✓ {table_name}")
@@ -189,14 +189,14 @@ def init_db():
         
         else:
             # No existing tables, create fresh
-            logger.info("🏗️  Creating fresh database schema...")
+            logger.info("Creating fresh database schema...")
             Base.metadata.create_all(bind=engine)
             
             # Verify
             inspector = inspect(engine)
             created_tables = inspector.get_table_names()
             
-            print("\n✅ Database initialized successfully!")
+            print("\nDatabase initialized successfully!")
             print(f"Tables created: {len(created_tables)}")
             for table_name in created_tables:
                 print(f"  ✓ {table_name}")
@@ -204,7 +204,7 @@ def init_db():
             return True
         
     except Exception as e:
-        logger.error(f"❌ Error initializing database: {e}")
+        logger.error(f"Error initializing database: {e}")
         import traceback
         traceback.print_exc()
         return False
@@ -224,7 +224,7 @@ def drop_db():
             # Drop all tables
             drop_all_tables(conn)
         
-        print("✓ Database schema dropped completely!")
+        print("Database schema dropped completely!")
         
     except Exception as e:
         logger.error(f"Error dropping database: {e}")

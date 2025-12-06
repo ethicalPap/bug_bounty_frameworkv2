@@ -47,6 +47,15 @@ from src.controllers.visualization import (
     get_attack_surface_summary
 )
 from src.controllers.http_prober import HTTPProber
+from src.controllers.workspace import (
+    create_workspace as create_workspace_db,
+    get_workspace as get_workspace_db,
+    get_all_workspaces,
+    update_workspace as update_workspace_db,
+    delete_workspace as delete_workspace_db,
+    get_workspace_stats as get_workspace_stats_db,
+    workspace_to_dict
+)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -225,6 +234,26 @@ class DomainValidationRequest(BaseModel):
     limit: int = Field(10, description="Max number of targets to validate", ge=1, le=50)
     min_risk_score: int = Field(30, description="Minimum risk score for validation", ge=0, le=100)
 
+# Workspace Models
+class WorkspaceCreate(BaseModel):
+    name: str = Field(..., description="Workspace name", example="HackerOne - Example Corp")
+    description: Optional[str] = Field(None, description="Workspace description")
+    target_scope: Optional[str] = Field(None, description="Target scope pattern", example="*.example.com")
+
+class WorkspaceUpdate(BaseModel):
+    name: Optional[str] = Field(None, description="Workspace name")
+    description: Optional[str] = Field(None, description="Workspace description")
+    target_scope: Optional[str] = Field(None, description="Target scope pattern")
+
+class WorkspaceResponse(BaseModel):
+    id: str
+    name: str
+    description: Optional[str]
+    target_scope: Optional[str]
+    created_at: Optional[str]
+    updated_at: Optional[str]
+    stats: Optional[Dict] = None
+
 # ==================== Startup Events ====================
 
 @app.on_event("startup")
@@ -260,10 +289,12 @@ async def root():
             "content_discovery",
             "port_scanning",
             "vulnerability_validation",
-            "visualization"
+            "visualization",
+            "workspaces"
         ],
         "endpoints": {
             "health": "/health",
+            "workspaces": "/api/v1/workspaces",
             "subdomain_scan": "/api/v1/scan",
             "probe_hosts": "/api/v1/probe-hosts",
             "content_discovery": "/api/v1/content/scan",
@@ -273,6 +304,83 @@ async def root():
             "docs": "/docs"
         }
     }
+
+# ==================== Workspace Endpoints ====================
+
+@app.get("/api/v1/workspaces", response_model=List[WorkspaceResponse])
+async def list_workspaces(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=100),
+    db: Session = Depends(get_db)
+):
+    """Get all workspaces"""
+    workspaces = get_all_workspaces(db, skip=skip, limit=limit)
+    return [workspace_to_dict(w, include_stats=True, db=db) for w in workspaces]
+
+@app.post("/api/v1/workspaces", response_model=WorkspaceResponse)
+async def create_workspace(
+    request: WorkspaceCreate,
+    db: Session = Depends(get_db)
+):
+    """Create a new workspace"""
+    workspace = create_workspace_db(
+        db,
+        name=request.name,
+        description=request.description,
+        target_scope=request.target_scope
+    )
+    return workspace_to_dict(workspace, include_stats=False)
+
+@app.get("/api/v1/workspaces/{workspace_id}", response_model=WorkspaceResponse)
+async def get_workspace(
+    workspace_id: str,
+    db: Session = Depends(get_db)
+):
+    """Get a workspace by ID"""
+    workspace = get_workspace_db(db, workspace_id)
+    if not workspace:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+    return workspace_to_dict(workspace, include_stats=True, db=db)
+
+@app.put("/api/v1/workspaces/{workspace_id}", response_model=WorkspaceResponse)
+async def update_workspace(
+    workspace_id: str,
+    request: WorkspaceUpdate,
+    db: Session = Depends(get_db)
+):
+    """Update a workspace"""
+    workspace = update_workspace_db(
+        db,
+        workspace_id=workspace_id,
+        name=request.name,
+        description=request.description,
+        target_scope=request.target_scope
+    )
+    if not workspace:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+    return workspace_to_dict(workspace, include_stats=True, db=db)
+
+@app.delete("/api/v1/workspaces/{workspace_id}")
+async def delete_workspace(
+    workspace_id: str,
+    db: Session = Depends(get_db)
+):
+    """Delete a workspace and all associated data"""
+    success = delete_workspace_db(db, workspace_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+    return {"status": "deleted", "workspace_id": workspace_id}
+
+@app.get("/api/v1/workspaces/{workspace_id}/stats")
+async def get_workspace_stats(
+    workspace_id: str,
+    db: Session = Depends(get_db)
+):
+    """Get statistics for a workspace"""
+    workspace = get_workspace_db(db, workspace_id)
+    if not workspace:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+    return get_workspace_stats_db(db, workspace_id)
 
 # ==================== HTTP Probing Endpoints ====================
 

@@ -44,6 +44,12 @@ const Layout = () => {
 
   const navigationStructure = [
     {
+      label: 'Auto Scan',
+      path: '/auto-scan',
+      icon: Scan,
+      standalone: true
+,   },
+    {
       label: 'Dashboard',
       path: '/',
       icon: Home,
@@ -76,7 +82,6 @@ const Layout = () => {
       icon: Target,
       section: 'analyze',
       children: [
-        { path: '/validation', label: 'Validation Results', icon: Shield },
         { path: '/vuln-scanner', label: 'Vulnerability Scanner', icon: Bug },
         { path: '/visualization', label: 'Visualization', icon: BarChart3 },
       ]
@@ -89,6 +94,12 @@ const Layout = () => {
         { path: '/exports', label: 'Exports', icon: Download },
         { path: '/history', label: 'Scan History', icon: HistoryIcon },
       ]
+    },
+    {
+      label: 'Settings',
+      path: '/settings',
+      icon: Settings,
+      standalone: true
     }
   ]
 
