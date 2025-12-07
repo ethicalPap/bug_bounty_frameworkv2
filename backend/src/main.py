@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict
 from sqlalchemy.orm import Session
+from datetime import datetime
 import logging
 import os
 
@@ -968,13 +969,11 @@ async def get_workspace_validation_report_endpoint(
 
 
 # ==================== AUTOSCAN ENDPOINTS ====================
+# Using FastAPI BackgroundTasks for now (simpler than Celery)
+# TODO: Migrate to Celery for production scale
 
-from src.services.autoscan import autoscan_service
-from src.config.database import SessionLocal
-
-def get_db_factory():
-    """Returns a function that creates new database sessions"""
-    return SessionLocal
+import uuid
+from src.models.scan_job import ScanJob, ScanStatus
 
 
 class AutoScanRequest(BaseModel):
@@ -982,62 +981,198 @@ class AutoScanRequest(BaseModel):
     settings: Optional[Dict] = Field(default=None, description="Scan settings")
 
 
+# In-memory tracking for running scans (will be replaced by Celery)
+_running_scans: Dict[str, bool] = {}
+
+
+async def run_scan_background(job_id: str, db_url: str):
+    """Background task to run the scan"""
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    
+    engine = create_engine(db_url)
+    SessionLocal = sessionmaker(bind=engine)
+    db = SessionLocal()
+    
+    try:
+        job = db.query(ScanJob).filter(ScanJob.id == job_id).first()
+        if not job:
+            return
+        
+        job.status = ScanStatus.RUNNING.value
+        job.started_at = datetime.utcnow()
+        job.add_log(f"Starting scan of {job.target_domain}")
+        db.commit()
+        
+        # Phase 1: Subdomains
+        if _running_scans.get(job_id) and job.settings.get("enable_subdomains", True):
+            try:
+                job.current_phase = "subdomains"
+                job.phase_progress["subdomains"] = 0
+                job.add_log("Starting subdomain enumeration", phase="subdomains")
+                db.commit()
+                
+                from src.controllers.subdomains import start_subdomain_scan
+                config = {
+                    "domain": job.target_domain,
+                    "workspace_id": job.workspace_id,
+                    "use_subfinder": job.settings.get("use_subfinder", True),
+                    "use_amass": job.settings.get("use_amass", False),
+                    "use_assetfinder": job.settings.get("use_assetfinder", True),
+                    "use_findomain": job.settings.get("use_findomain", True),
+                }
+                result = start_subdomain_scan(config, db)
+                
+                job.results["subdomains"] = result.get("total", 0)
+                job.completed_phases = (job.completed_phases or []) + ["subdomains"]
+                job.phase_progress["subdomains"] = 100
+                job.add_log(f"Found {result.get('total', 0)} subdomains", phase="subdomains")
+                db.commit()
+            except Exception as e:
+                job.failed_phases = (job.failed_phases or []) + ["subdomains"]
+                job.add_log(f"Subdomain scan failed: {str(e)}", level="error", phase="subdomains")
+                db.commit()
+        
+        # Phase 2: Live Hosts
+        if _running_scans.get(job_id) and job.settings.get("enable_live_hosts", True):
+            try:
+                job.current_phase = "live_hosts"
+                job.phase_progress["live_hosts"] = 0
+                job.add_log("Starting live host detection", phase="live_hosts")
+                db.commit()
+                
+                from src.controllers.http_prober import probe_workspace_subdomains
+                results = probe_workspace_subdomains(
+                    workspace_id=job.workspace_id,
+                    db=db,
+                    timeout=job.settings.get("probe_timeout", 10),
+                    concurrency=job.settings.get("probe_concurrency", 50)
+                )
+                
+                live_count = len([r for r in results if r.get("is_active")])
+                job.results["live_hosts"] = live_count
+                job.completed_phases = (job.completed_phases or []) + ["live_hosts"]
+                job.phase_progress["live_hosts"] = 100
+                job.add_log(f"Found {live_count} live hosts", phase="live_hosts")
+                db.commit()
+            except Exception as e:
+                job.failed_phases = (job.failed_phases or []) + ["live_hosts"]
+                job.add_log(f"Live host detection failed: {str(e)}", level="error", phase="live_hosts")
+                db.commit()
+        
+        # Complete
+        if _running_scans.get(job_id):
+            job.status = ScanStatus.COMPLETED.value
+            job.current_phase = None
+            job.completed_at = datetime.utcnow()
+            job.add_log("Scan completed successfully")
+        else:
+            job.status = ScanStatus.CANCELLED.value
+            job.completed_at = datetime.utcnow()
+            job.add_log("Scan was cancelled", level="warning")
+        
+        db.commit()
+        
+    except Exception as e:
+        logger.error(f"Scan failed: {e}")
+        try:
+            job.status = ScanStatus.FAILED.value
+            job.error_message = str(e)
+            job.completed_at = datetime.utcnow()
+            job.add_log(f"Scan failed: {str(e)}", level="error")
+            db.commit()
+        except:
+            pass
+    finally:
+        _running_scans.pop(job_id, None)
+        db.close()
+
+
 @app.post("/api/v1/autoscan/start/{workspace_id}")
 async def start_autoscan(
-    workspace_id: str,
+    workspace_id: str, 
     request: AutoScanRequest,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db)
 ):
-    """
-    Start a background auto-scan for a workspace.
-    The scan continues running even if the client disconnects.
-    """
+    """Start a background auto-scan for a workspace"""
     try:
         # Verify workspace exists
         workspace = get_workspace_db(workspace_id, db)
         if not workspace:
             raise HTTPException(status_code=404, detail="Workspace not found")
         
-        job = await autoscan_service.start_scan(
+        # Check for existing active scan
+        existing = db.query(ScanJob).filter(
+            ScanJob.workspace_id == workspace_id,
+            ScanJob.status.in_(["pending", "running", "paused"])
+        ).first()
+        
+        if existing:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Workspace already has an active scan: {existing.id}"
+            )
+        
+        # Create scan job
+        job = ScanJob(
+            id=str(uuid.uuid4()),
             workspace_id=workspace_id,
-            target_domain=request.target_domain,
-            settings=request.settings,
-            db_session_factory=get_db_factory()
+            target_domain=request.target_domain.strip().lower(),
+            status=ScanStatus.PENDING.value,
+            settings=request.settings or {},
+            results={},
+            completed_phases=[],
+            failed_phases=[],
+            phase_progress={},
+            logs=[]
         )
+        job.add_log(f"Scan queued for {request.target_domain}")
+        
+        db.add(job)
+        db.commit()
+        db.refresh(job)
+        
+        # Mark as running and queue background task
+        _running_scans[job.id] = True
+        
+        # Get DB URL for background task
+        db_url = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@db:5432/bugbounty")
+        background_tasks.add_task(run_scan_background, job.id, db_url)
         
         return {
             "status": "started",
             "job_id": job.id,
-            "message": f"Scan started for {request.target_domain}"
+            "message": f"Scan queued for {request.target_domain}"
         }
         
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to start autoscan: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/api/v1/autoscan/status/{workspace_id}")
-async def get_autoscan_status(workspace_id: str):
+async def get_autoscan_status(workspace_id: str, db: Session = Depends(get_db)):
     """Get the current scan status for a workspace"""
-    job = autoscan_service.get_workspace_job(workspace_id)
+    job = db.query(ScanJob).filter(
+        ScanJob.workspace_id == workspace_id
+    ).order_by(ScanJob.created_at.desc()).first()
+    
     if not job:
-        return {
-            "status": "idle",
-            "job": None
-        }
+        return {"status": "idle", "job": None}
     
     return {
-        "status": job.status.value,
+        "status": job.status,
         "job": job.to_dict()
     }
 
 
 @app.get("/api/v1/autoscan/job/{job_id}")
-async def get_autoscan_job(job_id: str):
+async def get_autoscan_job(job_id: str, db: Session = Depends(get_db)):
     """Get details of a specific scan job"""
-    job = autoscan_service.get_job(job_id)
+    job = db.query(ScanJob).filter(ScanJob.id == job_id).first()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     
@@ -1045,49 +1180,89 @@ async def get_autoscan_job(job_id: str):
 
 
 @app.post("/api/v1/autoscan/pause/{job_id}")
-async def pause_autoscan(job_id: str):
+async def pause_autoscan_endpoint(job_id: str, db: Session = Depends(get_db)):
     """Pause a running scan"""
-    success = await autoscan_service.pause_scan(job_id)
-    if not success:
-        raise HTTPException(status_code=400, detail="Cannot pause this scan")
+    job = db.query(ScanJob).filter(ScanJob.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    if job.status != ScanStatus.RUNNING.value:
+        raise HTTPException(status_code=400, detail="Job is not running")
+    
+    job.status = ScanStatus.PAUSED.value
+    job.add_log("Scan paused by user", level="warning")
+    db.commit()
     
     return {"status": "paused", "job_id": job_id}
 
 
 @app.post("/api/v1/autoscan/resume/{job_id}")
-async def resume_autoscan(job_id: str):
+async def resume_autoscan_endpoint(job_id: str, db: Session = Depends(get_db)):
     """Resume a paused scan"""
-    success = await autoscan_service.resume_scan(job_id)
-    if not success:
-        raise HTTPException(status_code=400, detail="Cannot resume this scan")
+    job = db.query(ScanJob).filter(ScanJob.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    if job.status != ScanStatus.PAUSED.value:
+        raise HTTPException(status_code=400, detail="Job is not paused")
+    
+    job.status = ScanStatus.RUNNING.value
+    job.add_log("Scan resumed by user")
+    db.commit()
     
     return {"status": "resumed", "job_id": job_id}
 
 
 @app.post("/api/v1/autoscan/cancel/{job_id}")
-async def cancel_autoscan(job_id: str):
+async def cancel_autoscan_endpoint(job_id: str, db: Session = Depends(get_db)):
     """Cancel a scan"""
-    success = await autoscan_service.cancel_scan(job_id)
-    if not success:
-        raise HTTPException(status_code=400, detail="Cannot cancel this scan")
+    job = db.query(ScanJob).filter(ScanJob.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    if job.status not in ["pending", "running", "paused"]:
+        raise HTTPException(status_code=400, detail="Job cannot be cancelled")
+    
+    # Signal the background task to stop
+    _running_scans.pop(job_id, None)
+    
+    job.status = ScanStatus.CANCELLED.value
+    job.completed_at = datetime.utcnow()
+    job.add_log("Scan cancelled by user", level="warning")
+    db.commit()
     
     return {"status": "cancelled", "job_id": job_id}
 
 
 @app.delete("/api/v1/autoscan/job/{job_id}")
-async def delete_autoscan_job(job_id: str):
+async def delete_autoscan_job(job_id: str, db: Session = Depends(get_db)):
     """Delete a completed/failed/cancelled scan job"""
-    success = autoscan_service.clear_job(job_id)
-    if not success:
-        raise HTTPException(status_code=400, detail="Cannot delete this job (may be still running)")
+    job = db.query(ScanJob).filter(ScanJob.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    if job.status in ["running", "paused"]:
+        raise HTTPException(status_code=400, detail="Cannot delete active job")
+    
+    db.delete(job)
+    db.commit()
     
     return {"status": "deleted", "job_id": job_id}
 
 
 @app.get("/api/v1/autoscan/jobs")
-async def list_autoscan_jobs(workspace_id: Optional[str] = Query(None)):
+async def list_autoscan_jobs(
+    workspace_id: Optional[str] = Query(None),
+    db: Session = Depends(get_db)
+):
     """List all scan jobs, optionally filtered by workspace"""
-    jobs = autoscan_service.get_all_jobs(workspace_id)
+    query = db.query(ScanJob)
+    
+    if workspace_id:
+        query = query.filter(ScanJob.workspace_id == workspace_id)
+    
+    jobs = query.order_by(ScanJob.created_at.desc()).limit(50).all()
+    
     return {
         "jobs": [j.to_dict() for j in jobs],
         "count": len(jobs)

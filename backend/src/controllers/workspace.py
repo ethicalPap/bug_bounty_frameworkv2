@@ -9,10 +9,10 @@ from typing import List, Optional
 from datetime import datetime
 import uuid
 
-from src.models.Workspace import Workspace
-from src.models.Subdomain import Subdomain
-from src.models.ContentDiscovery import ContentDiscovery, JSEndpoint, APIParameter
-from src.models.PortScan import PortScan
+from src.models.workspace import Workspace
+from src.models.subdomain import Subdomain
+from src.models.content_discovery import ContentDiscovery, JSEndpoint, APIParameter
+from src.models.port_scan import PortScan
 
 import logging
 
