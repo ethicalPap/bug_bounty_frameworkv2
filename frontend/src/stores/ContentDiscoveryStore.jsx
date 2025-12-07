@@ -110,20 +110,76 @@ export function extractSubdomain(url) {
   }
 }
 
+// Get current workspace ID from URL or localStorage
+function getCurrentWorkspaceId() {
+  // Try to get from URL first
+  var match = window.location.pathname.match(/\/workspace\/([^\/]+)/)
+  if (match) return match[1]
+  
+  // Fall back to localStorage
+  try {
+    var workspace = JSON.parse(localStorage.getItem('active_workspace') || '{}')
+    return workspace.id || null
+  } catch (e) {
+    return null
+  }
+}
+
+// Get workspace-scoped storage key
+function getStorageKey(baseKey) {
+  var workspaceId = getCurrentWorkspaceId()
+  if (workspaceId) {
+    return baseKey + '_' + workspaceId
+  }
+  return baseKey + '_global'
+}
+
 var ContentDiscoveryContext = createContext(null)
 
 export function ContentDiscoveryProvider(props) {
   var children = props.children
   
+  // Track current workspace
+  var workspaceIdState = useState(getCurrentWorkspaceId)
+  var currentWorkspaceId = workspaceIdState[0]
+  var setCurrentWorkspaceId = workspaceIdState[1]
+  
+  // Update workspace ID when URL changes
+  useEffect(function() {
+    function handleLocationChange() {
+      var newWorkspaceId = getCurrentWorkspaceId()
+      if (newWorkspaceId !== currentWorkspaceId) {
+        console.log('📁 Workspace changed:', currentWorkspaceId, '->', newWorkspaceId)
+        setCurrentWorkspaceId(newWorkspaceId)
+        // Reload data for new workspace
+        var state = loadInitialState()
+        setItems(state.items)
+        setScanHistory(state.scanHistory)
+        setSubdomains(loadSubdomains())
+        setLiveHosts(loadLiveHosts())
+      }
+    }
+    
+    window.addEventListener('popstate', handleLocationChange)
+    // Check periodically for SPA navigation
+    var interval = setInterval(handleLocationChange, 500)
+    
+    return function() {
+      window.removeEventListener('popstate', handleLocationChange)
+      clearInterval(interval)
+    }
+  }, [currentWorkspaceId])
+  
   function loadInitialState() {
+    // Items are loaded from API/database, not localStorage
+    // Only scan history (metadata) is stored locally
     try {
-      var saved = localStorage.getItem(STORAGE_KEY)
-      console.log('📦 Loading content discovery state:', saved ? 'found' : 'empty')
+      var key = getStorageKey(STORAGE_KEY)
+      var saved = localStorage.getItem(key)
       if (saved) {
         var parsed = JSON.parse(saved)
-        console.log('📦 Loaded items:', parsed.items?.length || 0)
         return {
-          items: parsed.items || [],
+          items: [], // Items come from database via API
           scanHistory: parsed.scanHistory || []
         }
       }
@@ -134,29 +190,12 @@ export function ContentDiscoveryProvider(props) {
   }
 
   function loadSubdomains() {
-    try {
-      var saved = localStorage.getItem(SUBDOMAINS_KEY)
-      if (saved) {
-        var parsed = JSON.parse(saved)
-        return Array.isArray(parsed) ? parsed : (parsed.results || [])
-      }
-    } catch (e) {
-      console.error('Error loading subdomains:', e)
-    }
+    // Subdomains are loaded from API, not localStorage
     return []
   }
 
   function loadLiveHosts() {
-    try {
-      var saved = localStorage.getItem('live_hosts_results')
-      if (saved) {
-        var parsed = JSON.parse(saved)
-        var hosts = Array.isArray(parsed) ? parsed : (parsed.results || [])
-        return hosts.filter(function(h) { return h.is_active && h.url })
-      }
-    } catch (e) {
-      console.error('Error loading live hosts:', e)
-    }
+    // Live hosts are loaded from API, not localStorage
     return []
   }
 
@@ -218,17 +257,21 @@ export function ContentDiscoveryProvider(props) {
     }
   }, [])
 
+  // NOTE: We no longer save items to localStorage - they're stored in PostgreSQL
+  // Only save minimal scan metadata (scan history for UI state)
   useEffect(function() {
     try {
-      console.log('💾 Saving content discovery state:', items.length, 'items')
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({
-        items: items,
-        scanHistory: scanHistory
-      }))
+      // Only save scan history (small metadata), NOT items
+      var storageKey = getStorageKey(STORAGE_KEY)
+      var dataToSave = JSON.stringify({
+        scanHistory: (scanHistory || []).slice(0, 50) // Only keep last 50 scan records
+        // items are NOT saved - they live in PostgreSQL database
+      })
+      localStorage.setItem(storageKey, dataToSave)
     } catch (e) {
-      console.error('Error saving content discovery state:', e)
+      console.warn('Failed to save scan history:', e.message)
     }
-  }, [items, scanHistory])
+  }, [scanHistory])
 
   var enrichItem = useCallback(function(item) {
     var url = item.discovered_url || item.url
@@ -267,6 +310,36 @@ export function ContentDiscoveryProvider(props) {
 
   var clearItems = useCallback(function() {
     setItems([])
+  }, [])
+
+  var clearAllData = useCallback(function() {
+    // Clear only current workspace's data
+    var workspaceId = getCurrentWorkspaceId()
+    var suffix = workspaceId ? '_' + workspaceId : '_global'
+    
+    var keysToRemove = []
+    for (var i = 0; i < localStorage.length; i++) {
+      var key = localStorage.key(i)
+      if (key && key.endsWith(suffix) && (
+        key.startsWith('content_') || 
+        key.startsWith('scan_') || 
+        key.startsWith('autoscan') ||
+        key.startsWith('live_hosts') ||
+        key.startsWith('port_scan') ||
+        key.startsWith('vuln_scan') ||
+        key.startsWith('subdomain_scan')
+      )) {
+        keysToRemove.push(key)
+      }
+    }
+    keysToRemove.forEach(function(key) {
+      localStorage.removeItem(key)
+    })
+    setItems([])
+    setScanHistory([])
+    setSubdomains([])
+    setLiveHosts([])
+    console.log('🗑️ Cleared workspace data:', workspaceId || 'global', '- removed', keysToRemove.length, 'keys')
   }, [])
 
   var removeItem = useCallback(function(id) {
@@ -436,6 +509,7 @@ export function ContentDiscoveryProvider(props) {
     addItems: addItems,
     setItems: setAllItems,
     clearItems: clearItems,
+    clearAllData: clearAllData,
     removeItem: removeItem,
     updateItem: updateItem,
     startScan: startScan,

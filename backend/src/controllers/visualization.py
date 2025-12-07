@@ -1,6 +1,7 @@
 """
 Visualization Data Controller
 Aggregates data from all scan types for visual representation
+Supports workspace isolation
 """
 
 import logging
@@ -17,44 +18,57 @@ from src.config.database import SessionLocal
 logger = logging.getLogger(__name__)
 
 
-def get_domain_visualization_data(domain: str, db: Session) -> Dict:
+def get_domain_visualization_data(domain: str, db: Session, workspace_id: Optional[str] = None) -> Dict:
     """
     Get comprehensive visualization data for a domain
     Returns data structured for network graph visualization
     """
     try:
         # Get all subdomains
-        subdomains = db.query(Subdomain).filter(
-            Subdomain.domain == domain
-        ).all()
+        query = db.query(Subdomain).filter(Subdomain.domain == domain)
+        if workspace_id:
+            query = query.filter(Subdomain.workspace_id == workspace_id)
+        subdomains = query.all()
         
         # Get all content discoveries for this domain
         subdomain_ids = [s.id for s in subdomains]
         content_discoveries = []
         if subdomain_ids:
-            content_discoveries = db.query(ContentDiscovery).filter(
+            cd_query = db.query(ContentDiscovery).filter(
                 ContentDiscovery.subdomain_id.in_(subdomain_ids)
-            ).all()
+            )
+            if workspace_id:
+                cd_query = cd_query.filter(ContentDiscovery.workspace_id == workspace_id)
+            content_discoveries = cd_query.all()
         
         # Get all port scans
         port_scans = []
         subdomain_names = [s.full_domain for s in subdomains]
         if subdomain_names:
-            port_scans = db.query(PortScan).filter(
-                PortScan.target.in_(subdomain_names)
-            ).all()
+            ps_query = db.query(PortScan).filter(PortScan.target.in_(subdomain_names))
+            if workspace_id:
+                ps_query = ps_query.filter(PortScan.workspace_id == workspace_id)
+            port_scans = ps_query.all()
         
         # Get JS endpoints and API parameters
         js_endpoints = []
         api_parameters = []
         if subdomain_ids:
-            js_endpoints = db.query(JSEndpoint).filter(
-                JSEndpoint.content_discovery_id.in_([cd.id for cd in content_discoveries])
-            ).all()
-            
-            api_parameters = db.query(APIParameter).filter(
-                APIParameter.content_discovery_id.in_([cd.id for cd in content_discoveries])
-            ).all()
+            content_ids = [cd.id for cd in content_discoveries]
+            if content_ids:
+                je_query = db.query(JSEndpoint).filter(
+                    JSEndpoint.content_discovery_id.in_(content_ids)
+                )
+                if workspace_id:
+                    je_query = je_query.filter(JSEndpoint.workspace_id == workspace_id)
+                js_endpoints = je_query.all()
+                
+                ap_query = db.query(APIParameter).filter(
+                    APIParameter.content_discovery_id.in_(content_ids)
+                )
+                if workspace_id:
+                    ap_query = ap_query.filter(APIParameter.workspace_id == workspace_id)
+                api_parameters = ap_query.all()
         
         # Build nodes and edges for network graph
         nodes = []
@@ -86,9 +100,8 @@ def get_domain_visualization_data(domain: str, db: Session) -> Dict:
                 'color': '#10b981' if subdomain.is_active else '#6b7280',
                 'is_active': subdomain.is_active,
                 'ip_address': subdomain.ip_address,
-                'status_code': subdomain.status_code,
-                'title': subdomain.title,
-                'server': subdomain.server
+                'status_code': subdomain.http_status,
+                'title': subdomain.title
             })
             
             # Edge from domain to subdomain
@@ -99,11 +112,11 @@ def get_domain_visualization_data(domain: str, db: Session) -> Dict:
                 'label': 'subdomain'
             })
         
-        # Technology nodes (from server headers)
+        # Technology nodes (from technologies field)
         tech_map = defaultdict(list)
         for subdomain in subdomains:
-            if subdomain.server:
-                tech = subdomain.server.split('/')[0]  # Extract tech name
+            if subdomain.technologies:
+                tech = subdomain.technologies.split('/')[0] if '/' in subdomain.technologies else subdomain.technologies
                 tech_map[tech].append(subdomain.id)
         
         for tech, sub_ids in tech_map.items():
@@ -118,7 +131,6 @@ def get_domain_visualization_data(domain: str, db: Session) -> Dict:
                 'count': len(sub_ids)
             })
             
-            # Edge from subdomains to technology
             for sub_id in sub_ids:
                 if sub_id in subdomain_map:
                     edges.append({
@@ -147,9 +159,7 @@ def get_domain_visualization_data(domain: str, db: Session) -> Dict:
                 'count': len(ports)
             })
             
-            # Edge from subdomains to services
             for port in ports:
-                # Find matching subdomain
                 for subdomain in subdomains:
                     if subdomain.full_domain == port.target:
                         if subdomain.id in subdomain_map:
@@ -167,14 +177,13 @@ def get_domain_visualization_data(domain: str, db: Session) -> Dict:
         endpoint_map = defaultdict(set)
         for content in content_discoveries:
             if content.path:
-                # Extract top-level path
                 parts = content.path.strip('/').split('/')
                 top_level = '/' + parts[0] if parts and parts[0] else '/'
                 endpoint_map[content.subdomain_id].add(top_level)
         
         for sub_id, paths in endpoint_map.items():
             if sub_id in subdomain_map:
-                for path in list(paths)[:5]:  # Limit to top 5 paths per subdomain
+                for path in list(paths)[:5]:
                     path_id = f'path-{sub_id}-{path.replace("/", "_")}'
                     nodes.append({
                         'id': path_id,
@@ -206,6 +215,7 @@ def get_domain_visualization_data(domain: str, db: Session) -> Dict:
         
         return {
             'domain': domain,
+            'workspace_id': workspace_id,
             'nodes': nodes,
             'edges': edges,
             'stats': stats,
@@ -213,7 +223,7 @@ def get_domain_visualization_data(domain: str, db: Session) -> Dict:
                 'subdomains': [s.to_dict() for s in subdomains],
                 'technologies': list(tech_map.keys()),
                 'services': list(service_map.keys()),
-                'ports': [p.to_dict() for p in port_scans[:100]],  # Limit for performance
+                'ports': [p.to_dict() for p in port_scans[:100]],
                 'content_discoveries': [c.to_dict() for c in content_discoveries[:100]]
             }
         }
@@ -223,23 +233,25 @@ def get_domain_visualization_data(domain: str, db: Session) -> Dict:
         raise
 
 
-def get_technology_breakdown(domain: str, db: Session) -> Dict:
+def get_technology_breakdown(domain: str, db: Session, workspace_id: Optional[str] = None) -> Dict:
     """Get detailed technology breakdown for visualization"""
     try:
-        subdomains = db.query(Subdomain).filter(
-            Subdomain.domain == domain
-        ).all()
+        query = db.query(Subdomain).filter(Subdomain.domain == domain)
+        if workspace_id:
+            query = query.filter(Subdomain.workspace_id == workspace_id)
+        subdomains = query.all()
         
         tech_breakdown = defaultdict(lambda: {'count': 0, 'subdomains': []})
         
         for subdomain in subdomains:
-            if subdomain.server:
-                tech = subdomain.server.split('/')[0]
+            if subdomain.technologies:
+                tech = subdomain.technologies.split('/')[0] if '/' in subdomain.technologies else subdomain.technologies
                 tech_breakdown[tech]['count'] += 1
                 tech_breakdown[tech]['subdomains'].append(subdomain.full_domain)
         
         return {
             'domain': domain,
+            'workspace_id': workspace_id,
             'technologies': [
                 {
                     'name': tech,
@@ -255,18 +267,20 @@ def get_technology_breakdown(domain: str, db: Session) -> Dict:
         raise
 
 
-def get_service_breakdown(domain: str, db: Session) -> Dict:
+def get_service_breakdown(domain: str, db: Session, workspace_id: Optional[str] = None) -> Dict:
     """Get detailed service/port breakdown for visualization"""
     try:
-        subdomains = db.query(Subdomain).filter(
-            Subdomain.domain == domain
-        ).all()
+        query = db.query(Subdomain).filter(Subdomain.domain == domain)
+        if workspace_id:
+            query = query.filter(Subdomain.workspace_id == workspace_id)
+        subdomains = query.all()
         
         subdomain_names = [s.full_domain for s in subdomains]
         
-        ports = db.query(PortScan).filter(
-            PortScan.target.in_(subdomain_names)
-        ).all()
+        ps_query = db.query(PortScan).filter(PortScan.target.in_(subdomain_names))
+        if workspace_id:
+            ps_query = ps_query.filter(PortScan.workspace_id == workspace_id)
+        ports = ps_query.all()
         
         service_breakdown = defaultdict(lambda: {
             'count': 0,
@@ -285,12 +299,13 @@ def get_service_breakdown(domain: str, db: Session) -> Dict:
         
         return {
             'domain': domain,
+            'workspace_id': workspace_id,
             'services': [
                 {
                     'name': service,
                     'count': data['count'],
                     'ports': sorted(list(data['ports'])),
-                    'targets': list(data['targets'])[:10],  # Limit for performance
+                    'targets': list(data['targets'])[:10],
                     'versions': list(data['versions'])[:5]
                 }
                 for service, data in sorted(service_breakdown.items(), key=lambda x: x[1]['count'], reverse=True)
@@ -302,18 +317,22 @@ def get_service_breakdown(domain: str, db: Session) -> Dict:
         raise
 
 
-def get_endpoint_tree(domain: str, db: Session) -> Dict:
+def get_endpoint_tree(domain: str, db: Session, workspace_id: Optional[str] = None) -> Dict:
     """Get hierarchical endpoint tree for visualization"""
     try:
-        subdomains = db.query(Subdomain).filter(
-            Subdomain.domain == domain
-        ).all()
+        query = db.query(Subdomain).filter(Subdomain.domain == domain)
+        if workspace_id:
+            query = query.filter(Subdomain.workspace_id == workspace_id)
+        subdomains = query.all()
         
         subdomain_ids = [s.id for s in subdomains]
         
-        content = db.query(ContentDiscovery).filter(
+        cd_query = db.query(ContentDiscovery).filter(
             ContentDiscovery.subdomain_id.in_(subdomain_ids)
-        ).all()
+        )
+        if workspace_id:
+            cd_query = cd_query.filter(ContentDiscovery.workspace_id == workspace_id)
+        content = cd_query.all()
         
         # Build tree structure
         tree = {
@@ -335,8 +354,7 @@ def get_endpoint_tree(domain: str, db: Session) -> Dict:
                 subdomain_tree[item.subdomain_id]['children'].append({
                     'name': item.path,
                     'status_code': item.status_code,
-                    'method': item.method,
-                    'discovery_type': item.discovery_type,
+                    'content_type': item.content_type,
                     'size': 1
                 })
         
@@ -344,6 +362,7 @@ def get_endpoint_tree(domain: str, db: Session) -> Dict:
         
         return {
             'domain': domain,
+            'workspace_id': workspace_id,
             'tree': tree
         }
         
@@ -352,12 +371,13 @@ def get_endpoint_tree(domain: str, db: Session) -> Dict:
         raise
 
 
-def get_attack_surface_summary(domain: str, db: Session) -> Dict:
+def get_attack_surface_summary(domain: str, db: Session, workspace_id: Optional[str] = None) -> Dict:
     """Get attack surface summary metrics"""
     try:
-        subdomains = db.query(Subdomain).filter(
-            Subdomain.domain == domain
-        ).all()
+        query = db.query(Subdomain).filter(Subdomain.domain == domain)
+        if workspace_id:
+            query = query.filter(Subdomain.workspace_id == workspace_id)
+        subdomains = query.all()
         
         subdomain_ids = [s.id for s in subdomains]
         subdomain_names = [s.full_domain for s in subdomains]
@@ -369,43 +389,60 @@ def get_attack_surface_summary(domain: str, db: Session) -> Dict:
         total_ports = 0
         open_ports = 0
         if subdomain_names:
-            total_ports = db.query(PortScan).filter(
-                PortScan.target.in_(subdomain_names)
-            ).count()
+            ps_query = db.query(PortScan).filter(PortScan.target.in_(subdomain_names))
+            if workspace_id:
+                ps_query = ps_query.filter(PortScan.workspace_id == workspace_id)
+            total_ports = ps_query.count()
             
-            open_ports = db.query(PortScan).filter(
+            open_query = db.query(PortScan).filter(
                 PortScan.target.in_(subdomain_names),
                 PortScan.state == 'open'
-            ).count()
+            )
+            if workspace_id:
+                open_query = open_query.filter(PortScan.workspace_id == workspace_id)
+            open_ports = open_query.count()
         
         total_endpoints = 0
         interesting_endpoints = 0
         if subdomain_ids:
-            total_endpoints = db.query(ContentDiscovery).filter(
+            cd_query = db.query(ContentDiscovery).filter(
                 ContentDiscovery.subdomain_id.in_(subdomain_ids)
-            ).count()
+            )
+            if workspace_id:
+                cd_query = cd_query.filter(ContentDiscovery.workspace_id == workspace_id)
+            total_endpoints = cd_query.count()
             
-            interesting_endpoints = db.query(ContentDiscovery).filter(
+            int_query = db.query(ContentDiscovery).filter(
                 ContentDiscovery.subdomain_id.in_(subdomain_ids),
-                ContentDiscovery.is_interesting == True
-            ).count()
+                ContentDiscovery.interesting == True
+            )
+            if workspace_id:
+                int_query = int_query.filter(ContentDiscovery.workspace_id == workspace_id)
+            interesting_endpoints = int_query.count()
         
         # Technology diversity
-        unique_techs = db.query(distinct(Subdomain.server)).filter(
+        tech_query = db.query(distinct(Subdomain.technologies)).filter(
             Subdomain.domain == domain,
-            Subdomain.server.isnot(None)
-        ).count()
+            Subdomain.technologies.isnot(None)
+        )
+        if workspace_id:
+            tech_query = tech_query.filter(Subdomain.workspace_id == workspace_id)
+        unique_techs = tech_query.count()
         
         # Service diversity
         unique_services = 0
         if subdomain_names:
-            unique_services = db.query(distinct(PortScan.service)).filter(
+            svc_query = db.query(distinct(PortScan.service)).filter(
                 PortScan.target.in_(subdomain_names),
                 PortScan.service.isnot(None)
-            ).count()
+            )
+            if workspace_id:
+                svc_query = svc_query.filter(PortScan.workspace_id == workspace_id)
+            unique_services = svc_query.count()
         
         return {
             'domain': domain,
+            'workspace_id': workspace_id,
             'attack_surface': {
                 'subdomains': {
                     'total': total_subdomains,
@@ -438,13 +475,57 @@ def get_attack_surface_summary(domain: str, db: Session) -> Dict:
         raise
 
 
+def get_workspace_visualization_data(workspace_id: str, db: Session) -> Dict:
+    """Get comprehensive visualization data for an entire workspace"""
+    try:
+        # Get all unique domains in workspace
+        domains = db.query(distinct(Subdomain.domain)).filter(
+            Subdomain.workspace_id == workspace_id
+        ).all()
+        
+        domain_list = [d[0] for d in domains]
+        
+        # Aggregate stats across all domains
+        total_subdomains = db.query(Subdomain).filter(
+            Subdomain.workspace_id == workspace_id
+        ).count()
+        
+        active_subdomains = db.query(Subdomain).filter(
+            Subdomain.workspace_id == workspace_id,
+            Subdomain.is_active == True
+        ).count()
+        
+        total_ports = db.query(PortScan).filter(
+            PortScan.workspace_id == workspace_id
+        ).count()
+        
+        total_content = db.query(ContentDiscovery).filter(
+            ContentDiscovery.workspace_id == workspace_id
+        ).count()
+        
+        return {
+            'workspace_id': workspace_id,
+            'domains': domain_list,
+            'stats': {
+                'total_domains': len(domain_list),
+                'total_subdomains': total_subdomains,
+                'active_subdomains': active_subdomains,
+                'total_ports': total_ports,
+                'total_content_discoveries': total_content
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting workspace visualization data: {e}")
+        raise
+
+
 def calculate_exposure_score(active_subs: int, open_ports: int, 
                             total_endpoints: int, interesting_endpoints: int) -> float:
     """
     Calculate a normalized exposure score (0-100)
     Higher score = larger attack surface
     """
-    # Weighted scoring
     score = 0
     
     # Active subdomains (0-30 points)

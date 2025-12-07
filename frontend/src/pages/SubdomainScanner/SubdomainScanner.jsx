@@ -1,24 +1,38 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
+import { useParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { startSubdomainScan, getSubdomains } from '../../api/client'
 import { Globe, Play, CheckCircle, XCircle, ExternalLink, Loader, Download, Copy, RefreshCw, AlertTriangle, X } from 'lucide-react'
 
-// LocalStorage keys
+// Get workspace-scoped storage key
+function getStorageKey(baseKey) {
+  const match = window.location.pathname.match(/\/workspace\/([^\/]+)/)
+  const workspaceId = match ? match[1] : null
+  if (workspaceId) {
+    return baseKey + '_' + workspaceId
+  }
+  return baseKey + '_global'
+}
+
+// LocalStorage keys (will be workspace-scoped)
 const STORAGE_KEYS = {
   LAST_SCAN_DOMAIN: 'subdomain_scanner_last_domain',
   SCAN_CONFIG: 'subdomain_scanner_config',
   FILTER_STATE: 'subdomain_scanner_filter',
   IS_SCANNING: 'subdomain_scanner_is_scanning',
+  SCAN_RESULTS: 'subdomain_scan_results',
 }
 
 const SubdomainScanner = () => {
-  // Load persisted state from localStorage
+  const { workspaceId } = useParams()
+  
+  // Load persisted state from localStorage (workspace-scoped)
   const [domain, setDomain] = useState(() => {
-    return localStorage.getItem(STORAGE_KEYS.LAST_SCAN_DOMAIN) || ''
+    return localStorage.getItem(getStorageKey(STORAGE_KEYS.LAST_SCAN_DOMAIN)) || ''
   })
   
   const [scanConfig, setScanConfig] = useState(() => {
-    const saved = localStorage.getItem(STORAGE_KEYS.SCAN_CONFIG)
+    const saved = localStorage.getItem(getStorageKey(STORAGE_KEYS.SCAN_CONFIG))
     return saved ? JSON.parse(saved) : {
       use_subfinder: true,
       use_sublist3r: true,
@@ -30,7 +44,7 @@ const SubdomainScanner = () => {
   })
   
   const [lastScanDomain, setLastScanDomain] = useState(() => {
-    return localStorage.getItem(STORAGE_KEYS.LAST_SCAN_DOMAIN) || null
+    return localStorage.getItem(getStorageKey(STORAGE_KEYS.LAST_SCAN_DOMAIN)) || null
   })
   
   const [scanProgress, setScanProgress] = useState(0)
@@ -48,15 +62,26 @@ const SubdomainScanner = () => {
   const progressIntervalRef = useRef(null)
   const hasCheckedCache = useRef(false)
 
-  // Persist state changes to localStorage
+  // Reload data when workspace changes
+  useEffect(() => {
+    const savedDomain = localStorage.getItem(getStorageKey(STORAGE_KEYS.LAST_SCAN_DOMAIN))
+    setDomain(savedDomain || '')
+    setLastScanDomain(savedDomain || null)
+    const savedConfig = localStorage.getItem(getStorageKey(STORAGE_KEYS.SCAN_CONFIG))
+    if (savedConfig) {
+      setScanConfig(JSON.parse(savedConfig))
+    }
+  }, [workspaceId])
+
+  // Persist state changes to localStorage (workspace-scoped)
   useEffect(() => {
     if (lastScanDomain) {
-      localStorage.setItem(STORAGE_KEYS.LAST_SCAN_DOMAIN, lastScanDomain)
+      localStorage.setItem(getStorageKey(STORAGE_KEYS.LAST_SCAN_DOMAIN), lastScanDomain)
     }
   }, [lastScanDomain])
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.SCAN_CONFIG, JSON.stringify(scanConfig))
+    localStorage.setItem(getStorageKey(STORAGE_KEYS.SCAN_CONFIG), JSON.stringify(scanConfig))
   }, [scanConfig])
 
   // Memoize enabled tools to prevent infinite re-renders
@@ -262,7 +287,7 @@ const SubdomainScanner = () => {
     setIsCancelled(false)
     setIsScanning(false)
     setScanSummary(null)
-    localStorage.removeItem(STORAGE_KEYS.LAST_SCAN_DOMAIN)
+    localStorage.removeItem(getStorageKey(STORAGE_KEYS.LAST_SCAN_DOMAIN))
     queryClient.removeQueries(['subdomains'])
   }
 

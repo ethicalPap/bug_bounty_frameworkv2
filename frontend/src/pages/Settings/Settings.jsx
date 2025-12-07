@@ -37,7 +37,7 @@ import {
   Info,
   ExternalLink
 } from 'lucide-react'
-import { useContentDiscovery } from '../../stores/contentDiscoveryStore.jsx'
+import { useContentDiscovery } from '../../stores/ContentDiscoveryStore'
 
 // Default settings
 const DEFAULT_SETTINGS = {

@@ -6,47 +6,8 @@ from sqlalchemy.orm import Session
 import logging
 import os
 
-# FIXED: Correct import path
 from src.config.database import get_db, init_db
 
-from src.controllers.validation import (
-    validate_single_target,
-    validate_high_value_targets_for_domain,
-    quick_validate_target,
-    get_validation_report
-)
-
-from src.controllers.subdomains import (
-    start_subdomain_scan,
-    get_subdomains_by_domain,
-    get_scan_results,
-    delete_duplicates
-)
-from src.controllers.content_discovery import (
-    start_content_discovery,
-    get_content_by_target,
-    get_content_by_scan,
-    get_interesting_discoveries,
-    get_js_endpoints,
-    get_api_parameters
-)
-from src.controllers.port_scanner import (
-    start_port_scan,
-    get_ports_by_target,
-    get_ports_by_subdomain,
-    get_ports_by_scan,
-    get_open_ports,
-    get_vulnerable_services,
-    get_ports_by_service
-)
-from src.controllers.visualization import (
-    get_domain_visualization_data,
-    get_technology_breakdown,
-    get_service_breakdown,
-    get_endpoint_tree,
-    get_attack_surface_summary
-)
-from src.controllers.http_prober import HTTPProber
 from src.controllers.workspace import (
     create_workspace as create_workspace_db,
     get_workspace as get_workspace_db,
@@ -57,6 +18,67 @@ from src.controllers.workspace import (
     workspace_to_dict
 )
 
+from src.controllers.subdomains import (
+    start_subdomain_scan,
+    get_subdomains_by_domain,
+    get_scan_results,
+    get_subdomains_by_workspace,
+    delete_duplicates
+)
+
+from src.controllers.content_discovery import (
+    start_content_discovery,
+    get_content_by_target,
+    get_content_by_scan,
+    get_content_by_workspace,
+    get_interesting_discoveries,
+    get_js_endpoints,
+    get_api_parameters
+)
+
+from src.controllers.port_scanner import (
+    start_port_scan,
+    get_ports_by_target,
+    get_ports_by_subdomain,
+    get_ports_by_scan,
+    get_ports_by_workspace,
+    get_open_ports,
+    get_vulnerable_services,
+    get_ports_by_service
+)
+
+from src.controllers.visualization import (
+    get_domain_visualization_data,
+    get_technology_breakdown,
+    get_service_breakdown,
+    get_endpoint_tree,
+    get_attack_surface_summary,
+    get_workspace_visualization_data
+)
+
+from src.controllers.http_prober import (
+    HTTPProber,
+    probe_domain_subdomains,
+    probe_scan_results,
+    probe_specific_subdomains,
+    probe_workspace_subdomains
+)
+
+from src.controllers.validation import (
+    validate_single_target,
+    validate_high_value_targets_for_domain,
+    validate_workspace_targets,
+    quick_validate_target,
+    get_validation_report,
+    get_workspace_validation_report
+)
+
+from src.controllers.vuln_scanner import (
+    run_vulnerability_scan,
+    get_vuln_stats_by_workspace,
+    get_vuln_summary
+)
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -64,24 +86,47 @@ logger = logging.getLogger(__name__)
 # Create FastAPI app
 app = FastAPI(
     title="Bug Bounty Hunter Platform API",
-    description="Advanced subdomain enumeration, content discovery, port scanning, and vulnerability validation tool",
-    version="2.0.0"
+    description="Advanced subdomain enumeration, content discovery, port scanning, and vulnerability validation tool with workspace isolation",
+    version="3.0.0"
 )
 
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Configure appropriately for production
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+
 # ==================== Pydantic Models ====================
+
+# Workspace Models
+class WorkspaceCreate(BaseModel):
+    name: str = Field(..., description="Workspace name", example="HackerOne - Example Corp")
+    description: Optional[str] = Field(None, description="Workspace description")
+    target_scope: Optional[str] = Field(None, description="Target scope", example="*.example.com")
+
+class WorkspaceUpdate(BaseModel):
+    name: Optional[str] = Field(None, description="Workspace name")
+    description: Optional[str] = Field(None, description="Workspace description")
+    target_scope: Optional[str] = Field(None, description="Target scope")
+
+class WorkspaceResponse(BaseModel):
+    id: str
+    name: str
+    description: Optional[str]
+    target_scope: Optional[str]
+    created_at: Optional[str]
+    updated_at: Optional[str]
+    stats: Optional[Dict] = None
+
 
 # Subdomain Scanning Models
 class ScanRequest(BaseModel):
     domain: str = Field(..., description="Target domain to scan", example="example.com")
+    workspace_id: Optional[str] = Field(None, description="Workspace ID for isolation")
     use_subfinder: bool = Field(True, description="Use Subfinder tool")
     use_sublist3r: bool = Field(True, description="Use Sublist3r tool")
     use_amass: bool = Field(True, description="Use Amass tool")
@@ -93,26 +138,18 @@ class ScanRequest(BaseModel):
 
 class ScanResponse(BaseModel):
     scan_id: str
+    workspace_id: Optional[str]
     domain: str
     total_unique_subdomains: int
     new_subdomains_saved: int
     tool_results: Dict[str, int]
     timestamp: str
 
-class SubdomainResponse(BaseModel):
-    id: int
-    domain: str
-    subdomain: str
-    full_domain: str
-    ip_address: Optional[str]
-    status_code: Optional[int]
-    is_active: bool
-    scan_id: Optional[str]
-    created_at: Optional[str]
 
 # HTTP Probing Models
 class ProbeHostsRequest(BaseModel):
     subdomains: List[str] = Field(..., description="List of subdomains to probe")
+    workspace_id: Optional[str] = Field(None, description="Workspace ID for isolation")
     concurrency: int = Field(10, description="Number of concurrent probes", ge=1, le=50)
     timeout: int = Field(10, description="Timeout per request in seconds", ge=1, le=30)
 
@@ -120,11 +157,14 @@ class ProbeHostsResponse(BaseModel):
     total: int
     active: int
     inactive: int
+    workspace_id: Optional[str]
     results: List[Dict]
+
 
 # Content Discovery Models
 class ContentDiscoveryRequest(BaseModel):
     target_url: str = Field(..., description="Target URL to scan", example="https://example.com")
+    workspace_id: Optional[str] = Field(None, description="Workspace ID for isolation")
     scan_type: str = Field("full", description="Type of scan: full, fuzzing, passive, crawling, js_analysis, api")
     
     # Fuzzing options
@@ -162,19 +202,12 @@ class ContentDiscoveryRequest(BaseModel):
     rate_limit: int = Field(150, description="Requests per second", ge=10, le=500)
     subdomain_id: Optional[int] = Field(None, description="Link to subdomain ID")
 
-class ContentDiscoveryResponse(BaseModel):
-    scan_id: str
-    target_url: str
-    scan_type: str
-    total_unique_urls: int
-    new_urls_saved: int
-    tool_results: Dict[str, int]
-    timestamp: str
 
 # Port Scanning Models
 class PortScanRequest(BaseModel):
-    targets: List[str] = Field(..., description="List of IPs or domains to scan", example=["example.com", "192.168.1.1"])
-    ports: str = Field("top-100", description="Port range (top-100, top-1000, common-web, common-db, common-admin, all-tcp, or custom)")
+    targets: List[str] = Field(..., description="List of IPs or domains to scan", example=["example.com"])
+    workspace_id: Optional[str] = Field(None, description="Workspace ID for isolation")
+    ports: str = Field("top-100", description="Port range")
     scan_type: str = Field("quick", description="Scan type: quick, full, stealth, udp, comprehensive")
     
     # Tool selection
@@ -183,12 +216,12 @@ class PortScanRequest(BaseModel):
     use_naabu: bool = Field(True, description="Use naabu scanner")
     
     # Nmap options
-    nmap_scan_type: str = Field("-sS", description="Nmap scan type: -sS (SYN), -sT (Connect), -sU (UDP)")
-    nmap_timing: str = Field("T4", description="Nmap timing template: T0-T5")
+    nmap_scan_type: str = Field("-sS", description="Nmap scan type")
+    nmap_timing: str = Field("T4", description="Nmap timing template")
     nmap_scripts: Optional[str] = Field(None, description="Nmap scripts to run")
-    service_detection: bool = Field(True, description="Enable service/version detection")
+    service_detection: bool = Field(True, description="Enable service detection")
     os_detection: bool = Field(False, description="Enable OS detection")
-    version_intensity: int = Field(5, description="Version detection intensity (0-9)", ge=0, le=9)
+    version_intensity: int = Field(5, description="Version detection intensity", ge=0, le=9)
     
     # Performance options
     masscan_rate: int = Field(10000, description="Masscan packets per second", ge=100, le=100000)
@@ -201,148 +234,120 @@ class PortScanRequest(BaseModel):
     exclude_closed: bool = Field(True, description="Don't save closed ports to database")
     subdomain_ids: Optional[List[int]] = Field(None, description="Link results to subdomain IDs")
 
-class PortScanResponse(BaseModel):
-    scan_id: str
-    targets: List[str]
-    target_count: int
-    scan_type: str
-    ports_scanned: str
-    total_results: int
-    unique_ports: int
-    new_results_saved: int
-    open_ports: int
-    tool_results: Dict[str, int]
-    duration_seconds: int
-    timestamp: str
+
+# Vulnerability Scanner Models
+class VulnScanRequest(BaseModel):
+    target_url: str = Field(..., description="Target URL to scan")
+    workspace_id: Optional[str] = Field(None, description="Workspace ID for isolation")
+    templates: Optional[List[str]] = Field(None, description="Nuclei template tags")
+    concurrency: int = Field(10, description="Concurrent requests", ge=1, le=50)
+    timeout: int = Field(300, description="Scan timeout in seconds", ge=60, le=1800)
+    rate_limit: int = Field(150, description="Requests per second", ge=10, le=500)
+    scan_type: str = Field("quick", description="Scan type: quick, full, comprehensive")
+    save_to_db: bool = Field(True, description="Save results to database")
+
+
+class BatchVulnScanRequest(BaseModel):
+    targets: List[str] = Field(..., description="List of target URLs")
+    workspace_id: Optional[str] = Field(None, description="Workspace ID for isolation")
+    scanners: List[str] = Field(["nuclei"], description="List of scanners to use")
+    templates: Optional[List[str]] = Field(None, description="Nuclei template tags")
+    concurrency: int = Field(10, description="Concurrent requests per scanner")
+    timeout: int = Field(300, description="Timeout per scan")
+    save_to_db: bool = Field(True, description="Save results to database")
+
 
 # Validation Models
-class TargetValidationRequest(BaseModel):
-    target_url: str = Field(..., description="Target URL to validate", example="https://admin.example.com")
-    discovered_paths: Optional[List[str]] = Field([], description="List of discovered paths for testing")
-    background: bool = Field(False, description="Run validation in background")
+class ValidationRequest(BaseModel):
+    target_url: str = Field(..., description="Target URL to validate")
+    workspace_id: Optional[str] = Field(None, description="Workspace ID for isolation")
+    discovered_paths: Optional[List[str]] = Field(None, description="List of discovered paths to test")
 
-class ValidationResponse(BaseModel):
-    target: str
-    validated_at: str
-    total_vulns: int
-    critical_vulns: int
-    high_vulns: int
-    proofs: List[Dict]
 
 class DomainValidationRequest(BaseModel):
-    domain: str = Field(..., description="Domain to validate high-value targets")
-    limit: int = Field(10, description="Max number of targets to validate", ge=1, le=50)
-    min_risk_score: int = Field(30, description="Minimum risk score for validation", ge=0, le=100)
+    domain: str = Field(..., description="Domain to validate")
+    workspace_id: Optional[str] = Field(None, description="Workspace ID for isolation")
+    limit: int = Field(10, description="Max targets to validate", ge=1, le=50)
+    min_risk_score: int = Field(30, description="Minimum risk score", ge=0, le=100)
 
-# Workspace Models
-class WorkspaceCreate(BaseModel):
-    name: str = Field(..., description="Workspace name", example="HackerOne - Example Corp")
-    description: Optional[str] = Field(None, description="Workspace description")
-    target_scope: Optional[str] = Field(None, description="Target scope pattern", example="*.example.com")
 
-class WorkspaceUpdate(BaseModel):
-    name: Optional[str] = Field(None, description="Workspace name")
-    description: Optional[str] = Field(None, description="Workspace description")
-    target_scope: Optional[str] = Field(None, description="Target scope pattern")
-
-class WorkspaceResponse(BaseModel):
-    id: str
-    name: str
-    description: Optional[str]
-    target_scope: Optional[str]
-    created_at: Optional[str]
-    updated_at: Optional[str]
-    stats: Optional[Dict] = None
-
-# ==================== Startup Events ====================
+# ==================== Startup Event ====================
 
 @app.on_event("startup")
 async def startup_event():
     """Initialize database on startup"""
-    logger.info("Starting Bug Bounty Platform API...")
-    try:
-        init_db()
-        logger.info("Database initialized successfully")
-    except Exception as e:
-        logger.error(f"Failed to initialize database: {e}")
+    logger.info("Initializing database...")
+    init_db()
+    logger.info("Database initialized successfully")
 
-# ==================== Health & Info Endpoints ====================
+
+# ==================== Health Check ====================
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint"""
-    return {
-        "status": "healthy",
-        "service": "bug-bounty-platform",
-        "version": "2.0.0"
-    }
+    return {"status": "healthy", "version": "3.0.0"}
 
 @app.get("/")
 async def root():
-    """Root endpoint with API information"""
     return {
-        "message": "Bug Bounty Hunter Platform API",
-        "version": "2.0.0",
+        "name": "Bug Bounty Hunter Platform API",
+        "version": "3.0.0",
         "features": [
-            "subdomain_enumeration",
-            "http_probing",
-            "content_discovery",
-            "port_scanning",
-            "vulnerability_validation",
-            "visualization",
-            "workspaces"
-        ],
-        "endpoints": {
-            "health": "/health",
-            "workspaces": "/api/v1/workspaces",
-            "subdomain_scan": "/api/v1/scan",
-            "probe_hosts": "/api/v1/probe-hosts",
-            "content_discovery": "/api/v1/content/scan",
-            "port_scan": "/api/v1/ports/scan",
-            "validation": "/api/v1/validation",
-            "visualization": "/api/v1/visualization/{domain}",
-            "docs": "/docs"
-        }
+            "Workspace Isolation",
+            "Subdomain Enumeration",
+            "HTTP Probing",
+            "Content Discovery",
+            "Port Scanning",
+            "Vulnerability Scanning",
+            "Validation",
+            "Visualization"
+        ]
     }
 
-# ==================== Workspace Endpoints ====================
 
-@app.get("/api/v1/workspaces", response_model=List[WorkspaceResponse])
+# ==================== WORKSPACE ENDPOINTS ====================
+
+@app.get("/api/v1/workspaces")
 async def list_workspaces(
     skip: int = Query(0, ge=0),
-    limit: int = Query(100, ge=1, le=100),
+    limit: int = Query(100, ge=1, le=500),
     db: Session = Depends(get_db)
 ):
-    """Get all workspaces"""
-    workspaces = get_all_workspaces(db, skip=skip, limit=limit)
-    return [workspace_to_dict(w, include_stats=True, db=db) for w in workspaces]
+    """List all workspaces with stats"""
+    try:
+        workspaces = get_all_workspaces(db, skip=skip, limit=limit)
+        return [workspace_to_dict(w, include_stats=True, db=db) for w in workspaces]
+    except Exception as e:
+        logger.error(f"Failed to list workspaces: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/api/v1/workspaces", response_model=WorkspaceResponse)
-async def create_workspace(
-    request: WorkspaceCreate,
-    db: Session = Depends(get_db)
-):
+
+@app.post("/api/v1/workspaces")
+async def create_workspace(request: WorkspaceCreate, db: Session = Depends(get_db)):
     """Create a new workspace"""
-    workspace = create_workspace_db(
-        db,
-        name=request.name,
-        description=request.description,
-        target_scope=request.target_scope
-    )
-    return workspace_to_dict(workspace, include_stats=False)
+    try:
+        workspace = create_workspace_db(
+            db=db,
+            name=request.name,
+            description=request.description,
+            target_scope=request.target_scope
+        )
+        return workspace_to_dict(workspace, include_stats=True, db=db)
+    except Exception as e:
+        logger.error(f"Failed to create workspace: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/v1/workspaces/{workspace_id}", response_model=WorkspaceResponse)
-async def get_workspace(
-    workspace_id: str,
-    db: Session = Depends(get_db)
-):
+
+@app.get("/api/v1/workspaces/{workspace_id}")
+async def get_workspace(workspace_id: str, db: Session = Depends(get_db)):
     """Get a workspace by ID"""
     workspace = get_workspace_db(db, workspace_id)
     if not workspace:
         raise HTTPException(status_code=404, detail="Workspace not found")
     return workspace_to_dict(workspace, include_stats=True, db=db)
 
-@app.put("/api/v1/workspaces/{workspace_id}", response_model=WorkspaceResponse)
+
+@app.put("/api/v1/workspaces/{workspace_id}")
 async def update_workspace(
     workspace_id: str,
     request: WorkspaceUpdate,
@@ -350,7 +355,7 @@ async def update_workspace(
 ):
     """Update a workspace"""
     workspace = update_workspace_db(
-        db,
+        db=db,
         workspace_id=workspace_id,
         name=request.name,
         description=request.description,
@@ -360,45 +365,121 @@ async def update_workspace(
         raise HTTPException(status_code=404, detail="Workspace not found")
     return workspace_to_dict(workspace, include_stats=True, db=db)
 
+
 @app.delete("/api/v1/workspaces/{workspace_id}")
-async def delete_workspace(
-    workspace_id: str,
-    db: Session = Depends(get_db)
-):
+async def delete_workspace(workspace_id: str, db: Session = Depends(get_db)):
     """Delete a workspace and all associated data"""
     success = delete_workspace_db(db, workspace_id)
     if not success:
         raise HTTPException(status_code=404, detail="Workspace not found")
-    return {"status": "deleted", "workspace_id": workspace_id}
+    return {"message": "Workspace deleted successfully", "workspace_id": workspace_id}
+
 
 @app.get("/api/v1/workspaces/{workspace_id}/stats")
-async def get_workspace_stats(
-    workspace_id: str,
-    db: Session = Depends(get_db)
-):
+async def get_workspace_stats(workspace_id: str, db: Session = Depends(get_db)):
     """Get statistics for a workspace"""
-    workspace = get_workspace_db(db, workspace_id)
-    if not workspace:
+    stats = get_workspace_stats_db(db, workspace_id)
+    if not stats:
         raise HTTPException(status_code=404, detail="Workspace not found")
-    return get_workspace_stats_db(db, workspace_id)
+    return stats
 
-# ==================== HTTP Probing Endpoints ====================
 
-@app.post("/api/v1/probe-hosts", response_model=ProbeHostsResponse)
-async def probe_hosts_endpoint(
-    request: ProbeHostsRequest,
+@app.get("/api/v1/workspaces/{workspace_id}/visualization")
+async def get_workspace_visualization(workspace_id: str, db: Session = Depends(get_db)):
+    """Get visualization data for entire workspace"""
+    try:
+        return get_workspace_visualization_data(workspace_id, db)
+    except Exception as e:
+        logger.error(f"Failed to get workspace visualization: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ==================== SUBDOMAIN SCANNING ENDPOINTS ====================
+
+@app.post("/api/v1/scan/subdomains")
+async def scan_subdomains(request: ScanRequest, background_tasks: BackgroundTasks):
+    """Start a subdomain enumeration scan"""
+    try:
+        result = start_subdomain_scan(
+            domain=request.domain,
+            workspace_id=request.workspace_id,
+            use_subfinder=request.use_subfinder,
+            use_sublist3r=request.use_sublist3r,
+            use_amass=request.use_amass,
+            use_assetfinder=request.use_assetfinder,
+            use_findomain=request.use_findomain,
+            use_chaos=request.use_chaos,
+            chaos_api_key=request.chaos_api_key,
+            timeout=request.timeout
+        )
+        return result
+    except Exception as e:
+        logger.error(f"Subdomain scan failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/v1/subdomains/domain/{domain}")
+async def get_domain_subdomains(
+    domain: str,
+    workspace_id: Optional[str] = Query(None, description="Filter by workspace"),
     db: Session = Depends(get_db)
 ):
-    """
-    Probe a list of subdomains to check if they're live
-    Returns status, IP, response time, etc.
-    """
+    """Get all subdomains for a domain"""
     try:
-        logger.info(f"Starting HTTP probe for {len(request.subdomains)} subdomains")
-        
+        subdomains = get_subdomains_by_domain(domain, db, workspace_id=workspace_id)
+        return subdomains
+    except Exception as e:
+        logger.error(f"Failed to get subdomains: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/v1/subdomains/scan/{scan_id}")
+async def get_scan_subdomains(scan_id: str, db: Session = Depends(get_db)):
+    """Get subdomains from a specific scan"""
+    try:
+        subdomains = get_scan_results(scan_id, db)
+        return subdomains
+    except Exception as e:
+        logger.error(f"Failed to get scan results: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/v1/subdomains/workspace/{workspace_id}")
+async def get_workspace_subdomains(workspace_id: str, db: Session = Depends(get_db)):
+    """Get all subdomains for a workspace"""
+    try:
+        subdomains = get_subdomains_by_workspace(workspace_id, db)
+        return subdomains
+    except Exception as e:
+        logger.error(f"Failed to get workspace subdomains: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/v1/subdomains/duplicates/{domain}")
+async def remove_duplicates(
+    domain: str,
+    workspace_id: Optional[str] = Query(None),
+    db: Session = Depends(get_db)
+):
+    """Remove duplicate subdomains for a domain"""
+    try:
+        deleted_count = delete_duplicates(domain, db, workspace_id=workspace_id)
+        return {"deleted": deleted_count, "domain": domain}
+    except Exception as e:
+        logger.error(f"Failed to delete duplicates: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ==================== HTTP PROBING ENDPOINTS ====================
+
+@app.post("/api/v1/probe/hosts")
+async def probe_hosts(request: ProbeHostsRequest):
+    """Probe a list of hosts for HTTP connectivity"""
+    try:
+        import asyncio
         prober = HTTPProber(timeout=request.timeout)
         results = await prober.probe_subdomains_batch(
-            request.subdomains, 
+            request.subdomains,
             concurrency=request.concurrency
         )
         
@@ -408,174 +489,60 @@ async def probe_hosts_endpoint(
             "total": len(results),
             "active": active_count,
             "inactive": len(results) - active_count,
+            "workspace_id": request.workspace_id,
             "results": results
         }
-        
     except Exception as e:
         logger.error(f"HTTP probe failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Probe failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/api/v1/probe-hosts/batch")
-async def probe_hosts_batch_endpoint(
-    request: ProbeHostsRequest,
-    db: Session = Depends(get_db)
-):
-    """
-    Probe hosts in batches with progress tracking
-    """
-    try:
-        logger.info(f"Starting batched HTTP probe for {len(request.subdomains)} subdomains")
-        
-        prober = HTTPProber(timeout=request.timeout)
-        
-        # Process in batches
-        batch_size = min(request.concurrency, 20)
-        all_results = []
-        
-        for i in range(0, len(request.subdomains), batch_size):
-            batch = request.subdomains[i:i + batch_size]
-            batch_results = await prober.probe_subdomains_batch(batch, concurrency=batch_size)
-            all_results.extend(batch_results)
-        
-        active_count = sum(1 for r in all_results if r.get('is_active'))
-        
-        return {
-            "total": len(all_results),
-            "active": active_count,
-            "inactive": len(all_results) - active_count,
-            "results": all_results
-        }
-        
-    except Exception as e:
-        logger.error(f"Batched HTTP probe failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Probe failed: {str(e)}")
-
-# ==================== Subdomain Enumeration Endpoints ====================
-
-@app.post("/api/v1/scan", response_model=ScanResponse)
-async def create_scan(
-    scan_request: ScanRequest,
-    background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db)
-):
-    """Start a new subdomain enumeration scan"""
-    try:
-        logger.info(f"Starting scan for domain: {scan_request.domain}")
-        
-        result = start_subdomain_scan(
-            domain=scan_request.domain,
-            use_subfinder=scan_request.use_subfinder,
-            use_sublist3r=scan_request.use_sublist3r,
-            use_amass=scan_request.use_amass,
-            use_assetfinder=scan_request.use_assetfinder,
-            use_findomain=scan_request.use_findomain,
-            use_chaos=scan_request.use_chaos,
-            chaos_api_key=scan_request.chaos_api_key,
-            timeout=scan_request.timeout
-        )
-        
-        return result
-        
-    except Exception as e:
-        logger.error(f"Scan failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Scan failed: {str(e)}")
-
-@app.get("/api/v1/domains")
-async def get_domains(db: Session = Depends(get_db)):
-    """Get all unique domains"""
-    try:
-        from src.models.Subdomain import Subdomain
-        from sqlalchemy import distinct
-        
-        domains = db.query(distinct(Subdomain.domain)).all()
-        domain_list = [d[0] for d in domains if d[0]]
-        
-        return sorted(domain_list)
-    except Exception as e:
-        logger.error(f"Failed to retrieve domains: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to retrieve domains: {str(e)}")
-
-@app.get("/api/v1/subdomains/{domain}")
-async def get_domain_subdomains(
+@app.post("/api/v1/probe/domain/{domain}")
+async def probe_domain(
     domain: str,
-    db: Session = Depends(get_db)
+    workspace_id: Optional[str] = Query(None),
+    concurrency: int = Query(10, ge=1, le=50)
 ):
-    """Get all discovered subdomains for a specific domain"""
+    """Probe all subdomains for a domain"""
     try:
-        subdomains = get_subdomains_by_domain(domain, db)
-        return subdomains
-    except Exception as e:
-        logger.error(f"Failed to retrieve subdomains: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to retrieve subdomains: {str(e)}")
-
-# ==================== Port Scanning Endpoints ====================
-
-@app.post("/api/v1/ports/scan", response_model=PortScanResponse)
-async def create_port_scan(
-    scan_request: PortScanRequest,
-    background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db)
-):
-    """Start a new port scan"""
-    try:
-        logger.info(f"Starting port scan for targets: {scan_request.targets}")
-        
-        result = start_port_scan(
-            targets=scan_request.targets,
-            ports=scan_request.ports,
-            scan_type=scan_request.scan_type,
-            use_nmap=scan_request.use_nmap,
-            use_masscan=scan_request.use_masscan,
-            use_naabu=scan_request.use_naabu,
-            nmap_scan_type=scan_request.nmap_scan_type,
-            nmap_timing=scan_request.nmap_timing,
-            nmap_scripts=scan_request.nmap_scripts,
-            service_detection=scan_request.service_detection,
-            os_detection=scan_request.os_detection,
-            version_intensity=scan_request.version_intensity,
-            masscan_rate=scan_request.masscan_rate,
-            naabu_rate=scan_request.naabu_rate,
-            naabu_retries=scan_request.naabu_retries,
-            timeout=scan_request.timeout,
-            threads=scan_request.threads,
-            exclude_closed=scan_request.exclude_closed,
-            subdomain_ids=scan_request.subdomain_ids
-        )
-        
+        result = await probe_domain_subdomains(domain, concurrency, workspace_id)
         return result
-        
     except Exception as e:
-        logger.error(f"Port scan failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Port scan failed: {str(e)}")
+        logger.error(f"Domain probe failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/v1/ports/target/{target}")
-async def get_ports_for_target(
-    target: str,
-    db: Session = Depends(get_db)
-):
-    """Get all discovered ports for a specific target"""
+
+@app.post("/api/v1/probe/scan/{scan_id}")
+async def probe_scan(scan_id: str, concurrency: int = Query(10, ge=1, le=50)):
+    """Probe all subdomains from a scan"""
     try:
-        ports = get_ports_by_target(target, db)
-        return ports
+        result = await probe_scan_results(scan_id, concurrency)
+        return result
     except Exception as e:
-        logger.error(f"Failed to retrieve ports: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to retrieve ports: {str(e)}")
+        logger.error(f"Scan probe failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-# ==================== Content Discovery Endpoints ====================
 
-@app.post("/api/v1/content/scan", response_model=ContentDiscoveryResponse)
-async def create_content_discovery(
-    request: ContentDiscoveryRequest,
-    background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db)
-):
-    """Start a new content discovery scan"""
+@app.post("/api/v1/probe/workspace/{workspace_id}")
+async def probe_workspace(workspace_id: str, concurrency: int = Query(10, ge=1, le=50)):
+    """Probe all subdomains in a workspace"""
     try:
-        logger.info(f"Starting content discovery for: {request.target_url}")
-        
+        result = await probe_workspace_subdomains(workspace_id, concurrency)
+        return result
+    except Exception as e:
+        logger.error(f"Workspace probe failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ==================== CONTENT DISCOVERY ENDPOINTS ====================
+
+@app.post("/api/v1/scan/content")
+async def scan_content(request: ContentDiscoveryRequest):
+    """Start a content discovery scan"""
+    try:
         result = start_content_discovery(
             target_url=request.target_url,
+            workspace_id=request.workspace_id,
             scan_type=request.scan_type,
             use_ffuf=request.use_ffuf,
             use_feroxbuster=request.use_feroxbuster,
@@ -599,410 +566,246 @@ async def create_content_discovery(
             rate_limit=request.rate_limit,
             subdomain_id=request.subdomain_id
         )
-        
         return result
-        
     except Exception as e:
         logger.error(f"Content discovery failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Content discovery failed: {str(e)}")
-
-@app.post("/api/v1/content-discovery/start")
-async def start_content_discovery_scan(
-    request: dict,
-    background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db)
-):
-    """
-    Start content discovery scan with custom tool configuration (frontend endpoint)
-    """
-    try:
-        target_url = request.get('target_url')
-        
-        if not target_url:
-            raise HTTPException(status_code=400, detail="target_url is required")
-        
-        # Extract all configuration options - NO use_arjun!
-        scan_config = {
-            'scan_type': request.get('scan_type', 'full'),
-            'use_ffuf': request.get('use_ffuf', True),
-            'use_feroxbuster': request.get('use_feroxbuster', True),
-            'use_waymore': request.get('use_waymore', True),
-            'use_gau': request.get('use_gau', True),
-            'use_katana': request.get('use_katana', True),
-            'use_gospider': request.get('use_gospider', False),
-            'use_hakrawler': request.get('use_hakrawler', False),
-            'use_zap_spider': request.get('use_zap_spider', False),
-            'use_zap_ajax': request.get('use_zap_ajax', False),
-            'use_linkfinder': request.get('use_linkfinder', False),
-            'use_jsluice': request.get('use_jsluice', False),
-            'use_paramspider': request.get('use_paramspider', False),
-            'use_unfurl': request.get('use_unfurl', True),
-            'use_uro': request.get('use_uro', True),
-            'use_nuclei': request.get('use_nuclei', False),
-            'threads': request.get('threads', 10),
-            'timeout': request.get('timeout', 600),
-            'rate_limit': request.get('rate_limit', 150),
-            'crawl_depth': request.get('crawl_depth', 3),
-            'wordlist': request.get('wordlist', '/opt/wordlists/common.txt'),
-            'subdomain_id': request.get('subdomain_id')
-        }
-        
-        # Run scan (synchronously for now)
-        result = start_content_discovery(target_url, **scan_config)
-        
-        return result
-            
-    except Exception as e:
-        logger.error(f"Content discovery scan failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/v1/content-discovery/target/{target}")
-async def get_content_by_target_endpoint(
+
+@app.get("/api/v1/content/target/{target:path}")
+async def get_target_content(
     target: str,
+    workspace_id: Optional[str] = Query(None),
     db: Session = Depends(get_db)
 ):
-    """Get all discovered content for a target URL"""
+    """Get discovered content for a target"""
     try:
-        results = get_content_by_target(target, db)
-        return results
+        content = get_content_by_target(target, db, workspace_id=workspace_id)
+        return content
     except Exception as e:
         logger.error(f"Failed to get content: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-# ==================== Validation Endpoints ====================
 
-@app.post("/api/v1/validation/validate-target")
-async def validate_target_endpoint(
-    request: TargetValidationRequest,
-    background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db)
-):
-    """
-    Validate a single target for vulnerabilities
-    
-    ⚠️ IMPORTANT: Only use on targets you have permission to test!
-    """
+@app.get("/api/v1/content/scan/{scan_id}")
+async def get_scan_content(scan_id: str, db: Session = Depends(get_db)):
+    """Get content from a specific scan"""
     try:
-        logger.info(f"Validation request for: {request.target_url}")
-        
-        if request.background:
-            # Run in background
-            background_tasks.add_task(
-                validate_single_target,
-                request.target_url,
-                request.discovered_paths,
-                db
-            )
-            return {
-                "message": "Validation started in background",
-                "target": request.target_url,
-                "status": "running"
-            }
-        else:
-            # Run synchronously
-            result = validate_single_target(
-                request.target_url,
-                request.discovered_paths,
-                db
-            )
-            return result
-            
+        content = get_content_by_scan(scan_id, db)
+        return content
     except Exception as e:
-        logger.error(f"Validation failed: {e}")
+        logger.error(f"Failed to get scan content: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/api/v1/validation/quick-validate")
-async def quick_validate_endpoint(
-    request: TargetValidationRequest,
+
+@app.get("/api/v1/content/workspace/{workspace_id}")
+async def get_workspace_content(workspace_id: str, db: Session = Depends(get_db)):
+    """Get all content discoveries for a workspace"""
+    try:
+        content = get_content_by_workspace(workspace_id, db)
+        return content
+    except Exception as e:
+        logger.error(f"Failed to get workspace content: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/v1/content/interesting")
+async def get_interesting(
+    workspace_id: Optional[str] = Query(None),
+    limit: int = Query(100, ge=1, le=500),
     db: Session = Depends(get_db)
 ):
-    """
-    Quick validation of a target (critical checks only)
-    
-    ⚠️ IMPORTANT: Only use on targets you have permission to test!
-    """
+    """Get interesting discoveries"""
     try:
-        logger.info(f"Quick validation for: {request.target_url}")
-        
-        result = quick_validate_target(
-            request.target_url,
-            request.discovered_paths
+        content = get_interesting_discoveries(db, workspace_id=workspace_id, limit=limit)
+        return content
+    except Exception as e:
+        logger.error(f"Failed to get interesting content: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ==================== PORT SCANNING ENDPOINTS ====================
+
+@app.post("/api/v1/scan/ports")
+async def scan_ports(request: PortScanRequest):
+    """Start a port scan"""
+    try:
+        result = start_port_scan(
+            targets=request.targets,
+            workspace_id=request.workspace_id,
+            ports=request.ports,
+            scan_type=request.scan_type,
+            use_nmap=request.use_nmap,
+            use_masscan=request.use_masscan,
+            use_naabu=request.use_naabu,
+            nmap_scan_type=request.nmap_scan_type,
+            nmap_timing=request.nmap_timing,
+            nmap_scripts=request.nmap_scripts,
+            service_detection=request.service_detection,
+            os_detection=request.os_detection,
+            version_intensity=request.version_intensity,
+            masscan_rate=request.masscan_rate,
+            naabu_rate=request.naabu_rate,
+            naabu_retries=request.naabu_retries,
+            timeout=request.timeout,
+            threads=request.threads,
+            exclude_closed=request.exclude_closed,
+            subdomain_ids=request.subdomain_ids
         )
         return result
-        
     except Exception as e:
-        logger.error(f"Quick validation failed: {e}")
+        logger.error(f"Port scan failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/api/v1/validation/validate-domain")
-async def validate_domain_endpoint(
-    request: DomainValidationRequest,
-    background_tasks: BackgroundTasks = None,
+
+@app.get("/api/v1/ports/target/{target}")
+async def get_target_ports(
+    target: str,
+    workspace_id: Optional[str] = Query(None),
     db: Session = Depends(get_db)
 ):
-    """
-    Validate high-value targets for a domain
-    
-    ⚠️ IMPORTANT: Only use on domains you have permission to test!
-    """
+    """Get ports for a target"""
     try:
-        logger.info(f"Domain validation for: {request.domain} (limit: {request.limit}, min_risk: {request.min_risk_score})")
-        
-        result = validate_high_value_targets_for_domain(
-            request.domain,
-            db,
-            request.limit,
-            request.min_risk_score
-        )
-        return result
-        
+        ports = get_ports_by_target(target, db, workspace_id=workspace_id)
+        return ports
     except Exception as e:
-        logger.error(f"Domain validation failed: {e}")
+        logger.error(f"Failed to get ports: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/v1/validation/results/{domain}")
-async def get_validation_report_endpoint(
-    domain: str,
-    db: Session = Depends(get_db)
-):
-    """Get validation report for a domain"""
+
+@app.get("/api/v1/ports/scan/{scan_id}")
+async def get_scan_ports(scan_id: str, db: Session = Depends(get_db)):
+    """Get ports from a specific scan"""
     try:
-        report = get_validation_report(domain, db)
-        return report
+        ports = get_ports_by_scan(scan_id, db)
+        return ports
     except Exception as e:
-        logger.error(f"Failed to get validation report: {e}")
+        logger.error(f"Failed to get scan ports: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/v1/validation/target/{subdomain}")
-async def get_target_validation_endpoint(
-    subdomain: str,
-    db: Session = Depends(get_db)
-):
-    """Get validation results for a specific subdomain"""
+
+@app.get("/api/v1/ports/workspace/{workspace_id}")
+async def get_workspace_ports(workspace_id: str, db: Session = Depends(get_db)):
+    """Get all ports for a workspace"""
     try:
-        from src.models.Subdomain import Subdomain
-        
-        target = db.query(Subdomain).filter(
-            Subdomain.full_domain == subdomain
-        ).first()
-        
-        if not target:
-            raise HTTPException(status_code=404, detail="Target not found")
-        
-        return {
-            'subdomain': subdomain,
-            'validated': target.validated,
-            'validation_results': target.validation_results,
-            'confirmed_vulns': target.confirmed_vulns,
-            'last_validated': target.last_validated.isoformat() if target.last_validated else None,
-            'risk_tier': target.risk_tier,
-            'risk_score': target.risk_score
-        }
-        
-    except HTTPException:
-        raise
+        ports = get_ports_by_workspace(workspace_id, db)
+        return ports
     except Exception as e:
-        logger.error(f"Failed to get target validation: {e}")
+        logger.error(f"Failed to get workspace ports: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-# ==================== Visualization Endpoints ====================
 
-@app.get("/api/v1/visualization/{domain}")
-async def get_visualization_data(
-    domain: str,
+@app.get("/api/v1/ports/open")
+async def get_all_open_ports(
+    workspace_id: Optional[str] = Query(None),
+    limit: int = Query(100, ge=1, le=500),
     db: Session = Depends(get_db)
 ):
-    """Get comprehensive visualization data for network graph"""
+    """Get all open ports"""
     try:
-        data = get_domain_visualization_data(domain, db)
-        return data
+        ports = get_open_ports(db, workspace_id=workspace_id, limit=limit)
+        return ports
     except Exception as e:
-        logger.error(f"Failed to get visualization data: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get visualization data: {str(e)}")
+        logger.error(f"Failed to get open ports: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/v1/visualization/{domain}/technology")
-async def get_tech_breakdown(
-    domain: str,
+
+@app.get("/api/v1/ports/service/{service}")
+async def get_service_ports(
+    service: str,
+    workspace_id: Optional[str] = Query(None),
     db: Session = Depends(get_db)
 ):
-    """Get technology breakdown for visualization"""
+    """Get ports by service name"""
     try:
-        data = get_technology_breakdown(domain, db)
-        return data
+        ports = get_ports_by_service(service, db, workspace_id=workspace_id)
+        return ports
     except Exception as e:
-        logger.error(f"Failed to get technology breakdown: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get technology breakdown: {str(e)}")
+        logger.error(f"Failed to get service ports: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/v1/visualization/{domain}/services")
-async def get_services_breakdown(
+
+# ==================== VISUALIZATION ENDPOINTS ====================
+
+@app.get("/api/v1/visualization/domain/{domain}")
+async def get_domain_viz(
     domain: str,
+    workspace_id: Optional[str] = Query(None),
     db: Session = Depends(get_db)
 ):
-    """Get service/port breakdown for visualization"""
+    """Get visualization data for a domain"""
     try:
-        data = get_service_breakdown(domain, db)
-        return data
+        return get_domain_visualization_data(domain, db, workspace_id=workspace_id)
     except Exception as e:
-        logger.error(f"Failed to get service breakdown: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get service breakdown: {str(e)}")
+        logger.error(f"Failed to get visualization: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/v1/visualization/{domain}/tree")
-async def get_tree_view(
+
+@app.get("/api/v1/visualization/domain/{domain}/technologies")
+async def get_domain_technologies(
     domain: str,
+    workspace_id: Optional[str] = Query(None),
     db: Session = Depends(get_db)
 ):
-    """Get hierarchical tree view of endpoints"""
+    """Get technology breakdown for a domain"""
     try:
-        data = get_endpoint_tree(domain, db)
-        return data
+        return get_technology_breakdown(domain, db, workspace_id=workspace_id)
     except Exception as e:
-        logger.error(f"Failed to get tree view: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get tree view: {str(e)}")
+        logger.error(f"Failed to get technologies: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/v1/visualization/{domain}/attack-surface")
-async def get_attack_surface_viz(
+
+@app.get("/api/v1/visualization/domain/{domain}/services")
+async def get_domain_services(
     domain: str,
+    workspace_id: Optional[str] = Query(None),
     db: Session = Depends(get_db)
 ):
-    """Get attack surface summary metrics (visualization path)"""
+    """Get service breakdown for a domain"""
     try:
-        data = get_attack_surface_summary(domain, db)
-        return data
+        return get_service_breakdown(domain, db, workspace_id=workspace_id)
+    except Exception as e:
+        logger.error(f"Failed to get services: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/v1/visualization/domain/{domain}/endpoints")
+async def get_domain_endpoints(
+    domain: str,
+    workspace_id: Optional[str] = Query(None),
+    db: Session = Depends(get_db)
+):
+    """Get endpoint tree for a domain"""
+    try:
+        return get_endpoint_tree(domain, db, workspace_id=workspace_id)
+    except Exception as e:
+        logger.error(f"Failed to get endpoints: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/v1/visualization/domain/{domain}/attack-surface")
+async def get_domain_attack_surface(
+    domain: str,
+    workspace_id: Optional[str] = Query(None),
+    db: Session = Depends(get_db)
+):
+    """Get attack surface summary for a domain"""
+    try:
+        return get_attack_surface_summary(domain, db, workspace_id=workspace_id)
     except Exception as e:
         logger.error(f"Failed to get attack surface: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get attack surface: {str(e)}")
-
-@app.get("/api/v1/attack-surface/{domain}")
-async def get_attack_surface(
-    domain: str,
-    db: Session = Depends(get_db)
-):
-    """Get attack surface summary metrics"""
-    try:
-        data = get_attack_surface_summary(domain, db)
-        return data
-    except Exception as e:
-        logger.error(f"Failed to get attack surface: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get attack surface: {str(e)}")
-
-# ==================== Statistics Endpoints ====================
-
-@app.get("/api/v1/stats")
-async def get_statistics(db: Session = Depends(get_db)):
-    """Get overall platform statistics"""
-    try:
-        from src.models.Subdomain import Subdomain
-        from src.models.ContentDiscovery import ContentDiscovery
-        from src.models.PortScan import PortScan
-        from sqlalchemy import func
-        
-        # Subdomain stats
-        total_subdomains = db.query(Subdomain).count()
-        unique_domains = db.query(Subdomain.domain).distinct().count()
-        active_subdomains = db.query(Subdomain).filter(Subdomain.is_active == True).count()
-        
-        # Port scan stats
-        total_ports = db.query(PortScan).count()
-        open_ports = db.query(PortScan).filter(PortScan.state == 'open').count()
-        
-        # Content discovery stats
-        total_discoveries = db.query(ContentDiscovery).count()
-        interesting_discoveries = db.query(ContentDiscovery).filter(
-            ContentDiscovery.is_interesting == True
-        ).count()
-        
-        # Validation stats
-        validated_targets = db.query(Subdomain).filter(
-            Subdomain.validated == True
-        ).count()
-        
-        confirmed_critical = db.query(Subdomain).filter(
-            Subdomain.risk_tier == 'CRITICAL_CONFIRMED'
-        ).count()
-        
-        return {
-            "subdomain_stats": {
-                "total_subdomains": total_subdomains,
-                "unique_domains": unique_domains,
-                "active_subdomains": active_subdomains
-            },
-            "port_scan_stats": {
-                "total_ports_discovered": total_ports,
-                "open_ports": open_ports
-            },
-            "content_stats": {
-                "total_discoveries": total_discoveries,
-                "interesting_discoveries": interesting_discoveries
-            },
-            "validation_stats": {
-                "validated_targets": validated_targets,
-                "confirmed_critical": confirmed_critical
-            }
-        }
-    except Exception as e:
-        logger.error(f"Failed to retrieve statistics: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to retrieve statistics: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ==================== VULNERABILITY SCANNING ENDPOINTS ====================
 
-from src.controllers.vuln_scanner import (
-    run_vulnerability_scan,
-    get_vuln_scans_by_target,
-    get_vuln_scans_by_domain,
-    get_findings_by_severity,
-    get_findings_by_scan,
-    get_vuln_statistics,
-    update_finding_status
-)
-
-class VulnScanRequest(BaseModel):
-    target_url: str
-    templates: Optional[List[str]] = None
-    concurrency: int = Field(10, ge=1, le=50)
-    timeout: int = Field(300, ge=30, le=600)
-    rate_limit: int = Field(150, ge=10, le=500)
-    follow_redirects: bool = True
-    verify_ssl: bool = False
-    save_to_db: bool = Field(True, description="Save results to database")
-    scan_type: str = Field("quick", description="Scan type: quick, full, custom")
-
-class VulnScanResponse(BaseModel):
-    scanner: str
-    target: str
-    scan_id: str
-    vulnerabilities: List[Dict]
-    total_vulns: int
-    critical_count: int
-    high_count: int
-    medium_count: int
-    low_count: int
-    info_count: int
-    scan_duration: str
-    status: str
-    error: Optional[str] = None
-    db_id: Optional[int] = None
-
-class BatchVulnScanRequest(BaseModel):
-    targets: List[str]
-    scanners: List[str] = Field(["nuclei"], description="List of scanners to run")
-    templates: Optional[List[str]] = None
-    concurrency: int = Field(10, ge=1, le=50)
-    timeout: int = Field(300, ge=30, le=600)
-    save_to_db: bool = True
-
-class FindingUpdateRequest(BaseModel):
-    status: str = Field(..., description="open, confirmed, false_positive, fixed")
-    confirmed: Optional[bool] = None
-    notes: Optional[str] = None
-    confirmed_by: Optional[str] = None
-
 @app.post("/api/v1/vuln-scan/nuclei")
 async def nuclei_scan(request: VulnScanRequest, db: Session = Depends(get_db)):
-    """Run Nuclei vulnerability scanner against a target"""
+    """Run Nuclei vulnerability scanner"""
     try:
         result = run_vulnerability_scan(
             target_url=request.target_url,
+            workspace_id=request.workspace_id,
             scanner='nuclei',
             templates=request.templates,
             concurrency=request.concurrency,
@@ -1016,99 +819,10 @@ async def nuclei_scan(request: VulnScanRequest, db: Session = Depends(get_db)):
         logger.error(f"Nuclei scan failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/api/v1/vuln-scan/nikto")
-async def nikto_scan(request: VulnScanRequest, db: Session = Depends(get_db)):
-    """Run Nikto web server scanner against a target"""
-    try:
-        result = run_vulnerability_scan(
-            target_url=request.target_url,
-            scanner='nikto',
-            concurrency=request.concurrency,
-            timeout=request.timeout,
-            rate_limit=request.rate_limit,
-            scan_type=request.scan_type,
-            save_to_db=request.save_to_db
-        )
-        return result
-    except Exception as e:
-        logger.error(f"Nikto scan failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/api/v1/vuln-scan/sqlmap")
-async def sqlmap_scan(request: VulnScanRequest, db: Session = Depends(get_db)):
-    """Run SQLMap SQL injection scanner (simulated for safety)"""
-    try:
-        result = run_vulnerability_scan(
-            target_url=request.target_url,
-            scanner='sqlmap',
-            concurrency=request.concurrency,
-            timeout=request.timeout,
-            scan_type=request.scan_type,
-            save_to_db=request.save_to_db
-        )
-        return result
-    except Exception as e:
-        logger.error(f"SQLMap scan failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/api/v1/vuln-scan/xsstrike")
-async def xsstrike_scan(request: VulnScanRequest, db: Session = Depends(get_db)):
-    """Run XSStrike XSS scanner"""
-    try:
-        result = run_vulnerability_scan(
-            target_url=request.target_url,
-            scanner='xsstrike',
-            concurrency=request.concurrency,
-            timeout=request.timeout,
-            scan_type=request.scan_type,
-            save_to_db=request.save_to_db
-        )
-        return result
-    except Exception as e:
-        logger.error(f"XSStrike scan failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/api/v1/vuln-scan/wpscan")
-async def wpscan_scan(request: VulnScanRequest, db: Session = Depends(get_db)):
-    """Run WPScan WordPress scanner"""
-    try:
-        result = run_vulnerability_scan(
-            target_url=request.target_url,
-            scanner='wpscan',
-            concurrency=request.concurrency,
-            timeout=request.timeout,
-            scan_type=request.scan_type,
-            save_to_db=request.save_to_db
-        )
-        return result
-    except Exception as e:
-        logger.error(f"WPScan failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/api/v1/vuln-scan/sslyze")
-async def sslyze_scan(request: VulnScanRequest, db: Session = Depends(get_db)):
-    """Run SSLyze SSL/TLS analyzer"""
-    try:
-        result = run_vulnerability_scan(
-            target_url=request.target_url,
-            scanner='sslyze',
-            concurrency=request.concurrency,
-            timeout=request.timeout,
-            scan_type=request.scan_type,
-            save_to_db=request.save_to_db
-        )
-        return result
-    except Exception as e:
-        logger.error(f"SSLyze scan failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/v1/vuln-scan/batch")
-async def batch_vuln_scan(
-    request: BatchVulnScanRequest,
-    background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db)
-):
-    """Run vulnerability scans on multiple targets with multiple scanners"""
+async def batch_vuln_scan(request: BatchVulnScanRequest, db: Session = Depends(get_db)):
+    """Run vulnerability scans on multiple targets"""
     import uuid
     batch_id = str(uuid.uuid4())
     
@@ -1119,6 +833,7 @@ async def batch_vuln_scan(
             try:
                 result = run_vulnerability_scan(
                     target_url=target,
+                    workspace_id=request.workspace_id,
                     scanner=scanner,
                     templates=request.templates,
                     concurrency=request.concurrency,
@@ -1138,86 +853,245 @@ async def batch_vuln_scan(
     
     return {
         'batch_id': batch_id,
+        'workspace_id': request.workspace_id,
         'total_scans': len(results),
         'successful': len([r for r in results if r.get('status') == 'completed']),
         'failed': len([r for r in results if r.get('status') == 'failed']),
         'results': results
     }
 
-@app.get("/api/v1/vuln-scan/target/{target:path}")
-async def get_target_vuln_scans(target: str, db: Session = Depends(get_db)):
-    """Get all vulnerability scans for a specific target"""
+
+@app.get("/api/v1/vuln-scan/workspace/{workspace_id}/stats")
+async def get_workspace_vuln_stats(workspace_id: str, db: Session = Depends(get_db)):
+    """Get vulnerability statistics for a workspace"""
     try:
-        scans = get_vuln_scans_by_target(target, db)
-        return scans
+        return get_vuln_stats_by_workspace(workspace_id, db)
     except Exception as e:
-        logger.error(f"Failed to get vuln scans: {e}")
+        logger.error(f"Failed to get vuln stats: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/v1/vuln-scan/domain/{domain}")
-async def get_domain_vuln_scans(domain: str, db: Session = Depends(get_db)):
-    """Get all vulnerability scans for a domain's subdomains"""
-    try:
-        scans = get_vuln_scans_by_domain(domain, db)
-        return scans
-    except Exception as e:
-        logger.error(f"Failed to get domain vuln scans: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/v1/vuln-scan/findings/{scan_id}")
-async def get_scan_findings(scan_id: str, db: Session = Depends(get_db)):
-    """Get all findings for a specific scan"""
-    try:
-        findings = get_findings_by_scan(scan_id, db)
-        return findings
-    except Exception as e:
-        logger.error(f"Failed to get scan findings: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/api/v1/vuln-scan/findings/severity/{severity}")
-async def get_findings_by_sev(
-    severity: str,
-    limit: int = Query(100, ge=1, le=500),
+@app.get("/api/v1/vuln-scan/summary")
+async def get_vuln_summary_endpoint(
+    workspace_id: Optional[str] = Query(None),
     db: Session = Depends(get_db)
 ):
-    """Get vulnerability findings by severity level"""
+    """Get overall vulnerability summary"""
     try:
-        findings = get_findings_by_severity(severity, db, limit)
-        return findings
+        return get_vuln_summary(db, workspace_id=workspace_id)
     except Exception as e:
-        logger.error(f"Failed to get findings by severity: {e}")
+        logger.error(f"Failed to get vuln summary: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.put("/api/v1/vuln-scan/finding/{finding_id}")
-async def update_finding(
-    finding_id: int,
-    request: FindingUpdateRequest,
-    db: Session = Depends(get_db)
-):
-    """Update the status of a vulnerability finding"""
+
+# ==================== VALIDATION ENDPOINTS ====================
+
+@app.post("/api/v1/validate/target")
+async def validate_target(request: ValidationRequest, db: Session = Depends(get_db)):
+    """Validate a single target for vulnerabilities"""
     try:
-        result = update_finding_status(
-            finding_id=finding_id,
-            status=request.status,
-            confirmed=request.confirmed,
-            notes=request.notes,
-            confirmed_by=request.confirmed_by,
-            db=db
+        result = validate_single_target(
+            target_url=request.target_url,
+            discovered_paths=request.discovered_paths,
+            db=db,
+            workspace_id=request.workspace_id
         )
         return result
     except Exception as e:
-        logger.error(f"Failed to update finding: {e}")
+        logger.error(f"Validation failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/v1/vuln-scan/statistics")
-async def get_vuln_stats(db: Session = Depends(get_db)):
-    """Get overall vulnerability scanning statistics"""
+
+@app.post("/api/v1/validate/domain")
+async def validate_domain(request: DomainValidationRequest, db: Session = Depends(get_db)):
+    """Validate high-value targets for a domain"""
     try:
-        stats = get_vuln_statistics(db)
-        return stats
+        results = validate_high_value_targets_for_domain(
+            domain=request.domain,
+            db=db,
+            workspace_id=request.workspace_id,
+            limit=request.limit,
+            min_risk_score=request.min_risk_score
+        )
+        return {"domain": request.domain, "results": results}
     except Exception as e:
-        logger.error(f"Failed to get vuln statistics: {e}")
+        logger.error(f"Domain validation failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/v1/validate/workspace/{workspace_id}")
+async def validate_workspace(
+    workspace_id: str,
+    limit: int = Query(10, ge=1, le=50),
+    min_risk_score: int = Query(30, ge=0, le=100),
+    db: Session = Depends(get_db)
+):
+    """Validate high-value targets across a workspace"""
+    try:
+        results = validate_workspace_targets(
+            workspace_id=workspace_id,
+            db=db,
+            limit=limit,
+            min_risk_score=min_risk_score
+        )
+        return {"workspace_id": workspace_id, "results": results}
+    except Exception as e:
+        logger.error(f"Workspace validation failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/v1/validate/report/domain/{domain}")
+async def get_domain_validation_report(
+    domain: str,
+    workspace_id: Optional[str] = Query(None),
+    db: Session = Depends(get_db)
+):
+    """Get validation report for a domain"""
+    try:
+        return get_validation_report(domain, db, workspace_id=workspace_id)
+    except Exception as e:
+        logger.error(f"Failed to get validation report: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/v1/validate/report/workspace/{workspace_id}")
+async def get_workspace_validation_report_endpoint(
+    workspace_id: str,
+    db: Session = Depends(get_db)
+):
+    """Get validation report for a workspace"""
+    try:
+        return get_workspace_validation_report(workspace_id, db)
+    except Exception as e:
+        logger.error(f"Failed to get workspace validation report: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ==================== AUTOSCAN ENDPOINTS ====================
+
+from src.services.autoscan import autoscan_service
+from src.config.database import SessionLocal
+
+def get_db_factory():
+    """Returns a function that creates new database sessions"""
+    return SessionLocal
+
+
+class AutoScanRequest(BaseModel):
+    target_domain: str = Field(..., description="Target domain to scan")
+    settings: Optional[Dict] = Field(default=None, description="Scan settings")
+
+
+@app.post("/api/v1/autoscan/start/{workspace_id}")
+async def start_autoscan(
+    workspace_id: str,
+    request: AutoScanRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Start a background auto-scan for a workspace.
+    The scan continues running even if the client disconnects.
+    """
+    try:
+        # Verify workspace exists
+        workspace = get_workspace_db(workspace_id, db)
+        if not workspace:
+            raise HTTPException(status_code=404, detail="Workspace not found")
+        
+        job = await autoscan_service.start_scan(
+            workspace_id=workspace_id,
+            target_domain=request.target_domain,
+            settings=request.settings,
+            db_session_factory=get_db_factory()
+        )
+        
+        return {
+            "status": "started",
+            "job_id": job.id,
+            "message": f"Scan started for {request.target_domain}"
+        }
+        
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Failed to start autoscan: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/v1/autoscan/status/{workspace_id}")
+async def get_autoscan_status(workspace_id: str):
+    """Get the current scan status for a workspace"""
+    job = autoscan_service.get_workspace_job(workspace_id)
+    if not job:
+        return {
+            "status": "idle",
+            "job": None
+        }
+    
+    return {
+        "status": job.status.value,
+        "job": job.to_dict()
+    }
+
+
+@app.get("/api/v1/autoscan/job/{job_id}")
+async def get_autoscan_job(job_id: str):
+    """Get details of a specific scan job"""
+    job = autoscan_service.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    return job.to_dict()
+
+
+@app.post("/api/v1/autoscan/pause/{job_id}")
+async def pause_autoscan(job_id: str):
+    """Pause a running scan"""
+    success = await autoscan_service.pause_scan(job_id)
+    if not success:
+        raise HTTPException(status_code=400, detail="Cannot pause this scan")
+    
+    return {"status": "paused", "job_id": job_id}
+
+
+@app.post("/api/v1/autoscan/resume/{job_id}")
+async def resume_autoscan(job_id: str):
+    """Resume a paused scan"""
+    success = await autoscan_service.resume_scan(job_id)
+    if not success:
+        raise HTTPException(status_code=400, detail="Cannot resume this scan")
+    
+    return {"status": "resumed", "job_id": job_id}
+
+
+@app.post("/api/v1/autoscan/cancel/{job_id}")
+async def cancel_autoscan(job_id: str):
+    """Cancel a scan"""
+    success = await autoscan_service.cancel_scan(job_id)
+    if not success:
+        raise HTTPException(status_code=400, detail="Cannot cancel this scan")
+    
+    return {"status": "cancelled", "job_id": job_id}
+
+
+@app.delete("/api/v1/autoscan/job/{job_id}")
+async def delete_autoscan_job(job_id: str):
+    """Delete a completed/failed/cancelled scan job"""
+    success = autoscan_service.clear_job(job_id)
+    if not success:
+        raise HTTPException(status_code=400, detail="Cannot delete this job (may be still running)")
+    
+    return {"status": "deleted", "job_id": job_id}
+
+
+@app.get("/api/v1/autoscan/jobs")
+async def list_autoscan_jobs(workspace_id: Optional[str] = Query(None)):
+    """List all scan jobs, optionally filtered by workspace"""
+    jobs = autoscan_service.get_all_jobs(workspace_id)
+    return {
+        "jobs": [j.to_dict() for j in jobs],
+        "count": len(jobs)
+    }
 
 
 if __name__ == "__main__":

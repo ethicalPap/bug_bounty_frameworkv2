@@ -184,11 +184,12 @@ class HTTPProber:
             
             # Update fields
             subdomain.ip_address = probe_result.get('ip_address')
-            subdomain.status_code = probe_result.get('status_code')
+            subdomain.http_status = probe_result.get('status_code')
             subdomain.is_active = probe_result.get('is_active', False)
             subdomain.title = probe_result.get('title')
-            subdomain.server = probe_result.get('server')
+            subdomain.technologies = probe_result.get('server')
             subdomain.content_length = probe_result.get('content_length')
+            subdomain.last_checked = datetime.utcnow()
             subdomain.updated_at = datetime.utcnow()
             
             db.commit()
@@ -199,13 +200,14 @@ class HTTPProber:
             db.rollback()
             return False
     
-    def update_database_batch(self, probe_results: List[Dict], db: Session) -> int:
+    def update_database_batch(self, probe_results: List[Dict], db: Session, workspace_id: Optional[str] = None) -> int:
         """
         Update multiple subdomain records with probe results
         
         Args:
             probe_results: List of probe results
             db: Database session
+            workspace_id: Optional workspace filter
         
         Returns:
             Number of records updated
@@ -217,18 +219,21 @@ class HTTPProber:
             
             try:
                 # Find the subdomain in database
-                subdomain = db.query(Subdomain).filter(
-                    Subdomain.full_domain == subdomain_name
-                ).first()
+                query = db.query(Subdomain).filter(Subdomain.full_domain == subdomain_name)
+                if workspace_id:
+                    query = query.filter(Subdomain.workspace_id == workspace_id)
+                
+                subdomain = query.first()
                 
                 if subdomain:
                     # Update fields
                     subdomain.ip_address = result.get('ip_address')
-                    subdomain.status_code = result.get('status_code')
+                    subdomain.http_status = result.get('status_code')
                     subdomain.is_active = result.get('is_active', False)
                     subdomain.title = result.get('title')
-                    subdomain.server = result.get('server')
+                    subdomain.technologies = result.get('server')
                     subdomain.content_length = result.get('content_length')
+                    subdomain.last_checked = datetime.utcnow()
                     subdomain.updated_at = datetime.utcnow()
                     
                     updated_count += 1
@@ -242,6 +247,11 @@ class HTTPProber:
         
         try:
             db.commit()
+            
+            # Touch workspace to update timestamp
+            if workspace_id:
+                _touch_workspace(db, workspace_id)
+            
             logger.info(f"Updated {updated_count} subdomain records in database")
         except Exception as e:
             logger.error(f"Failed to commit batch update: {e}")
@@ -251,15 +261,28 @@ class HTTPProber:
         return updated_count
 
 
+def _touch_workspace(db: Session, workspace_id: str):
+    """Update workspace timestamp"""
+    try:
+        from src.models.workspace import Workspace
+        workspace = db.query(Workspace).filter(Workspace.id == workspace_id).first()
+        if workspace:
+            workspace.updated_at = datetime.utcnow()
+            db.commit()
+    except Exception as e:
+        logger.warning(f"Failed to touch workspace: {e}")
+
+
 # Async wrapper functions for FastAPI integration
 
-async def probe_domain_subdomains(domain: str, concurrency: int = 10) -> Dict:
+async def probe_domain_subdomains(domain: str, concurrency: int = 10, workspace_id: Optional[str] = None) -> Dict:
     """
     Probe all subdomains for a domain
     
     Args:
         domain: Target domain
         concurrency: Number of concurrent probes
+        workspace_id: Optional workspace filter
     
     Returns:
         Dict with probe statistics
@@ -268,14 +291,17 @@ async def probe_domain_subdomains(domain: str, concurrency: int = 10) -> Dict:
     
     try:
         # Get all subdomains for the domain
-        subdomains = db.query(Subdomain).filter(
-            Subdomain.domain == domain
-        ).all()
+        query = db.query(Subdomain).filter(Subdomain.domain == domain)
+        if workspace_id:
+            query = query.filter(Subdomain.workspace_id == workspace_id)
+        
+        subdomains = query.all()
         
         if not subdomains:
             logger.warning(f"No subdomains found for domain: {domain}")
             return {
                 'domain': domain,
+                'workspace_id': workspace_id,
                 'total_subdomains': 0,
                 'probed': 0,
                 'active': 0,
@@ -287,12 +313,12 @@ async def probe_domain_subdomains(domain: str, concurrency: int = 10) -> Dict:
         
         logger.info(f"Probing {len(subdomain_names)} subdomains for {domain}")
         
-        # Run async probe (await instead of asyncio.run)
+        # Run async probe
         prober = HTTPProber()
         probe_results = await prober.probe_subdomains_batch(subdomain_names, concurrency)
         
         # Update database
-        updated_count = prober.update_database_batch(probe_results, db)
+        updated_count = prober.update_database_batch(probe_results, db, workspace_id)
         
         # Calculate statistics
         active_count = sum(1 for r in probe_results if r.get('is_active'))
@@ -300,6 +326,7 @@ async def probe_domain_subdomains(domain: str, concurrency: int = 10) -> Dict:
         
         return {
             'domain': domain,
+            'workspace_id': workspace_id,
             'total_subdomains': len(subdomains),
             'probed': len(probe_results),
             'active': active_count,
@@ -344,17 +371,20 @@ async def probe_scan_results(scan_id: str, concurrency: int = 10) -> Dict:
                 'inactive': 0
             }
         
+        # Get workspace_id from first subdomain
+        workspace_id = subdomains[0].workspace_id if subdomains else None
+        
         # Extract subdomain names
         subdomain_names = [sub.full_domain for sub in subdomains]
         
         logger.info(f"Probing {len(subdomain_names)} subdomains for scan {scan_id}")
         
-        # Run async probe (await instead of asyncio.run)
+        # Run async probe
         prober = HTTPProber()
         probe_results = await prober.probe_subdomains_batch(subdomain_names, concurrency)
         
         # Update database
-        updated_count = prober.update_database_batch(probe_results, db)
+        updated_count = prober.update_database_batch(probe_results, db, workspace_id)
         
         # Calculate statistics
         active_count = sum(1 for r in probe_results if r.get('is_active'))
@@ -362,6 +392,7 @@ async def probe_scan_results(scan_id: str, concurrency: int = 10) -> Dict:
         
         return {
             'scan_id': scan_id,
+            'workspace_id': workspace_id,
             'total_subdomains': len(subdomains),
             'probed': len(probe_results),
             'active': active_count,
@@ -405,23 +436,27 @@ async def probe_specific_subdomains(subdomain_ids: List[int], concurrency: int =
                 'inactive': 0
             }
         
+        # Get workspace_id from first subdomain
+        workspace_id = subdomains[0].workspace_id if subdomains else None
+        
         # Extract subdomain names
         subdomain_names = [sub.full_domain for sub in subdomains]
         
         logger.info(f"Probing {len(subdomain_names)} specific subdomains")
         
-        # Run async probe (await instead of asyncio.run)
+        # Run async probe
         prober = HTTPProber()
         probe_results = await prober.probe_subdomains_batch(subdomain_names, concurrency)
         
         # Update database
-        updated_count = prober.update_database_batch(probe_results, db)
+        updated_count = prober.update_database_batch(probe_results, db, workspace_id)
         
         # Calculate statistics
         active_count = sum(1 for r in probe_results if r.get('is_active'))
         inactive_count = len(probe_results) - active_count
         
         return {
+            'workspace_id': workspace_id,
             'total_subdomains': len(subdomains),
             'probed': len(probe_results),
             'active': active_count,
@@ -432,6 +467,68 @@ async def probe_specific_subdomains(subdomain_ids: List[int], concurrency: int =
         
     except Exception as e:
         logger.error(f"Failed to probe specific subdomains: {e}")
+        raise
+    finally:
+        db.close()
+
+
+async def probe_workspace_subdomains(workspace_id: str, concurrency: int = 10) -> Dict:
+    """
+    Probe all subdomains in a workspace
+    
+    Args:
+        workspace_id: Workspace ID
+        concurrency: Number of concurrent probes
+    
+    Returns:
+        Dict with probe statistics
+    """
+    db = SessionLocal()
+    
+    try:
+        # Get all subdomains for the workspace
+        subdomains = db.query(Subdomain).filter(
+            Subdomain.workspace_id == workspace_id
+        ).all()
+        
+        if not subdomains:
+            logger.warning(f"No subdomains found for workspace: {workspace_id}")
+            return {
+                'workspace_id': workspace_id,
+                'total_subdomains': 0,
+                'probed': 0,
+                'active': 0,
+                'inactive': 0
+            }
+        
+        # Extract subdomain names
+        subdomain_names = [sub.full_domain for sub in subdomains]
+        
+        logger.info(f"Probing {len(subdomain_names)} subdomains for workspace {workspace_id}")
+        
+        # Run async probe
+        prober = HTTPProber()
+        probe_results = await prober.probe_subdomains_batch(subdomain_names, concurrency)
+        
+        # Update database
+        updated_count = prober.update_database_batch(probe_results, db, workspace_id)
+        
+        # Calculate statistics
+        active_count = sum(1 for r in probe_results if r.get('is_active'))
+        inactive_count = len(probe_results) - active_count
+        
+        return {
+            'workspace_id': workspace_id,
+            'total_subdomains': len(subdomains),
+            'probed': len(probe_results),
+            'active': active_count,
+            'inactive': inactive_count,
+            'updated_in_db': updated_count,
+            'results': probe_results
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to probe workspace subdomains: {e}")
         raise
     finally:
         db.close()

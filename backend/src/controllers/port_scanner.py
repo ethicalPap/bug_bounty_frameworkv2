@@ -36,6 +36,7 @@ COMMON_PORTS = {
 @dataclass
 class PortScanConfig:
     targets: List[str]  # List of IPs or domains to scan
+    workspace_id: Optional[str] = None  # Workspace isolation
     ports: str = 'top-100'  # Port range or preset
     scan_type: str = 'quick'  # quick, full, stealth, udp, comprehensive
     
@@ -425,39 +426,46 @@ class PortScanner:
                     if self.config.exclude_closed and result.get('state') == 'closed':
                         continue
                     
-                    # Check if port already exists for this target
-                    existing = db.query(PortScan).filter(
+                    # Check if port already exists for this target in this workspace
+                    existing_query = db.query(PortScan).filter(
                         PortScan.target == result.get('target'),
                         PortScan.port == result.get('port'),
                         PortScan.protocol == result.get('protocol', 'tcp')
-                    ).first()
+                    )
+                    if self.config.workspace_id:
+                        existing_query = existing_query.filter(
+                            PortScan.workspace_id == self.config.workspace_id
+                        )
+                    existing = existing_query.first()
                     
                     # Get subdomain_id if available
                     subdomain_id = None
                     if self.config.subdomain_ids:
                         # Try to match target to subdomain
-                        subdomain = db.query(Subdomain).filter(
+                        subdomain_query = db.query(Subdomain).filter(
                             Subdomain.full_domain == result.get('target')
-                        ).first()
+                        )
+                        if self.config.workspace_id:
+                            subdomain_query = subdomain_query.filter(
+                                Subdomain.workspace_id == self.config.workspace_id
+                            )
+                        subdomain = subdomain_query.first()
                         if subdomain:
                             subdomain_id = subdomain.id
                     
                     if not existing:
                         new_port = PortScan(
+                            workspace_id=self.config.workspace_id,  # Workspace isolation
                             subdomain_id=subdomain_id,
                             target=result.get('target'),
+                            ip_address=result.get('ip_address'),
                             port=result.get('port'),
                             protocol=result.get('protocol', 'tcp'),
                             state=result.get('state', 'open'),
-                            service=result.get('service', '')[:100],
-                            version=result.get('version', '')[:255],
-                            banner=result.get('banner'),
-                            cpe=result.get('cpe'),
-                            script_output=result.get('script_output'),
-                            tool_name=result.get('tool', 'unknown'),
-                            scan_type=self.config.scan_type,
-                            response_time=result.get('response_time'),
-                            is_common_port=result.get('is_common_port', False),
+                            service=result.get('service', '')[:100] if result.get('service') else None,
+                            version=result.get('version', '')[:255] if result.get('version') else None,
+                            extra_info=result.get('script_output'),
+                            source=result.get('tool', 'unknown'),
                             scan_id=self.scan_id
                         )
                         
@@ -470,8 +478,8 @@ class PortScanner:
                         if result.get('version'):
                             existing.version = result.get('version', '')[:255]
                         if result.get('script_output'):
-                            existing.script_output = result.get('script_output')
-                        existing.updated_at = datetime.utcnow()
+                            existing.extra_info = result.get('script_output')
+                        existing.last_checked = datetime.utcnow()
                         existing.scan_id = self.scan_id
                 
                 except Exception as e:
@@ -479,6 +487,11 @@ class PortScanner:
                     continue
             
             db.commit()
+            
+            # Touch workspace to update timestamp
+            if self.config.workspace_id:
+                self._touch_workspace(db)
+            
             logger.info(f"Saved {saved_count} new port scan results to database")
             
         except Exception as e:
@@ -489,11 +502,22 @@ class PortScanner:
         
         return saved_count
     
+    def _touch_workspace(self, db: Session):
+        """Update workspace timestamp"""
+        try:
+            from src.models.workspace import Workspace
+            workspace = db.query(Workspace).filter(Workspace.id == self.config.workspace_id).first()
+            if workspace:
+                workspace.updated_at = datetime.utcnow()
+                db.commit()
+        except Exception as e:
+            logger.warning(f"Failed to touch workspace: {e}")
+    
     # ==================== MAIN SCAN ORCHESTRATION ====================
     
     def run_scan(self) -> Dict:
         """Run complete port scan"""
-        logger.info(f"Starting port scan (scan_id: {self.scan_id})")
+        logger.info(f"Starting port scan (scan_id: {self.scan_id}, workspace: {self.config.workspace_id})")
         logger.info(f"Targets: {len(self.config.targets)}")
         logger.info(f"Ports: {self.config.ports}")
         logger.info(f"Scan type: {self.config.scan_type}")
@@ -543,6 +567,7 @@ class PortScanner:
             
             scan_summary = {
                 'scan_id': self.scan_id,
+                'workspace_id': self.config.workspace_id,
                 'targets': self.config.targets,
                 'target_count': len(self.config.targets),
                 'scan_type': self.config.scan_type,
@@ -570,19 +595,22 @@ class PortScanner:
 
 # ==================== API FUNCTIONS ====================
 
-def start_port_scan(targets: List[str], **kwargs) -> Dict:
+def start_port_scan(targets: List[str], workspace_id: Optional[str] = None, **kwargs) -> Dict:
     """Start a new port scan"""
-    config = PortScanConfig(targets=targets, **kwargs)
+    config = PortScanConfig(targets=targets, workspace_id=workspace_id, **kwargs)
     scanner = PortScanner(config)
     return scanner.run_scan()
 
-def get_ports_by_target(target: str, db: Session) -> List[Dict]:
+
+def get_ports_by_target(target: str, db: Session, workspace_id: Optional[str] = None) -> List[Dict]:
     """Get all discovered ports for a target"""
-    results = db.query(PortScan).filter(
-        PortScan.target == target
-    ).order_by(PortScan.port).all()
+    query = db.query(PortScan).filter(PortScan.target == target)
+    if workspace_id:
+        query = query.filter(PortScan.workspace_id == workspace_id)
     
+    results = query.order_by(PortScan.port).all()
     return [result.to_dict() for result in results]
+
 
 def get_ports_by_subdomain(subdomain_id: int, db: Session) -> List[Dict]:
     """Get all ports for a subdomain"""
@@ -592,6 +620,7 @@ def get_ports_by_subdomain(subdomain_id: int, db: Session) -> List[Dict]:
     
     return [result.to_dict() for result in results]
 
+
 def get_ports_by_scan(scan_id: str, db: Session) -> List[Dict]:
     """Get results for a specific scan"""
     results = db.query(PortScan).filter(
@@ -600,26 +629,41 @@ def get_ports_by_scan(scan_id: str, db: Session) -> List[Dict]:
     
     return [result.to_dict() for result in results]
 
-def get_open_ports(db: Session, limit: int = 100) -> List[Dict]:
-    """Get all open ports across all scans"""
-    results = db.query(PortScan).filter(
-        PortScan.state == 'open'
-    ).order_by(PortScan.created_at.desc()).limit(limit).all()
-    
-    return [result.to_dict() for result in results]
 
-def get_vulnerable_services(db: Session) -> List[Dict]:
-    """Get ports with potentially vulnerable services"""
+def get_ports_by_workspace(workspace_id: str, db: Session) -> List[Dict]:
+    """Get all ports for a workspace"""
     results = db.query(PortScan).filter(
-        PortScan.is_vulnerable == True
-    ).order_by(PortScan.created_at.desc()).all()
-    
-    return [result.to_dict() for result in results]
-
-def get_ports_by_service(service: str, db: Session) -> List[Dict]:
-    """Get all ports running a specific service"""
-    results = db.query(PortScan).filter(
-        PortScan.service.ilike(f'%{service}%')
+        PortScan.workspace_id == workspace_id
     ).order_by(PortScan.target, PortScan.port).all()
     
+    return [result.to_dict() for result in results]
+
+
+def get_open_ports(db: Session, workspace_id: Optional[str] = None, limit: int = 100) -> List[Dict]:
+    """Get all open ports across all scans"""
+    query = db.query(PortScan).filter(PortScan.state == 'open')
+    if workspace_id:
+        query = query.filter(PortScan.workspace_id == workspace_id)
+    
+    results = query.order_by(PortScan.discovered_at.desc()).limit(limit).all()
+    return [result.to_dict() for result in results]
+
+
+def get_vulnerable_services(db: Session, workspace_id: Optional[str] = None) -> List[Dict]:
+    """Get ports with potentially vulnerable services"""
+    query = db.query(PortScan).filter(PortScan.is_vulnerable == True)
+    if workspace_id:
+        query = query.filter(PortScan.workspace_id == workspace_id)
+    
+    results = query.order_by(PortScan.discovered_at.desc()).all()
+    return [result.to_dict() for result in results]
+
+
+def get_ports_by_service(service: str, db: Session, workspace_id: Optional[str] = None) -> List[Dict]:
+    """Get all ports running a specific service"""
+    query = db.query(PortScan).filter(PortScan.service.ilike(f'%{service}%'))
+    if workspace_id:
+        query = query.filter(PortScan.workspace_id == workspace_id)
+    
+    results = query.order_by(PortScan.target, PortScan.port).all()
     return [result.to_dict() for result in results]

@@ -1,9 +1,20 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
+import { useParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { getSubdomains, probeHostsWithProgress } from '../../api/client'
 import { Activity, Play, CheckCircle, XCircle, ExternalLink, Loader, Download, Copy, RefreshCw, AlertTriangle, X, Globe } from 'lucide-react'
 
-// LocalStorage keys
+// Get workspace-scoped storage key
+function getStorageKey(baseKey) {
+  const match = window.location.pathname.match(/\/workspace\/([^\/]+)/)
+  const workspaceId = match ? match[1] : null
+  if (workspaceId) {
+    return baseKey + '_' + workspaceId
+  }
+  return baseKey + '_global'
+}
+
+// LocalStorage keys (will be workspace-scoped)
 const STORAGE_KEYS = {
   LIVE_HOSTS_DOMAIN: 'live_hosts_last_domain',
   LIVE_HOSTS_RESULTS: 'live_hosts_results',
@@ -11,14 +22,16 @@ const STORAGE_KEYS = {
 }
 
 const LiveHosts = () => {
+  const { workspaceId } = useParams()
+  
   const [availableDomains, setAvailableDomains] = useState([])
   const [selectedDomain, setSelectedDomain] = useState(() => {
-    return localStorage.getItem(STORAGE_KEYS.LIVE_HOSTS_DOMAIN) || ''
+    return localStorage.getItem(getStorageKey(STORAGE_KEYS.LIVE_HOSTS_DOMAIN)) || ''
   })
   const [isProbing, setIsProbing] = useState(false)
   const [probeProgress, setProbeProgress] = useState(0)
   const [probeResults, setProbeResults] = useState(() => {
-    const saved = localStorage.getItem(STORAGE_KEYS.LIVE_HOSTS_RESULTS)
+    const saved = localStorage.getItem(getStorageKey(STORAGE_KEYS.LIVE_HOSTS_RESULTS))
     return saved ? JSON.parse(saved) : []
   })
   const [currentlyProbing, setCurrentlyProbing] = useState('')
@@ -27,16 +40,24 @@ const LiveHosts = () => {
   const probeAbortController = useRef(null)
   const queryClient = useQueryClient()
 
-  // Persist results to localStorage
+  // Reload data when workspace changes
+  useEffect(() => {
+    const saved = localStorage.getItem(getStorageKey(STORAGE_KEYS.LIVE_HOSTS_RESULTS))
+    setProbeResults(saved ? JSON.parse(saved) : [])
+    const savedDomain = localStorage.getItem(getStorageKey(STORAGE_KEYS.LIVE_HOSTS_DOMAIN))
+    setSelectedDomain(savedDomain || '')
+  }, [workspaceId])
+
+  // Persist results to localStorage (workspace-scoped)
   useEffect(() => {
     if (probeResults.length > 0) {
-      localStorage.setItem(STORAGE_KEYS.LIVE_HOSTS_RESULTS, JSON.stringify(probeResults))
+      localStorage.setItem(getStorageKey(STORAGE_KEYS.LIVE_HOSTS_RESULTS), JSON.stringify(probeResults))
     }
   }, [probeResults])
 
   useEffect(() => {
     if (selectedDomain) {
-      localStorage.setItem(STORAGE_KEYS.LIVE_HOSTS_DOMAIN, selectedDomain)
+      localStorage.setItem(getStorageKey(STORAGE_KEYS.LIVE_HOSTS_DOMAIN), selectedDomain)
     }
   }, [selectedDomain])
 

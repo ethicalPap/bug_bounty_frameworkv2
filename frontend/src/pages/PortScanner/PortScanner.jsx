@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { useParams } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { 
   Network, 
@@ -15,6 +16,16 @@ import {
   Zap,
   Lock
 } from 'lucide-react'
+
+// Get workspace-scoped storage key
+function getStorageKey(baseKey) {
+  const match = window.location.pathname.match(/\/workspace\/([^\/]+)/)
+  const workspaceId = match ? match[1] : null
+  if (workspaceId) {
+    return baseKey + '_' + workspaceId
+  }
+  return baseKey + '_global'
+}
 
 const STORAGE_KEYS = {
   PORT_SCAN_TARGETS: 'port_scan_targets',
@@ -34,6 +45,7 @@ const PORT_PRESETS = {
 }
 
 const PortScanner = () => {
+  const { workspaceId } = useParams()
   const queryClient = useQueryClient()
   
   // Available targets (active hosts from Live Hosts)
@@ -41,9 +53,9 @@ const PortScanner = () => {
   const [selectedTargets, setSelectedTargets] = useState([])
   const [customTarget, setCustomTarget] = useState('')
   
-  // Scan configuration
+  // Scan configuration (workspace-scoped)
   const [scanConfig, setScanConfig] = useState(() => {
-    const saved = localStorage.getItem(STORAGE_KEYS.PORT_SCAN_CONFIG)
+    const saved = localStorage.getItem(getStorageKey(STORAGE_KEYS.PORT_SCAN_CONFIG))
     return saved ? JSON.parse(saved) : {
       port_preset: 'top-100',
       custom_ports: '',
@@ -60,27 +72,37 @@ const PortScanner = () => {
   const [scanProgress, setScanProgress] = useState(0)
   const [currentTarget, setCurrentTarget] = useState('')
   const [scanResults, setScanResults] = useState(() => {
-    const saved = localStorage.getItem(STORAGE_KEYS.PORT_SCAN_RESULTS)
+    const saved = localStorage.getItem(getStorageKey(STORAGE_KEYS.PORT_SCAN_RESULTS))
     return saved ? JSON.parse(saved) : []
   })
   
   const scanAbortController = useRef(null)
 
-  // Persist state
+  // Reload data when workspace changes
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.PORT_SCAN_CONFIG, JSON.stringify(scanConfig))
+    const savedConfig = localStorage.getItem(getStorageKey(STORAGE_KEYS.PORT_SCAN_CONFIG))
+    if (savedConfig) {
+      setScanConfig(JSON.parse(savedConfig))
+    }
+    const savedResults = localStorage.getItem(getStorageKey(STORAGE_KEYS.PORT_SCAN_RESULTS))
+    setScanResults(savedResults ? JSON.parse(savedResults) : [])
+  }, [workspaceId])
+
+  // Persist state (workspace-scoped)
+  useEffect(() => {
+    localStorage.setItem(getStorageKey(STORAGE_KEYS.PORT_SCAN_CONFIG), JSON.stringify(scanConfig))
   }, [scanConfig])
 
   useEffect(() => {
     if (scanResults.length > 0) {
-      localStorage.setItem(STORAGE_KEYS.PORT_SCAN_RESULTS, JSON.stringify(scanResults))
+      localStorage.setItem(getStorageKey(STORAGE_KEYS.PORT_SCAN_RESULTS), JSON.stringify(scanResults))
     }
   }, [scanResults])
 
-  // Load available targets
+  // Load available targets (workspace-scoped)
   useEffect(() => {
     try {
-      const liveHostsData = localStorage.getItem('live_hosts_results')
+      const liveHostsData = localStorage.getItem(getStorageKey('live_hosts_results'))
       if (liveHostsData) {
         const hosts = JSON.parse(liveHostsData)
         const targets = hosts
@@ -216,7 +238,7 @@ const PortScanner = () => {
   const clearResults = () => {
     setScanResults([])
     setScanProgress(0)
-    localStorage.removeItem(STORAGE_KEYS.PORT_SCAN_RESULTS)
+    localStorage.removeItem(getStorageKey(STORAGE_KEYS.PORT_SCAN_RESULTS))
   }
 
   // Export to CSV

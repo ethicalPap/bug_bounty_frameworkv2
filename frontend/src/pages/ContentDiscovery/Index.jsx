@@ -32,7 +32,7 @@ import {
   CheckSquare
 } from 'lucide-react'
 import { startContentDiscovery, getDomains, getSubdomains } from '../../api/client'
-import { useContentDiscovery, CONTENT_TYPES } from '../../stores/contentDiscoveryStore.jsx'
+import { useContentDiscovery, CONTENT_TYPES } from '../../stores/ContentDiscoveryStore'
 
 // Tool configurations
 const TOOLS = {

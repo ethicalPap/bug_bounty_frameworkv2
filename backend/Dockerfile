@@ -120,7 +120,7 @@ RUN go install github.com/BishopFox/jsluice/cmd/jsluice@latest
 
 # API/Parameter Discovery Tools
 # Install ParamSpider
-RUN pip install paramspider
+RUN pip install git+https://github.com/devanshbatham/ParamSpider.git
 
 # Specialized Discovery Tools
 # Install unfurl

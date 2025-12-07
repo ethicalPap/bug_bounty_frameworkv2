@@ -1,20 +1,18 @@
-# Models package
-# This file imports all models so they're registered with SQLAlchemy Base
+"""
+Database Models
+All models use the shared Base from src.config.database
+"""
 
+from src.models.Workspace import Workspace
 from src.models.Subdomain import Subdomain
 from src.models.ContentDiscovery import ContentDiscovery, JSEndpoint, APIParameter
 from src.models.PortScan import PortScan
-from src.models.VulnScan import VulnScan, VulnFinding
 
 __all__ = [
+    'Workspace',
     'Subdomain',
     'ContentDiscovery',
-    'JSEndpoint', 
+    'JSEndpoint',
     'APIParameter',
-    'PortScan',
-    'VulnScan',
-    'VulnFinding',
-    'Workspace'
+    'PortScan'
 ]
-
-__version__ = "2.1.0"

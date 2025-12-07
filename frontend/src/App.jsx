@@ -1,4 +1,4 @@
-import { Routes, Route } from 'react-router-dom'
+import { Routes, Route, Navigate } from 'react-router-dom'
 import Layout from './components/Layout/Layout'
 import Home from './pages/Home/Home'
 import Dashboard from './pages/Dashboard/Dashboard'
@@ -22,11 +22,12 @@ import JSFiles from './pages/ContentDiscovery/JSFiles'
 function App() {
   return (
     <Routes>
-      {/* Home page without sidebar */}
+      {/* Home page - workspace selection (no sidebar) */}
       <Route path="/" element={<Home />} />
       
-      {/* Main app with sidebar */}
-      <Route element={<Layout />}>
+      {/* All tools require a workspace - nested under /workspace/:workspaceId */}
+      <Route path="/workspace/:workspaceId" element={<Layout />}>
+        <Route index element={<Dashboard />} />
         <Route path="dashboard" element={<Dashboard />} />
         <Route path="auto-scan" element={<AutoScan />} />
         <Route path="subdomain-scanner" element={<SubdomainScanner />} />
@@ -45,10 +46,23 @@ function App() {
         <Route path="history" element={<History />} />
         <Route path="exports" element={<Exports />} />
         <Route path="settings" element={<Settings />} />
-        
-        {/* Workspace routes */}
-        <Route path="workspace/:workspaceId" element={<Dashboard />} />
       </Route>
+      
+      {/* Redirect old routes to home (workspace selection) */}
+      <Route path="/dashboard" element={<Navigate to="/" replace />} />
+      <Route path="/auto-scan" element={<Navigate to="/" replace />} />
+      <Route path="/subdomain-scanner" element={<Navigate to="/" replace />} />
+      <Route path="/live-hosts" element={<Navigate to="/" replace />} />
+      <Route path="/port-scanner" element={<Navigate to="/" replace />} />
+      <Route path="/content-discovery/*" element={<Navigate to="/" replace />} />
+      <Route path="/vuln-scanner" element={<Navigate to="/" replace />} />
+      <Route path="/visualization" element={<Navigate to="/" replace />} />
+      <Route path="/history" element={<Navigate to="/" replace />} />
+      <Route path="/exports" element={<Navigate to="/" replace />} />
+      <Route path="/settings" element={<Navigate to="/" replace />} />
+      
+      {/* Catch all - redirect to home */}
+      <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   )
 }

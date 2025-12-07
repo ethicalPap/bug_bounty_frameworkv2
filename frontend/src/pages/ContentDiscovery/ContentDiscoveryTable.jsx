@@ -22,7 +22,7 @@ import {
   Trash2,
   Eye
 } from 'lucide-react'
-import { useContentDiscovery, CONTENT_TYPES, extractSubdomain } from '../../stores/contentDiscoveryStore.jsx'
+import { useContentDiscovery, CONTENT_TYPES, extractSubdomain } from '../../stores/ContentDiscoveryStore'
 
 // Icon mapping
 const iconMap = {

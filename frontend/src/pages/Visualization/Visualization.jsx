@@ -39,7 +39,7 @@ import {
   X,
   Maximize2
 } from 'lucide-react'
-import { useContentDiscovery } from '../../stores/contentDiscoveryStore.jsx'
+import { useContentDiscovery } from '../../stores/ContentDiscoveryStore'
 import { getDomains, getSubdomains } from '../../api/client'
 
 // Risk level colors

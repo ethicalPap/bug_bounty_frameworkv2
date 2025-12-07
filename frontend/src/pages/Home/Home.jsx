@@ -121,13 +121,6 @@ export default function Home() {
     navigate(`/workspace/${workspace.id}`)
   }
 
-  // Quick stats from localStorage
-  const quickStats = {
-    subdomains: JSON.parse(localStorage.getItem('subdomain_scan_results') || '[]').length,
-    liveHosts: JSON.parse(localStorage.getItem('live_hosts_results') || '[]').filter(h => h.is_active).length,
-    discoveries: JSON.parse(localStorage.getItem('content_discovery_store') || '{"items":[]}').items?.length || 0
-  }
-
   return (
     <div className="min-h-screen bg-[#0a0a0a]">
       {/* Hero Section */}
@@ -154,24 +147,6 @@ export default function Home() {
               live host detection, content discovery, and vulnerability scanning.
             </p>
           </div>
-
-          {/* Quick Stats */}
-          {(quickStats.subdomains > 0 || quickStats.liveHosts > 0 || quickStats.discoveries > 0) && (
-            <div className="grid grid-cols-3 gap-4 max-w-2xl mx-auto mb-12">
-              <div className="bg-[#111111]/80 backdrop-blur border border-[#1f1f1f] rounded-xl p-4 text-center">
-                <div className="text-2xl font-bold text-white">{quickStats.subdomains.toLocaleString()}</div>
-                <div className="text-xs text-gray-500">Subdomains</div>
-              </div>
-              <div className="bg-[#111111]/80 backdrop-blur border border-[#1f1f1f] rounded-xl p-4 text-center">
-                <div className="text-2xl font-bold text-green-400">{quickStats.liveHosts.toLocaleString()}</div>
-                <div className="text-xs text-gray-500">Live Hosts</div>
-              </div>
-              <div className="bg-[#111111]/80 backdrop-blur border border-[#1f1f1f] rounded-xl p-4 text-center">
-                <div className="text-2xl font-bold text-blue-400">{quickStats.discoveries.toLocaleString()}</div>
-                <div className="text-xs text-gray-500">Discoveries</div>
-              </div>
-            </div>
-          )}
 
           {/* Quick Actions */}
           <div className="flex flex-wrap justify-center gap-4 mb-16">

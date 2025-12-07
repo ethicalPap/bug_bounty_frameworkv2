@@ -84,19 +84,19 @@ export async function getStatistics() {
 // ==================== SUBDOMAIN SCANNING ====================
 
 export async function startSubdomainScan(config) {
-  return apiRequest('/api/v1/scan', {
+  return apiRequest('/api/v1/scan/subdomains', {
     method: 'POST',
     body: JSON.stringify(config)
   })
 }
 
-export async function getSubdomains(domain) {
-  return apiRequest(`/api/v1/subdomains/${encodeURIComponent(domain)}`)
+export async function getSubdomains(domain, workspaceId = null) {
+  const params = workspaceId ? `?workspace_id=${workspaceId}` : ''
+  return apiRequest(`/api/v1/subdomains/domain/${encodeURIComponent(domain)}${params}`)
 }
 
 export async function getSubdomainResults(scanId) {
-  // Backend doesn't have scan-specific endpoint, use domain query
-  return apiRequest(`/api/v1/subdomains?scan_id=${encodeURIComponent(scanId)}`)
+  return apiRequest(`/api/v1/subdomains/scan/${encodeURIComponent(scanId)}`)
 }
 
 export async function getDomains() {
@@ -419,6 +419,27 @@ export async function getWorkspaceStats(workspaceId) {
   return apiRequest(`/api/v1/workspaces/${workspaceId}/stats`)
 }
 
+/**
+ * Get subdomains for a specific workspace
+ */
+export async function getSubdomainsByWorkspace(workspaceId) {
+  return apiRequest(`/api/v1/subdomains/workspace/${workspaceId}`)
+}
+
+/**
+ * Get content discoveries for a specific workspace
+ */
+export async function getContentByWorkspace(workspaceId) {
+  return apiRequest(`/api/v1/content/workspace/${workspaceId}`)
+}
+
+/**
+ * Get port scans for a specific workspace
+ */
+export async function getPortsByWorkspace(workspaceId) {
+  return apiRequest(`/api/v1/ports/workspace/${workspaceId}`)
+}
+
 // ==================== DEFAULT EXPORT ====================
 
 export default {
@@ -497,5 +518,56 @@ export default {
   createWorkspace,
   updateWorkspace,
   deleteWorkspace,
-  getWorkspaceStats
+  getWorkspaceStats,
+  getSubdomainsByWorkspace,
+  getContentByWorkspace,
+  getPortsByWorkspace,
+  
+  // AutoScan (background scanning)
+  startAutoScan,
+  getAutoScanStatus,
+  getAutoScanJob,
+  pauseAutoScan,
+  resumeAutoScan,
+  cancelAutoScan,
+  deleteAutoScanJob,
+  listAutoScanJobs
+}
+
+// ==================== AUTOSCAN (BACKGROUND SCANNING) ====================
+
+export async function startAutoScan(workspaceId, targetDomain, settings = {}) {
+  return apiRequest(`/api/v1/autoscan/start/${workspaceId}`, {
+    method: 'POST',
+    body: JSON.stringify({ target_domain: targetDomain, settings })
+  })
+}
+
+export async function getAutoScanStatus(workspaceId) {
+  return apiRequest(`/api/v1/autoscan/status/${workspaceId}`)
+}
+
+export async function getAutoScanJob(jobId) {
+  return apiRequest(`/api/v1/autoscan/job/${jobId}`)
+}
+
+export async function pauseAutoScan(jobId) {
+  return apiRequest(`/api/v1/autoscan/pause/${jobId}`, { method: 'POST' })
+}
+
+export async function resumeAutoScan(jobId) {
+  return apiRequest(`/api/v1/autoscan/resume/${jobId}`, { method: 'POST' })
+}
+
+export async function cancelAutoScan(jobId) {
+  return apiRequest(`/api/v1/autoscan/cancel/${jobId}`, { method: 'POST' })
+}
+
+export async function deleteAutoScanJob(jobId) {
+  return apiRequest(`/api/v1/autoscan/job/${jobId}`, { method: 'DELETE' })
+}
+
+export async function listAutoScanJobs(workspaceId = null) {
+  const params = workspaceId ? `?workspace_id=${workspaceId}` : ''
+  return apiRequest(`/api/v1/autoscan/jobs${params}`)
 }

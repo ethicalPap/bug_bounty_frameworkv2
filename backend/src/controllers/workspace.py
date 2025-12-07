@@ -11,7 +11,7 @@ import uuid
 
 from src.models.Workspace import Workspace
 from src.models.Subdomain import Subdomain
-from src.models.ContentDiscovery import ContentDiscovery
+from src.models.ContentDiscovery import ContentDiscovery, JSEndpoint, APIParameter
 from src.models.PortScan import PortScan
 
 import logging
@@ -87,10 +87,15 @@ def delete_workspace(db: Session, workspace_id: str) -> bool:
     if not workspace:
         return False
     
-    # Delete associated data
-    db.query(Subdomain).filter(Subdomain.workspace_id == workspace_id).delete()
-    db.query(ContentDiscovery).filter(ContentDiscovery.workspace_id == workspace_id).delete()
-    db.query(PortScan).filter(PortScan.workspace_id == workspace_id).delete()
+    # Delete associated data (cascade should handle this, but be explicit)
+    try:
+        db.query(APIParameter).filter(APIParameter.workspace_id == workspace_id).delete(synchronize_session=False)
+        db.query(JSEndpoint).filter(JSEndpoint.workspace_id == workspace_id).delete(synchronize_session=False)
+        db.query(ContentDiscovery).filter(ContentDiscovery.workspace_id == workspace_id).delete(synchronize_session=False)
+        db.query(PortScan).filter(PortScan.workspace_id == workspace_id).delete(synchronize_session=False)
+        db.query(Subdomain).filter(Subdomain.workspace_id == workspace_id).delete(synchronize_session=False)
+    except Exception as e:
+        logger.warning(f"Error deleting associated data: {e}")
     
     # Delete workspace
     db.delete(workspace)
@@ -106,41 +111,53 @@ def get_workspace_stats(db: Session, workspace_id: str) -> dict:
     if not workspace:
         return {}
     
-    # Count subdomains
-    subdomains_count = db.query(func.count(Subdomain.id)).filter(
-        Subdomain.workspace_id == workspace_id
-    ).scalar() or 0
-    
-    # Count active subdomains (live hosts)
-    live_hosts_count = db.query(func.count(Subdomain.id)).filter(
-        Subdomain.workspace_id == workspace_id,
-        Subdomain.is_active == True
-    ).scalar() or 0
-    
-    # Count content discoveries
-    content_count = db.query(func.count(ContentDiscovery.id)).filter(
-        ContentDiscovery.workspace_id == workspace_id
-    ).scalar() or 0
-    
-    # Count port scans
-    ports_count = db.query(func.count(PortScan.id)).filter(
-        PortScan.workspace_id == workspace_id
-    ).scalar() or 0
-    
-    # Get unique domains
-    unique_domains = db.query(func.count(func.distinct(Subdomain.domain))).filter(
-        Subdomain.workspace_id == workspace_id
-    ).scalar() or 0
-    
-    return {
-        "workspace_id": workspace_id,
-        "subdomains": subdomains_count,
-        "live_hosts": live_hosts_count,
-        "content_discoveries": content_count,
-        "port_scans": ports_count,
-        "unique_domains": unique_domains,
-        "last_scan": workspace.updated_at.isoformat() if workspace.updated_at else None
-    }
+    try:
+        # Count subdomains
+        subdomains_count = db.query(func.count(Subdomain.id)).filter(
+            Subdomain.workspace_id == workspace_id
+        ).scalar() or 0
+        
+        # Count active subdomains (live hosts)
+        live_hosts_count = db.query(func.count(Subdomain.id)).filter(
+            Subdomain.workspace_id == workspace_id,
+            Subdomain.is_active == True
+        ).scalar() or 0
+        
+        # Count content discoveries
+        content_count = db.query(func.count(ContentDiscovery.id)).filter(
+            ContentDiscovery.workspace_id == workspace_id
+        ).scalar() or 0
+        
+        # Count port scans
+        ports_count = db.query(func.count(PortScan.id)).filter(
+            PortScan.workspace_id == workspace_id
+        ).scalar() or 0
+        
+        # Get unique domains
+        unique_domains = db.query(func.count(func.distinct(Subdomain.domain))).filter(
+            Subdomain.workspace_id == workspace_id
+        ).scalar() or 0
+        
+        return {
+            "workspace_id": workspace_id,
+            "subdomains": subdomains_count,
+            "live_hosts": live_hosts_count,
+            "content_discoveries": content_count,
+            "port_scans": ports_count,
+            "unique_domains": unique_domains,
+            "last_scan": workspace.updated_at.isoformat() if workspace.updated_at else None
+        }
+    except Exception as e:
+        logger.error(f"Error getting workspace stats: {e}")
+        return {
+            "workspace_id": workspace_id,
+            "subdomains": 0,
+            "live_hosts": 0,
+            "content_discoveries": 0,
+            "port_scans": 0,
+            "unique_domains": 0,
+            "last_scan": None
+        }
 
 
 def workspace_to_dict(workspace: Workspace, include_stats: bool = True, db: Session = None) -> dict:
@@ -158,3 +175,11 @@ def workspace_to_dict(workspace: Workspace, include_stats: bool = True, db: Sess
         result["stats"] = get_workspace_stats(db, workspace.id)
     
     return result
+
+
+def touch_workspace(db: Session, workspace_id: str) -> None:
+    """Update workspace's updated_at timestamp (call after scans)"""
+    workspace = get_workspace(db, workspace_id)
+    if workspace:
+        workspace.updated_at = datetime.utcnow()
+        db.commit()

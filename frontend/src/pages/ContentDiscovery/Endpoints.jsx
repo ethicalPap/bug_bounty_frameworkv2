@@ -19,7 +19,7 @@ import {
   Trash2,
   Filter
 } from 'lucide-react'
-import { useContentDiscovery, CONTENT_TYPES } from '../../stores/contentDiscoveryStore.jsx'
+import { useContentDiscovery, CONTENT_TYPES } from '../../stores/ContentDiscoveryStore'
 import ContentScanPanel from './ContentScanPanel'
 
 export default function Endpoints() {

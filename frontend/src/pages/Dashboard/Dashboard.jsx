@@ -1,521 +1,443 @@
 /**
  * Dashboard - Bug Bounty Metrics & Analytics
  * 
- * Features:
- * - Findings overview with filters
- * - Content type breakdown charts
- * - Subdomain distribution
- * - Discovery timeline
- * - Quick stats cards
- * - Interesting findings highlight
+ * WORKSPACE ISOLATED - Only shows data for the current workspace
+ * Fetches all data from API, NOT localStorage
  */
 
 import { useState, useMemo, useEffect } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { Link } from 'react-router-dom'
+import { useParams, Link } from 'react-router-dom'
 import {
   BarChart3,
-  PieChart,
-  TrendingUp,
   Globe,
   Activity,
   Database,
   Link as LinkIcon,
   FolderOpen,
-  FileCode,
   Lock,
   Shield,
-  ShieldAlert,
   Star,
-  Filter,
   ChevronDown,
   ArrowRight,
   ArrowUpRight,
   Target,
-  Zap,
   Search,
   Eye,
-  AlertTriangle,
-  CheckCircle,
-  Clock,
-  Layers
+  Layers,
+  Loader2,
+  RefreshCw
 } from 'lucide-react'
-import { useContentDiscovery } from '../../stores/contentDiscoveryStore.jsx'
-import { getDomains, getSubdomains } from '../../api/client'
+import { 
+  getWorkspaceStats, 
+  getSubdomainsByWorkspace,
+  getContentByWorkspace,
+  getPortsByWorkspace,
+  getWorkspace
+} from '../../api/client'
 
 export default function Dashboard() {
-  const { items, stats } = useContentDiscovery()
+  const { workspaceId } = useParams()
+  
+  // Loading and error states
+  const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState(null)
+  
+  // Workspace info
+  const [workspace, setWorkspace] = useState(null)
+  
+  // Stats from API
+  const [stats, setStats] = useState({
+    subdomains: 0,
+    live_hosts: 0,
+    open_ports: 0,
+    content_discoveries: 0,
+    vulnerabilities: 0
+  })
+  
+  // Data from API
+  const [subdomains, setSubdomains] = useState([])
+  const [contentItems, setContentItems] = useState([])
+  const [portScans, setPortScans] = useState([])
   
   // Filters
   const [selectedDomain, setSelectedDomain] = useState('all')
   const [selectedType, setSelectedType] = useState('all')
   const [showInterestingOnly, setShowInterestingOnly] = useState(false)
-  
-  // Data from various sources
-  const [liveHosts, setLiveHosts] = useState([])
-  const [portScans, setPortScans] = useState([])
-  const [vulnFindings, setVulnFindings] = useState([])
-  const [subdomainData, setSubdomainData] = useState([])
 
-  // Fetch domains
-  const { data: domainsData } = useQuery({
-    queryKey: ['domains'],
-    queryFn: getDomains,
-    staleTime: 30000,
-  })
-
-  const availableDomains = useMemo(() => {
-    if (!domainsData) return []
-    if (Array.isArray(domainsData)) {
-      return domainsData.map(d => typeof d === 'string' ? d : d.domain || d.name).filter(Boolean)
-    }
-    return []
-  }, [domainsData])
-
-  // Load data from localStorage
-  useEffect(() => {
+  // Get active workspace from localStorage
+  const getActiveWorkspaceId = () => {
+    if (workspaceId) return workspaceId
     try {
-      const savedHosts = localStorage.getItem('live_hosts_results')
-      if (savedHosts) {
-        const parsed = JSON.parse(savedHosts)
-        setLiveHosts(Array.isArray(parsed) ? parsed : (parsed.results || []))
-      }
-      
-      const savedPorts = localStorage.getItem('port_scan_results')
-      if (savedPorts) {
-        const parsed = JSON.parse(savedPorts)
-        setPortScans(Array.isArray(parsed) ? parsed : (parsed.results || []))
-      }
-      
-      const savedVulns = localStorage.getItem('vuln_scan_results')
-      if (savedVulns) {
-        const parsed = JSON.parse(savedVulns)
-        setVulnFindings(Array.isArray(parsed) ? parsed : (parsed.findings || []))
-      }
-      
-      const savedSubs = localStorage.getItem('subdomain_scan_results')
-      if (savedSubs) {
-        const parsed = JSON.parse(savedSubs)
-        setSubdomainData(Array.isArray(parsed) ? parsed : (parsed.results || []))
-      }
+      const active = JSON.parse(localStorage.getItem('active_workspace') || '{}')
+      return active.id || null
     } catch (e) {
-      console.error('Error loading data:', e)
+      return null
     }
-  }, [])
+  }
 
-  // Filter items based on selections
-  const filteredItems = useMemo(() => {
-    let filtered = [...items]
-    
-    if (selectedDomain !== 'all') {
-      filtered = filtered.filter(i => 
-        i.subdomain?.endsWith(selectedDomain) || i.target_url?.includes(selectedDomain)
-      )
+  // Load workspace data
+  useEffect(() => {
+    const activeId = getActiveWorkspaceId()
+    if (activeId) {
+      loadWorkspaceData(activeId)
+    } else {
+      setIsLoading(false)
+      setStats({ subdomains: 0, live_hosts: 0, open_ports: 0, content_discoveries: 0, vulnerabilities: 0 })
+      setSubdomains([])
+      setContentItems([])
+      setPortScans([])
     }
-    
-    if (selectedType !== 'all') {
-      filtered = filtered.filter(i => i.content_type === selectedType)
-    }
-    
-    if (showInterestingOnly) {
-      filtered = filtered.filter(i => i.is_interesting)
-    }
-    
-    return filtered
-  }, [items, selectedDomain, selectedType, showInterestingOnly])
+  }, [workspaceId])
 
-  // Calculate metrics
-  const metrics = useMemo(() => {
-    const activeLiveHosts = liveHosts.filter(h => h.is_active).length
-    const openPorts = portScans.filter(p => p.state === 'open').length
-    const criticalVulns = vulnFindings.filter(v => v.severity === 'critical').length
-    const highVulns = vulnFindings.filter(v => v.severity === 'high').length
+  const loadWorkspaceData = async (wsId) => {
+    const targetWorkspaceId = wsId || getActiveWorkspaceId()
+    if (!targetWorkspaceId) return
     
-    return {
-      totalDomains: availableDomains.length,
-      totalSubdomains: subdomainData.length,
-      liveHosts: activeLiveHosts,
-      openPorts,
-      totalContent: filteredItems.length,
-      apis: filteredItems.filter(i => i.content_type === 'api').length,
-      endpoints: filteredItems.filter(i => i.content_type === 'endpoint').length,
-      directories: filteredItems.filter(i => i.content_type === 'directory').length,
-      javascript: filteredItems.filter(i => i.content_type === 'javascript').length,
-      interesting: filteredItems.filter(i => i.is_interesting).length,
-      criticalVulns,
-      highVulns,
-      totalVulns: vulnFindings.length
+    setIsLoading(true)
+    setError(null)
+    
+    try {
+      const workspaceData = await getWorkspace(targetWorkspaceId)
+      setWorkspace(workspaceData)
+      
+      const statsData = await getWorkspaceStats(targetWorkspaceId)
+      setStats(statsData || { subdomains: 0, live_hosts: 0, open_ports: 0, content_discoveries: 0, vulnerabilities: 0 })
+      
+      try {
+        const subData = await getSubdomainsByWorkspace(targetWorkspaceId)
+        setSubdomains(Array.isArray(subData) ? subData : subData?.subdomains || [])
+      } catch (e) {
+        setSubdomains([])
+      }
+      
+      try {
+        const contentData = await getContentByWorkspace(targetWorkspaceId)
+        setContentItems(Array.isArray(contentData) ? contentData : contentData?.items || [])
+      } catch (e) {
+        setContentItems([])
+      }
+      
+      try {
+        const portData = await getPortsByWorkspace(targetWorkspaceId)
+        setPortScans(Array.isArray(portData) ? portData : portData?.results || [])
+      } catch (e) {
+        setPortScans([])
+      }
+      
+    } catch (err) {
+      console.error('Failed to load workspace data:', err)
+      setError('Failed to load workspace data')
+    } finally {
+      setIsLoading(false)
     }
-  }, [availableDomains, subdomainData, liveHosts, portScans, vulnFindings, filteredItems])
+  }
 
-  // Content type distribution for chart
+  // Calculate content type distribution
   const contentDistribution = useMemo(() => {
-    const total = metrics.apis + metrics.endpoints + metrics.directories + metrics.javascript
-    if (total === 0) return []
+    const dist = { api: 0, endpoint: 0, directory: 0, javascript: 0 }
     
-    return [
-      { type: 'APIs', count: metrics.apis, percentage: Math.round((metrics.apis / total) * 100), color: '#f97316' },
-      { type: 'Endpoints', count: metrics.endpoints, percentage: Math.round((metrics.endpoints / total) * 100), color: '#6366f1' },
-      { type: 'Directories', count: metrics.directories, percentage: Math.round((metrics.directories / total) * 100), color: '#eab308' },
-      { type: 'JS Files', count: metrics.javascript, percentage: Math.round((metrics.javascript / total) * 100), color: '#a855f7' }
-    ].filter(d => d.count > 0)
-  }, [metrics])
-
-  // Top subdomains by content count
-  const topSubdomains = useMemo(() => {
-    const subdomainCounts = {}
-    filteredItems.forEach(item => {
-      const sub = item.subdomain || 'unknown'
-      subdomainCounts[sub] = (subdomainCounts[sub] || 0) + 1
+    contentItems.forEach(item => {
+      const url = (item.discovered_url || item.url || '').toLowerCase()
+      const type = item.content_type || item.discovery_type
+      
+      if (type === 'api' || url.includes('/api/') || url.includes('/v1/') || url.includes('/v2/')) {
+        dist.api++
+      } else if (type === 'javascript' || url.endsWith('.js')) {
+        dist.javascript++
+      } else if (type === 'directory' || url.endsWith('/')) {
+        dist.directory++
+      } else {
+        dist.endpoint++
+      }
     })
     
-    return Object.entries(subdomainCounts)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 10)
-      .map(([subdomain, count]) => ({ subdomain, count }))
-  }, [filteredItems])
+    return dist
+  }, [contentItems])
 
-  // Interesting findings
+  // Get interesting findings
   const interestingFindings = useMemo(() => {
-    return filteredItems
-      .filter(i => i.is_interesting)
-      .slice(0, 10)
-  }, [filteredItems])
+    return contentItems.filter(item => item.is_interesting).slice(0, 10)
+  }, [contentItems])
 
-  // Quick action cards
-  const quickStats = [
-    { label: 'Subdomains', value: metrics.totalSubdomains, icon: Globe, color: 'blue', href: '/subdomain-scanner' },
-    { label: 'Live Hosts', value: metrics.liveHosts, icon: Activity, color: 'green', href: '/live-hosts' },
-    { label: 'Open Ports', value: metrics.openPorts, icon: Lock, color: 'pink', href: '/port-scanner' },
-    { label: 'APIs Found', value: metrics.apis, icon: Database, color: 'orange', href: '/content-discovery/apis' },
-    { label: 'Endpoints', value: metrics.endpoints, icon: LinkIcon, color: 'indigo', href: '/content-discovery/endpoints' },
-    { label: 'Interesting', value: metrics.interesting, icon: Star, color: 'yellow', href: '/content-discovery' },
-  ]
+  // Get top subdomains by content count
+  const topSubdomains = useMemo(() => {
+    const counts = {}
+    contentItems.forEach(item => {
+      const url = item.discovered_url || item.url || ''
+      try {
+        const hostname = new URL(url).hostname
+        counts[hostname] = (counts[hostname] || 0) + 1
+      } catch (e) {}
+    })
+    
+    return Object.entries(counts)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([subdomain, count]) => ({ subdomain, count }))
+  }, [contentItems])
+
+  // Get unique domains for filter
+  const availableDomains = useMemo(() => {
+    const domains = new Set()
+    subdomains.forEach(s => {
+      const domain = (s.domain || s.subdomain || '').split('.').slice(-2).join('.')
+      if (domain) domains.add(domain)
+    })
+    return Array.from(domains).sort()
+  }, [subdomains])
+
+  const openPortsCount = useMemo(() => {
+    return portScans.filter(p => p.state === 'open' || p.is_open).length
+  }, [portScans])
+
+  const liveHostsCount = useMemo(() => {
+    return subdomains.filter(s => s.is_live || s.is_active).length
+  }, [subdomains])
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-[#0a0a0a] flex items-center justify-center">
+        <div className="text-center">
+          <Loader2 size={48} className="animate-spin text-emerald-400 mx-auto mb-4" />
+          <p className="text-gray-400">Loading workspace data...</p>
+        </div>
+      </div>
+    )
+  }
+
+  const total = contentDistribution.api + contentDistribution.endpoint + contentDistribution.directory + contentDistribution.javascript
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="min-h-screen bg-[#0a0a0a] p-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between mb-8">
         <div>
-          <h1 className="text-2xl font-bold text-white flex items-center gap-3">
-            <div className="p-2 rounded-xl bg-emerald-500/10">
+          <div className="flex items-center gap-3 mb-2">
+            <div className="p-2 bg-emerald-500/10 rounded-lg">
               <BarChart3 size={24} className="text-emerald-400" />
             </div>
-            Bug Bounty Dashboard
-          </h1>
-          <p className="text-gray-500 mt-1">
-            Analytics and metrics from your reconnaissance
+            <h1 className="text-2xl font-bold text-white">{workspace?.name || 'Workspace'} Dashboard</h1>
+          </div>
+          <p className="text-gray-500">
+            Analytics and metrics for this workspace
+            {workspace?.target_scope && <span className="ml-2 text-gray-600">• {workspace.target_scope}</span>}
           </p>
         </div>
         
-        {/* Filters */}
         <div className="flex items-center gap-3">
-          <select
-            value={selectedDomain}
-            onChange={(e) => setSelectedDomain(e.target.value)}
-            className="bg-[#111111] border border-[#1f1f1f] rounded-lg px-3 py-2 text-white text-sm focus:border-emerald-500/50 focus:outline-none"
-          >
-            <option value="all">All Domains</option>
-            {availableDomains.map(d => (
-              <option key={d} value={d}>{d}</option>
-            ))}
-          </select>
+          <button onClick={() => loadWorkspaceData()} className="flex items-center gap-2 px-4 py-2 bg-[#111111] border border-[#1f1f1f] rounded-lg text-gray-400 hover:text-white hover:border-[#2a2a2a] transition-colors">
+            <RefreshCw size={16} />
+            Refresh
+          </button>
           
-          <select
-            value={selectedType}
-            onChange={(e) => setSelectedType(e.target.value)}
-            className="bg-[#111111] border border-[#1f1f1f] rounded-lg px-3 py-2 text-white text-sm focus:border-emerald-500/50 focus:outline-none"
-          >
-            <option value="all">All Types</option>
-            <option value="api">APIs</option>
-            <option value="endpoint">Endpoints</option>
-            <option value="directory">Directories</option>
-            <option value="javascript">JS Files</option>
-          </select>
-          
-          <button
-            onClick={() => setShowInterestingOnly(!showInterestingOnly)}
-            className={`flex items-center gap-2 px-3 py-2 rounded-lg border transition-colors ${
-              showInterestingOnly 
-                ? 'bg-yellow-500/20 border-yellow-500/30 text-yellow-400' 
-                : 'bg-[#111111] border-[#1f1f1f] text-gray-400 hover:text-white'
-            }`}
-          >
-            <Star size={14} />
+          <div className="relative">
+            <select value={selectedDomain} onChange={(e) => setSelectedDomain(e.target.value)} className="appearance-none px-4 py-2 pr-10 bg-[#111111] border border-[#1f1f1f] rounded-lg text-gray-300 text-sm focus:outline-none focus:border-emerald-500/50 cursor-pointer">
+              <option value="all">All Domains</option>
+              {availableDomains.map(domain => <option key={domain} value={domain}>{domain}</option>)}
+            </select>
+            <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none" />
+          </div>
+
+          <button onClick={() => setShowInterestingOnly(!showInterestingOnly)} className={`flex items-center gap-2 px-4 py-2 rounded-lg border transition-colors ${showInterestingOnly ? 'bg-yellow-500/10 border-yellow-500/30 text-yellow-400' : 'bg-[#111111] border-[#1f1f1f] text-gray-400 hover:text-white'}`}>
+            <Star size={16} />
             Interesting
           </button>
         </div>
       </div>
 
-      {/* Quick Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-        {quickStats.map(stat => (
-          <Link
-            key={stat.label}
-            to={stat.href}
-            className={`bg-[#111111] rounded-xl p-4 border border-[#1f1f1f] hover:border-${stat.color}-500/30 transition-all group`}
-          >
-            <div className="flex items-center justify-between mb-3">
-              <div className={`p-2 rounded-lg bg-${stat.color}-500/10`}>
-                <stat.icon size={18} className={`text-${stat.color}-400`} />
-              </div>
-              <ArrowUpRight size={14} className="text-gray-600 group-hover:text-gray-400 transition-colors" />
-            </div>
-            <div className={`text-2xl font-bold text-white group-hover:text-${stat.color}-400 transition-colors`}>
-              {stat.value}
-            </div>
-            <div className="text-sm text-gray-500">{stat.label}</div>
-          </Link>
-        ))}
+      {/* Stats Cards */}
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
+        <div className="bg-[#111111] border border-[#1f1f1f] rounded-xl p-5">
+          <div className="flex items-center justify-between mb-3">
+            <div className="p-2 bg-blue-500/10 rounded-lg"><Globe size={20} className="text-blue-400" /></div>
+            <ArrowUpRight size={16} className="text-gray-600" />
+          </div>
+          <div className="text-2xl font-bold text-white">{stats.subdomains || 0}</div>
+          <div className="text-xs text-gray-500">Subdomains</div>
+        </div>
+
+        <div className="bg-[#111111] border border-[#1f1f1f] rounded-xl p-5">
+          <div className="flex items-center justify-between mb-3">
+            <div className="p-2 bg-green-500/10 rounded-lg"><Activity size={20} className="text-green-400" /></div>
+            <ArrowUpRight size={16} className="text-gray-600" />
+          </div>
+          <div className="text-2xl font-bold text-green-400">{stats.live_hosts || liveHostsCount}</div>
+          <div className="text-xs text-gray-500">Live Hosts</div>
+        </div>
+
+        <div className="bg-[#111111] border border-[#1f1f1f] rounded-xl p-5">
+          <div className="flex items-center justify-between mb-3">
+            <div className="p-2 bg-yellow-500/10 rounded-lg"><Lock size={20} className="text-yellow-400" /></div>
+            <ArrowUpRight size={16} className="text-gray-600" />
+          </div>
+          <div className="text-2xl font-bold text-white">{stats.open_ports || openPortsCount}</div>
+          <div className="text-xs text-gray-500">Open Ports</div>
+        </div>
+
+        <div className="bg-[#111111] border border-[#1f1f1f] rounded-xl p-5">
+          <div className="flex items-center justify-between mb-3">
+            <div className="p-2 bg-orange-500/10 rounded-lg"><Database size={20} className="text-orange-400" /></div>
+            <ArrowUpRight size={16} className="text-gray-600" />
+          </div>
+          <div className="text-2xl font-bold text-white">{contentDistribution.api}</div>
+          <div className="text-xs text-gray-500">APIs Found</div>
+        </div>
+
+        <div className="bg-[#111111] border border-[#1f1f1f] rounded-xl p-5">
+          <div className="flex items-center justify-between mb-3">
+            <div className="p-2 bg-purple-500/10 rounded-lg"><LinkIcon size={20} className="text-purple-400" /></div>
+            <ArrowUpRight size={16} className="text-gray-600" />
+          </div>
+          <div className="text-2xl font-bold text-white">{contentDistribution.endpoint}</div>
+          <div className="text-xs text-gray-500">Endpoints</div>
+        </div>
+
+        <div className="bg-[#111111] border border-[#1f1f1f] rounded-xl p-5">
+          <div className="flex items-center justify-between mb-3">
+            <div className="p-2 bg-yellow-500/10 rounded-lg"><Star size={20} className="text-yellow-400" /></div>
+          </div>
+          <div className="text-2xl font-bold text-yellow-400">{interestingFindings.length}</div>
+          <div className="text-xs text-gray-500">Interesting</div>
+        </div>
       </div>
 
       {/* Main Content Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Content Distribution Chart */}
-        <div className="bg-[#111111] rounded-xl border border-[#1f1f1f] overflow-hidden">
-          <div className="p-4 border-b border-[#1f1f1f]">
-            <h3 className="text-sm font-semibold text-white flex items-center gap-2">
-              <PieChart size={16} className="text-emerald-400" />
-              Content Distribution
-            </h3>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+        {/* Content Distribution */}
+        <div className="bg-[#111111] border border-[#1f1f1f] rounded-xl p-5">
+          <div className="flex items-center gap-2 mb-4">
+            <Layers size={18} className="text-emerald-400" />
+            <h3 className="font-semibold text-white">Content Distribution</h3>
           </div>
-          <div className="p-4">
-            {contentDistribution.length > 0 ? (
-              <div className="space-y-4">
-                {/* Visual bar chart */}
-                <div className="space-y-3">
-                  {contentDistribution.map(item => (
-                    <div key={item.type}>
-                      <div className="flex items-center justify-between text-sm mb-1">
-                        <span className="text-gray-400">{item.type}</span>
-                        <span className="text-white font-medium">{item.count}</span>
-                      </div>
-                      <div className="h-3 bg-[#1a1a1a] rounded-full overflow-hidden">
-                        <div 
-                          className="h-full rounded-full transition-all duration-500"
-                          style={{ width: `${item.percentage}%`, backgroundColor: item.color }}
-                        />
-                      </div>
-                    </div>
-                  ))}
+          
+          <div className="space-y-3">
+            {[
+              { label: 'APIs', value: contentDistribution.api, color: 'bg-orange-500' },
+              { label: 'Endpoints', value: contentDistribution.endpoint, color: 'bg-blue-500' },
+              { label: 'Directories', value: contentDistribution.directory, color: 'bg-yellow-500' },
+              { label: 'JS Files', value: contentDistribution.javascript, color: 'bg-purple-500' },
+            ].map(item => (
+              <div key={item.label}>
+                <div className="flex justify-between text-sm mb-1">
+                  <span className="text-gray-400">{item.label}</span>
+                  <span className="text-white">{item.value}</span>
                 </div>
-                
-                {/* Legend dots */}
-                <div className="flex flex-wrap gap-3 pt-2">
-                  {contentDistribution.map(item => (
-                    <div key={item.type} className="flex items-center gap-1.5">
-                      <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: item.color }} />
-                      <span className="text-xs text-gray-500">{item.percentage}%</span>
-                    </div>
-                  ))}
+                <div className="h-2 bg-[#1a1a1a] rounded-full overflow-hidden">
+                  <div className={`h-full ${item.color} rounded-full transition-all`} style={{ width: `${total > 0 ? (item.value / total * 100) : 0}%` }} />
                 </div>
               </div>
-            ) : (
-              <div className="text-center py-8">
-                <Layers className="mx-auto text-gray-600 mb-2" size={32} />
-                <p className="text-sm text-gray-500">No content discovered yet</p>
-              </div>
-            )}
+            ))}
           </div>
         </div>
 
         {/* Top Subdomains */}
-        <div className="bg-[#111111] rounded-xl border border-[#1f1f1f] overflow-hidden">
-          <div className="p-4 border-b border-[#1f1f1f] flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-white flex items-center gap-2">
-              <TrendingUp size={16} className="text-emerald-400" />
-              Top Subdomains
-            </h3>
+        <div className="bg-[#111111] border border-[#1f1f1f] rounded-xl p-5">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <Activity size={18} className="text-green-400" />
+              <h3 className="font-semibold text-white">Top Subdomains</h3>
+            </div>
             <span className="text-xs text-gray-500">by content count</span>
           </div>
-          <div className="p-2">
-            {topSubdomains.length > 0 ? (
-              <div className="space-y-1">
-                {topSubdomains.map((item, i) => {
-                  const maxCount = topSubdomains[0]?.count || 1
-                  const percentage = (item.count / maxCount) * 100
-                  return (
-                    <div key={item.subdomain} className="relative">
-                      <div 
-                        className="absolute inset-0 bg-emerald-500/10 rounded-lg"
-                        style={{ width: `${percentage}%` }}
-                      />
-                      <div className="relative flex items-center justify-between px-3 py-2">
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs text-gray-500 w-4">{i + 1}</span>
-                          <span className="text-sm text-white font-mono truncate max-w-[180px]">
-                            {item.subdomain}
-                          </span>
-                        </div>
-                        <span className="text-sm text-emerald-400 font-medium">{item.count}</span>
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            ) : (
-              <div className="text-center py-8">
-                <Globe className="mx-auto text-gray-600 mb-2" size={32} />
-                <p className="text-sm text-gray-500">No subdomain data</p>
-              </div>
-            )}
-          </div>
+          
+          {topSubdomains.length > 0 ? (
+            <div className="space-y-2">
+              {topSubdomains.map((item, idx) => (
+                <div key={item.subdomain} className="flex items-center justify-between p-2 bg-[#0a0a0a] rounded-lg">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-gray-500 w-4">{idx + 1}</span>
+                    <span className="text-sm text-gray-300 truncate max-w-[200px]">{item.subdomain}</span>
+                  </div>
+                  <span className="text-sm font-medium text-emerald-400">{item.count.toLocaleString()}</span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="text-center py-8 text-gray-500">
+              <Globe size={32} className="mx-auto mb-2 opacity-50" />
+              <p className="text-sm">No content discovered yet</p>
+            </div>
+          )}
         </div>
 
         {/* Interesting Findings */}
-        <div className="bg-[#111111] rounded-xl border border-[#1f1f1f] overflow-hidden">
-          <div className="p-4 border-b border-[#1f1f1f] flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-white flex items-center gap-2">
-              <Star size={16} className="text-yellow-400" />
-              Interesting Findings
-            </h3>
-            <span className="text-xs px-2 py-0.5 rounded-full bg-yellow-500/20 text-yellow-400">
-              {metrics.interesting}
-            </span>
+        <div className="bg-[#111111] border border-[#1f1f1f] rounded-xl p-5">
+          <div className="flex items-center gap-2 mb-4">
+            <Star size={18} className="text-yellow-400" />
+            <h3 className="font-semibold text-white">Interesting Findings</h3>
           </div>
-          <div className="p-2 max-h-[300px] overflow-y-auto">
-            {interestingFindings.length > 0 ? (
-              <div className="space-y-1">
-                {interestingFindings.map((item, i) => {
-                  const typeColors = {
-                    api: 'text-orange-400',
-                    endpoint: 'text-indigo-400',
-                    directory: 'text-yellow-400',
-                    javascript: 'text-purple-400'
-                  }
-                  return (
-                    <div key={i} className="flex items-start gap-2 px-3 py-2 rounded-lg hover:bg-[#1a1a1a] transition-colors">
+          
+          {interestingFindings.length > 0 ? (
+            <div className="space-y-2 max-h-[300px] overflow-y-auto">
+              {interestingFindings.map((item, idx) => {
+                let path = item.path || ''
+                let hostname = ''
+                try {
+                  const url = new URL(item.discovered_url || item.url || '')
+                  path = path || url.pathname
+                  hostname = url.hostname
+                } catch (e) {}
+                
+                return (
+                  <div key={idx} className="p-2 bg-[#0a0a0a] rounded-lg border-l-2 border-yellow-500/50">
+                    <div className="flex items-start gap-2">
                       <Star size={12} className="text-yellow-400 mt-1 flex-shrink-0" />
-                      <div className="min-w-0 flex-1">
-                        <p className="text-sm text-white truncate font-mono">
-                          {item.path || new URL(item.discovered_url || item.url || 'http://x').pathname}
-                        </p>
-                        <p className="text-xs text-gray-500 truncate">{item.subdomain}</p>
+                      <div className="min-w-0">
+                        <p className="text-sm text-white truncate">{path}</p>
+                        <p className="text-xs text-gray-500 truncate">{hostname}</p>
                       </div>
-                      <span className={`text-xs ${typeColors[item.content_type] || 'text-gray-400'}`}>
-                        {item.content_type}
-                      </span>
                     </div>
-                  )
-                })}
-              </div>
-            ) : (
-              <div className="text-center py-8">
-                <Star className="mx-auto text-gray-600 mb-2" size={32} />
-                <p className="text-sm text-gray-500">No interesting findings yet</p>
-              </div>
-            )}
-          </div>
+                  </div>
+                )
+              })}
+            </div>
+          ) : (
+            <div className="text-center py-8 text-gray-500">
+              <Star size={32} className="mx-auto mb-2 opacity-50" />
+              <p className="text-sm">No interesting findings yet</p>
+            </div>
+          )}
         </div>
       </div>
-
-      {/* Vulnerability Summary (if any) */}
-      {metrics.totalVulns > 0 && (
-        <div className="bg-[#111111] rounded-xl border border-[#1f1f1f] overflow-hidden">
-          <div className="p-4 border-b border-[#1f1f1f] flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-white flex items-center gap-2">
-              <ShieldAlert size={16} className="text-red-400" />
-              Vulnerability Summary
-            </h3>
-            <Link to="/vuln-scanner" className="text-xs text-emerald-400 hover:text-emerald-300 flex items-center gap-1">
-              View All <ArrowRight size={12} />
-            </Link>
-          </div>
-          <div className="p-4">
-            <div className="grid grid-cols-4 gap-4">
-              <div className="bg-red-500/10 rounded-xl p-4 border border-red-500/20">
-                <div className="flex items-center gap-2 mb-2">
-                  <AlertTriangle size={16} className="text-red-400" />
-                  <span className="text-xs text-red-400">Critical</span>
-                </div>
-                <div className="text-3xl font-bold text-red-400">{metrics.criticalVulns}</div>
-              </div>
-              <div className="bg-orange-500/10 rounded-xl p-4 border border-orange-500/20">
-                <div className="flex items-center gap-2 mb-2">
-                  <AlertTriangle size={16} className="text-orange-400" />
-                  <span className="text-xs text-orange-400">High</span>
-                </div>
-                <div className="text-3xl font-bold text-orange-400">{metrics.highVulns}</div>
-              </div>
-              <div className="bg-yellow-500/10 rounded-xl p-4 border border-yellow-500/20">
-                <div className="flex items-center gap-2 mb-2">
-                  <Shield size={16} className="text-yellow-400" />
-                  <span className="text-xs text-yellow-400">Medium</span>
-                </div>
-                <div className="text-3xl font-bold text-yellow-400">
-                  {metrics.totalVulns - metrics.criticalVulns - metrics.highVulns}
-                </div>
-              </div>
-              <div className="bg-gray-500/10 rounded-xl p-4 border border-gray-500/20">
-                <div className="flex items-center gap-2 mb-2">
-                  <Shield size={16} className="text-gray-400" />
-                  <span className="text-xs text-gray-400">Total</span>
-                </div>
-                <div className="text-3xl font-bold text-white">{metrics.totalVulns}</div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Quick Actions */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        {[
-          { label: 'Scan Subdomains', href: '/subdomain-scanner', icon: Globe, desc: 'Discover subdomains' },
-          { label: 'Content Discovery', href: '/content-discovery', icon: Search, desc: 'Find APIs & endpoints' },
-          { label: 'Vulnerability Scan', href: '/vuln-scanner', icon: Shield, desc: 'Check for vulns' },
-          { label: 'View Attack Map', href: '/visualization', icon: Target, desc: 'Visualize surface' },
-        ].map(action => (
-          <Link
-            key={action.href}
-            to={action.href}
-            className="bg-[#111111] rounded-xl p-4 border border-[#1f1f1f] hover:border-emerald-500/30 transition-all group"
-          >
-            <div className="flex items-center gap-3 mb-2">
-              <div className="p-2 rounded-lg bg-emerald-500/10 group-hover:bg-emerald-500/20 transition-colors">
-                <action.icon size={18} className="text-emerald-400" />
-              </div>
-              <ArrowRight size={14} className="ml-auto text-gray-600 group-hover:text-emerald-400 transition-colors" />
-            </div>
-            <div className="text-sm font-medium text-white">{action.label}</div>
-            <div className="text-xs text-gray-500">{action.desc}</div>
-          </Link>
-        ))}
-      </div>
+        <Link to="/subdomain-scanner" className="group bg-[#111111] border border-[#1f1f1f] rounded-xl p-5 hover:border-blue-500/30 transition-all">
+          <div className="flex items-center justify-between">
+            <div className="p-2 bg-blue-500/10 rounded-lg"><Globe size={24} className="text-blue-400" /></div>
+            <ArrowRight size={20} className="text-gray-600 group-hover:text-blue-400 transition-colors" />
+          </div>
+          <h3 className="font-medium text-white mt-3">Scan Subdomains</h3>
+          <p className="text-sm text-gray-500">Discover subdomains</p>
+        </Link>
 
-      {/* Recent Scanned Domains */}
-      {availableDomains.length > 0 && (
-        <div className="bg-[#111111] rounded-xl border border-[#1f1f1f] overflow-hidden">
-          <div className="p-4 border-b border-[#1f1f1f]">
-            <h3 className="text-sm font-semibold text-white flex items-center gap-2">
-              <Globe size={16} className="text-blue-400" />
-              Scanned Domains ({availableDomains.length})
-            </h3>
+        <Link to="/content-discovery" className="group bg-[#111111] border border-[#1f1f1f] rounded-xl p-5 hover:border-orange-500/30 transition-all">
+          <div className="flex items-center justify-between">
+            <div className="p-2 bg-orange-500/10 rounded-lg"><Search size={24} className="text-orange-400" /></div>
+            <ArrowRight size={20} className="text-gray-600 group-hover:text-orange-400 transition-colors" />
           </div>
-          <div className="p-4">
-            <div className="flex flex-wrap gap-2">
-              {availableDomains.slice(0, 15).map(domain => (
-                <button
-                  key={domain}
-                  onClick={() => setSelectedDomain(domain === selectedDomain ? 'all' : domain)}
-                  className={`px-3 py-1.5 rounded-lg text-sm font-mono transition-colors ${
-                    selectedDomain === domain
-                      ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-                      : 'bg-[#0a0a0a] text-gray-400 border border-[#1f1f1f] hover:border-[#252525]'
-                  }`}
-                >
-                  {domain}
-                </button>
-              ))}
-              {availableDomains.length > 15 && (
-                <span className="px-3 py-1.5 text-sm text-gray-500">
-                  +{availableDomains.length - 15} more
-                </span>
-              )}
-            </div>
+          <h3 className="font-medium text-white mt-3">Content Discovery</h3>
+          <p className="text-sm text-gray-500">Find APIs & endpoints</p>
+        </Link>
+
+        <Link to="/vuln-scanner" className="group bg-[#111111] border border-[#1f1f1f] rounded-xl p-5 hover:border-red-500/30 transition-all">
+          <div className="flex items-center justify-between">
+            <div className="p-2 bg-red-500/10 rounded-lg"><Shield size={24} className="text-red-400" /></div>
+            <ArrowRight size={20} className="text-gray-600 group-hover:text-red-400 transition-colors" />
           </div>
-        </div>
-      )}
+          <h3 className="font-medium text-white mt-3">Vulnerability Scan</h3>
+          <p className="text-sm text-gray-500">Check for vulns</p>
+        </Link>
+
+        <Link to="/visualization" className="group bg-[#111111] border border-[#1f1f1f] rounded-xl p-5 hover:border-emerald-500/30 transition-all">
+          <div className="flex items-center justify-between">
+            <div className="p-2 bg-emerald-500/10 rounded-lg"><Eye size={24} className="text-emerald-400" /></div>
+            <ArrowRight size={20} className="text-gray-600 group-hover:text-emerald-400 transition-colors" />
+          </div>
+          <h3 className="font-medium text-white mt-3">View Attack Map</h3>
+          <p className="text-sm text-gray-500">Visualize surface</p>
+        </Link>
+      </div>
     </div>
   )
 }
